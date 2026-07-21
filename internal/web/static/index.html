@@ -25,6 +25,7 @@
   .ok { color: #7bd88f; }
   .bad { color: #ff6e6e; }
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .actions button:last-child:nth-child(odd) { grid-column: 1 / -1; }
   button {
     border: 0; border-radius: 10px; padding: 16px 8px;
     font-size: 1rem; font-weight: 600;
@@ -50,13 +51,11 @@
 <div class="actions">
   <button data-action="lower-bed">Lower bed</button>
   <button data-action="home">Home</button>
-  <button data-action="bed-heat" class="warn">Bed 100°C</button>
-  <button data-action="heat-off">Heater off</button>
+  <button data-action="bed-heat" class="warn" id="heatBtn">Bed 100°C</button>
 </div>
 <div id="log"></div>
 <div class="actions" id="printControls" style="margin-top:16px">
-  <button data-print-action="pause" disabled>Pause print</button>
-  <button data-print-action="resume" disabled>Resume print</button>
+  <button data-print-action="pause" id="pauseBtn" disabled>Pause print</button>
   <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
 </div>
 <div class="card" style="margin-top:16px">
@@ -79,8 +78,20 @@ async function refresh() {
     const p = s.progress;
     $("progressRow").style.display = p == null ? "none" : "";
     if (p != null) $("progress").textContent = `${p}%`;
+    // Heater button toggles between heating and turning the heater off,
+    // based on whether the bed currently has a target temperature.
+    const heating = (s.bedTarget ?? 0) > 0;
+    const heat = $("heatBtn");
+    heat.dataset.action = heating ? "heat-off" : "bed-heat";
+    heat.textContent = heating ? "Heater off" : "Bed 100°C";
+    heat.classList.toggle("warn", !heating);
     document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
+
+    // Pause button toggles to Resume while the print is paused.
     const pa = s.printActions || {};
+    const pause = $("pauseBtn");
+    pause.dataset.printAction = pa.resume ? "resume" : "pause";
+    pause.textContent = pa.resume ? "Resume print" : "Pause print";
     document.querySelectorAll("[data-print-action]").forEach(b => {
       b.disabled = !pa[b.dataset.printAction];
     });
