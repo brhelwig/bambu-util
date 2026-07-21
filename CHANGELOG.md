@@ -10,6 +10,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Container image renamed from `ghcr.io/brhelwig/p1s-bridge` to
   `ghcr.io/brhelwig/bambu-util` to match the repository name.
+- Binary, command path (`cmd/bambu-util`), and release archive names renamed
+  from `p1s-bridge` to `bambu-util`.
+- Print-control buttons are now always visible and merely disabled when not
+  applicable, instead of hidden outside RUNNING/PAUSE.
+- The web page is served with `Cache-Control: no-cache` so UI updates reach
+  browsers (and iOS home-screen apps) immediately.
 
 ## [0.1.0] - 2026-07-21
 

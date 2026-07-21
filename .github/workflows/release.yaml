@@ -21,11 +21,11 @@ jobs:
           for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             goos=${platform%/*}
             goarch=${platform#*/}
-            bin=p1s-bridge
-            [ "$goos" = "windows" ] && bin=p1s-bridge.exe
+            bin=bambu-util
+            [ "$goos" = "windows" ] && bin=bambu-util.exe
             CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch \
-              go build -trimpath -ldflags="-s -w" -o "$bin" ./cmd/p1s-bridge
-            name="p1s-bridge_${GITHUB_REF_NAME}_${goos}_${goarch}"
+              go build -trimpath -ldflags="-s -w" -o "$bin" ./cmd/bambu-util
+            name="bambu-util_${GITHUB_REF_NAME}_${goos}_${goarch}"
             if [ "$goos" = "windows" ]; then
               zip -q "dist/${name}.zip" "$bin" README.md LICENSE
             else

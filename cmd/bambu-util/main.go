@@ -1,4 +1,4 @@
-// p1s-bridge serves a phone-friendly control page for a Bambu P1S on the
+// bambu-util serves a phone-friendly control page for a Bambu P1S on the
 // local network: bed actions and live status over the printer's MQTT
 // interface, camera via its chamber-image stream.
 package main
@@ -40,6 +40,6 @@ func main() {
 		return p1s.StreamFrames(ctx, net.JoinHostPort(ip, "6000"), "bblp", accessCode, yield)
 	})
 
-	log.Printf("p1s-bridge listening on %s (printer %s)", addr, ip)
+	log.Printf("bambu-util listening on %s (printer %s)", addr, ip)
 	log.Fatal(http.ListenAndServe(addr, web.NewServer(cache, client, hub).Handler()))
 }
