@@ -32,6 +32,8 @@
   }
   button:disabled { opacity: 0.4; }
   button.warn { background: #7a4a12; }
+  button.danger { background: #6e2222; }
+  button.danger.armed { background: #b02a2a; }
   #log { min-height: 1.2em; color: #9aa0a6; font-size: 0.85rem; margin-top: 12px; }
   #cam { width: 100%; border-radius: 12px; margin-top: 12px; display: none; }
 </style>
@@ -52,6 +54,11 @@
   <button data-action="heat-off">Heater off</button>
 </div>
 <div id="log"></div>
+<div class="actions" id="printControls" style="margin-top:16px; display:none">
+  <button data-print-action="pause">Pause print</button>
+  <button data-print-action="resume">Resume print</button>
+  <button data-print-action="stop" class="danger" id="stopBtn">Stop print</button>
+</div>
 <div class="card" style="margin-top:16px">
   <button id="camToggle" style="width:100%">Show camera</button>
   <img id="cam" alt="printer camera">
@@ -72,23 +79,57 @@ async function refresh() {
     const p = s.progress;
     $("progressRow").style.display = p == null ? "none" : "";
     if (p != null) $("progress").textContent = `${p}%`;
-    document.querySelectorAll(".actions button").forEach(b => b.disabled = !s.actionsAllowed);
+    document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
+    const pa = s.printActions || {};
+    const anyPrint = pa.pause || pa.resume || pa.stop;
+    $("printControls").style.display = anyPrint ? "" : "none";
+    document.querySelectorAll("[data-print-action]").forEach(b => {
+      const allowed = !!pa[b.dataset.printAction];
+      b.disabled = !allowed;
+      b.style.display = allowed ? "" : "none";
+    });
+    if (!pa.stop) disarmStop();
   } catch {
     $("conn").textContent = "bridge unreachable";
     $("conn").className = "bad";
-    document.querySelectorAll(".actions button").forEach(b => b.disabled = true);
+    document.querySelectorAll("[data-action], [data-print-action]").forEach(b => b.disabled = true);
   }
 }
 refresh();
 setInterval(refresh, 2000);
 
-document.querySelectorAll(".actions button").forEach(b =>
-  b.addEventListener("click", async () => {
-    try {
-      const r = await fetch(`/api/actions/${b.dataset.action}`, { method: "POST" });
-      $("log").textContent = await r.text();
-    } catch {
-      $("log").textContent = "request failed";
+async function post(action) {
+  try {
+    const r = await fetch(`/api/actions/${action}`, { method: "POST" });
+    $("log").textContent = await r.text();
+  } catch {
+    $("log").textContent = "request failed";
+  }
+}
+
+document.querySelectorAll("[data-action]").forEach(b =>
+  b.addEventListener("click", () => post(b.dataset.action)));
+
+// Stop kills the print, so it takes two taps: the first arms the button for
+// 4 seconds, the second actually sends.
+let stopTimer = null;
+function disarmStop() {
+  const b = $("stopBtn");
+  b.classList.remove("armed");
+  b.textContent = "Stop print";
+  if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
+}
+
+document.querySelectorAll("[data-print-action]").forEach(b =>
+  b.addEventListener("click", () => {
+    if (b.dataset.printAction !== "stop") { post(b.dataset.printAction); return; }
+    if (b.classList.contains("armed")) {
+      disarmStop();
+      post("stop");
+    } else {
+      b.classList.add("armed");
+      b.textContent = "Tap again to stop";
+      stopTimer = setTimeout(disarmStop, 4000);
     }
   }));
 
