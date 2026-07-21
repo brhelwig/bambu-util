@@ -43,7 +43,7 @@ PRINTER_IP=192.0.2.10 PRINTER_SERIAL=01P00XXXXXXXXXX PRINTER_ACCESS_CODE=xxxxxxx
   go run ./cmd/p1s-bridge
 ```
 
-Or the container image: `ghcr.io/brhelwig/p1s-bridge` (linux/arm64).
+Or the container image: `ghcr.io/brhelwig/bambu-util` (linux/arm64).
 
 ### Printer prerequisites
 
