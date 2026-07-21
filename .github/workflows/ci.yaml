@@ -37,7 +37,7 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            ghcr.io/brhelwig/p1s-bridge:${{ github.sha }}
-            ghcr.io/brhelwig/p1s-bridge:latest
+            ghcr.io/brhelwig/bambu-util:${{ github.sha }}
+            ghcr.io/brhelwig/bambu-util:latest
           labels: |
             org.opencontainers.image.source=https://github.com/brhelwig/bambu-util
