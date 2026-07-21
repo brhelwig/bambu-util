@@ -18,6 +18,9 @@ type Commander interface {
 	LowerBed()
 	Home()
 	SetBedTemp(int)
+	PausePrint()
+	ResumePrint()
+	StopPrint()
 }
 
 type Server struct {
@@ -55,6 +58,11 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"nozzleTemp":     fields["nozzle_temper"],
 		"nozzleTarget":   fields["nozzle_target_temper"],
 		"progress":       fields["mc_percent"],
+		"printActions": map[string]bool{
+			"pause":  p1s.PrintActionAllowed(connected, gs, "pause") == nil,
+			"resume": p1s.PrintActionAllowed(connected, gs, "resume") == nil,
+			"stop":   p1s.PrintActionAllowed(connected, gs, "stop") == nil,
+		},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -67,16 +75,29 @@ var actions = map[string]func(Commander){
 	"heat-off":  func(c Commander) { c.SetBedTemp(0) },
 }
 
+var printActions = map[string]func(Commander){
+	"pause":  func(c Commander) { c.PausePrint() },
+	"resume": func(c Commander) { c.ResumePrint() },
+	"stop":   func(c Commander) { c.StopPrint() },
+}
+
 func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	fields, connected := s.cache.Snapshot()
+	gs := p1s.GcodeState(fields)
+
+	var guardErr error
 	act, ok := actions[name]
-	if !ok {
+	if ok {
+		guardErr = p1s.ActionAllowed(connected, gs)
+	} else if act, ok = printActions[name]; ok {
+		guardErr = p1s.PrintActionAllowed(connected, gs, name)
+	} else {
 		http.Error(w, "unknown action", http.StatusNotFound)
 		return
 	}
-	fields, connected := s.cache.Snapshot()
-	if err := p1s.ActionAllowed(connected, p1s.GcodeState(fields)); err != nil {
-		http.Error(w, "blocked: "+err.Error(), http.StatusConflict)
+	if guardErr != nil {
+		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
 		return
 	}
 	act(s.cmd)

@@ -16,6 +16,9 @@ type fakeCommander struct{ calls []string }
 func (f *fakeCommander) LowerBed()        { f.calls = append(f.calls, "lower-bed") }
 func (f *fakeCommander) Home()            { f.calls = append(f.calls, "home") }
 func (f *fakeCommander) SetBedTemp(t int) { f.calls = append(f.calls, "bed-temp") }
+func (f *fakeCommander) PausePrint()      { f.calls = append(f.calls, "pause") }
+func (f *fakeCommander) ResumePrint()     { f.calls = append(f.calls, "resume") }
+func (f *fakeCommander) StopPrint()       { f.calls = append(f.calls, "stop") }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
 	cache := p1s.NewStateCache()
@@ -115,5 +118,65 @@ func TestCameraStreamContentType(t *testing.T) {
 	n, _ := resp.Body.Read(buf)
 	if !strings.Contains(string(buf[:n]), "image/jpeg") {
 		t.Fatalf("first part header missing: %q", buf[:n])
+	}
+}
+
+func TestPrintActionPauseWhileRunning(t *testing.T) {
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/pause", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "pause" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestPrintActionPauseBlockedWhileIdle(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/pause", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestPrintActionResumeOnlyWhilePaused(t *testing.T) {
+	ts, cmd := newTestServer(true, "PAUSE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/resume", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "resume" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+	ts2, cmd2 := newTestServer(true, "RUNNING")
+	defer ts2.Close()
+	resp2, _ := ts2.Client().Post(ts2.URL+"/api/actions/resume", "", nil)
+	if resp2.StatusCode != 409 || len(cmd2.calls) != 0 {
+		t.Fatalf("status %d calls %v", resp2.StatusCode, cmd2.calls)
+	}
+}
+
+func TestPrintActionStopWhileRunningOrPaused(t *testing.T) {
+	for _, state := range []string{"RUNNING", "PAUSE"} {
+		ts, cmd := newTestServer(true, state)
+		resp, _ := ts.Client().Post(ts.URL+"/api/actions/stop", "", nil)
+		if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "stop" {
+			t.Fatalf("state %s: status %d calls %v", state, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestStatusIncludesPrintActions(t *testing.T) {
+	ts, _ := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	resp, _ := ts.Client().Get(ts.URL + "/api/status")
+	var s struct {
+		PrintActions map[string]bool `json:"printActions"`
+	}
+	json.NewDecoder(resp.Body).Decode(&s)
+	want := map[string]bool{"pause": true, "resume": false, "stop": true}
+	for k, v := range want {
+		if s.PrintActions[k] != v {
+			t.Fatalf("printActions[%s] = %v, want %v (all: %v)", k, s.PrintActions[k], v, s.PrintActions)
+		}
 	}
 }
