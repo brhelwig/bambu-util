@@ -36,7 +36,13 @@ func NewServer(cache *p1s.StateCache, cmd Commander, hub *Hub) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(staticFS, "static")
-	mux.Handle("GET /", http.FileServerFS(static))
+	files := http.FileServerFS(static)
+	// Embedded files carry no modtime, so serve them no-cache: revalidation
+	// is cheap and stale pages on phones are worse.
+	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("POST /api/actions/{name}", s.action)
 	mux.HandleFunc("GET /camera/stream", s.camera)

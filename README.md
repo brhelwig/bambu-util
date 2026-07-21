@@ -2,7 +2,7 @@
 
 Utilities for Bambu Lab printers on the local network.
 
-## p1s-bridge
+## P1S web bridge
 
 A single-binary web app for controlling a Bambu P1S from a phone browser.
 Browsers can't speak the printer's protocols (MQTT over TLS on :8883, a
@@ -40,7 +40,7 @@ Environment variables only — no config files:
 
 ```sh
 PRINTER_IP=192.0.2.10 PRINTER_SERIAL=01P00XXXXXXXXXX PRINTER_ACCESS_CODE=xxxxxxxx \
-  go run ./cmd/p1s-bridge
+  go run ./cmd/bambu-util
 ```
 
 Or the container image: `ghcr.io/brhelwig/bambu-util` (linux/arm64).

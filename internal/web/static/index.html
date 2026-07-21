@@ -54,10 +54,10 @@
   <button data-action="heat-off">Heater off</button>
 </div>
 <div id="log"></div>
-<div class="actions" id="printControls" style="margin-top:16px; display:none">
-  <button data-print-action="pause">Pause print</button>
-  <button data-print-action="resume">Resume print</button>
-  <button data-print-action="stop" class="danger" id="stopBtn">Stop print</button>
+<div class="actions" id="printControls" style="margin-top:16px">
+  <button data-print-action="pause" disabled>Pause print</button>
+  <button data-print-action="resume" disabled>Resume print</button>
+  <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
 </div>
 <div class="card" style="margin-top:16px">
   <button id="camToggle" style="width:100%">Show camera</button>
@@ -81,12 +81,8 @@ async function refresh() {
     if (p != null) $("progress").textContent = `${p}%`;
     document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
     const pa = s.printActions || {};
-    const anyPrint = pa.pause || pa.resume || pa.stop;
-    $("printControls").style.display = anyPrint ? "" : "none";
     document.querySelectorAll("[data-print-action]").forEach(b => {
-      const allowed = !!pa[b.dataset.printAction];
-      b.disabled = !allowed;
-      b.style.display = allowed ? "" : "none";
+      b.disabled = !pa[b.dataset.printAction];
     });
     if (!pa.stop) disarmStop();
   } catch {
