@@ -20,3 +20,11 @@ func TestHandleReportIgnoresGarbage(t *testing.T) {
 		t.Fatalf("cache should be empty, got %v", fields)
 	}
 }
+
+func TestPrintCommandPayload(t *testing.T) {
+	got := printCommandPayload(7, "pause")
+	want := `{"print":{"command":"pause","sequence_id":"7"}}`
+	if got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}

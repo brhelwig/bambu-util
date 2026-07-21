@@ -84,3 +84,22 @@ func (c *Client) SendGcode(gcode string) {
 func (c *Client) LowerBed()        { c.SendGcode(BedDropGcode) }
 func (c *Client) Home()            { c.SendGcode(HomeGcode) }
 func (c *Client) SetBedTemp(t int) { c.SendGcode(fmt.Sprintf("M140 S%d\n", t)) }
+
+// printCommandPayload builds a print-flow command (pause/resume/stop) —
+// payload shape verified against ha-bambulab's pybambu commands.
+func printCommandPayload(seq int64, command string) string {
+	req := map[string]any{"print": map[string]any{
+		"sequence_id": strconv.FormatInt(seq, 10),
+		"command":     command,
+	}}
+	b, _ := json.Marshal(req)
+	return string(b)
+}
+
+func (c *Client) sendPrintCommand(command string) {
+	c.publish(printCommandPayload(c.seq.Add(1), command))
+}
+
+func (c *Client) PausePrint()  { c.sendPrintCommand("pause") }
+func (c *Client) ResumePrint() { c.sendPrintCommand("resume") }
+func (c *Client) StopPrint()   { c.sendPrintCommand("stop") }
