@@ -23,3 +23,28 @@ func ActionAllowed(connected bool, gcodeState string) error {
 	}
 	return nil
 }
+
+// PrintActionAllowed guards print-flow controls, which are only meaningful
+// mid-print — the inverse of the bed-action guard.
+func PrintActionAllowed(connected bool, gcodeState, action string) error {
+	if !connected {
+		return fmt.Errorf("not connected to printer")
+	}
+	switch action {
+	case "pause":
+		if gcodeState != "RUNNING" {
+			return fmt.Errorf("can only pause while RUNNING, printer state is %s", gcodeState)
+		}
+	case "resume":
+		if gcodeState != "PAUSE" {
+			return fmt.Errorf("can only resume while PAUSE, printer state is %s", gcodeState)
+		}
+	case "stop":
+		if gcodeState != "RUNNING" && gcodeState != "PAUSE" {
+			return fmt.Errorf("can only stop while RUNNING or PAUSE, printer state is %s", gcodeState)
+		}
+	default:
+		return fmt.Errorf("unknown print action %s", action)
+	}
+	return nil
+}

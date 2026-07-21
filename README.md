@@ -17,9 +17,12 @@ Features:
   (actual/target), print progress
 - Chamber camera view (~1 fps), relayed as MJPEG; the bridge only connects to
   the printer camera while someone is watching
-- Actions are refused server-side unless the printer is idle
+- Bed actions are refused server-side unless the printer is idle
   (IDLE/FINISH/FAILED) — nothing can move the bed or change temperatures
   mid-print
+- Print controls: **Pause** (while printing), **Resume** (while paused), and
+  **Stop** (either; needs a second confirming tap). Guarded server-side to the
+  matching printer states
 - iOS "Add to Home Screen" gives an app-like full-screen page
 
 ### Configuration

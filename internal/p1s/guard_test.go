@@ -36,3 +36,31 @@ func TestGcodeState(t *testing.T) {
 		t.Fatal("non-string gcode_state should read unknown")
 	}
 }
+
+func TestPrintActionAllowed(t *testing.T) {
+	cases := []struct {
+		connected bool
+		state     string
+		action    string
+		allowed   bool
+	}{
+		{false, "RUNNING", "pause", false},
+		{true, "RUNNING", "pause", true},
+		{true, "PAUSE", "pause", false},
+		{true, "IDLE", "pause", false},
+		{true, "PAUSE", "resume", true},
+		{true, "RUNNING", "resume", false},
+		{true, "IDLE", "resume", false},
+		{true, "RUNNING", "stop", true},
+		{true, "PAUSE", "stop", true},
+		{true, "IDLE", "stop", false},
+		{true, "FINISH", "stop", false},
+		{true, "RUNNING", "explode", false},
+	}
+	for _, c := range cases {
+		err := PrintActionAllowed(c.connected, c.state, c.action)
+		if (err == nil) != c.allowed {
+			t.Errorf("connected=%v state=%q action=%q: got err=%v", c.connected, c.state, c.action, err)
+		}
+	}
+}
