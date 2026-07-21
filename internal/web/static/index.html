@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#111418">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>P1S bed control</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0 auto;
+    font-family: -apple-system, system-ui, sans-serif;
+    background: #111418;
+    color: #e8eaed;
+    padding: max(env(safe-area-inset-top), 12px) 16px 24px;
+    max-width: 480px;
+  }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 8px 0 16px; }
+  .card { background: #1b2027; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.95rem; }
+  .row span:first-child { color: #9aa0a6; }
+  .ok { color: #7bd88f; }
+  .bad { color: #ff6e6e; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button {
+    border: 0; border-radius: 10px; padding: 16px 8px;
+    font-size: 1rem; font-weight: 600;
+    background: #2a313b; color: #e8eaed;
+  }
+  button:disabled { opacity: 0.4; }
+  button.warn { background: #7a4a12; }
+  #log { min-height: 1.2em; color: #9aa0a6; font-size: 0.85rem; margin-top: 12px; }
+  #cam { width: 100%; border-radius: 12px; margin-top: 12px; display: none; }
+</style>
+</head>
+<body>
+<h1>P1S bed control</h1>
+<div class="card">
+  <div class="row"><span>Connection</span><span id="conn">…</span></div>
+  <div class="row"><span>State</span><span id="state">…</span></div>
+  <div class="row"><span>Bed</span><span id="bed">…</span></div>
+  <div class="row"><span>Nozzle</span><span id="nozzle">…</span></div>
+  <div class="row" id="progressRow" style="display:none"><span>Progress</span><span id="progress"></span></div>
+</div>
+<div class="actions">
+  <button data-action="lower-bed">Lower bed</button>
+  <button data-action="home">Home</button>
+  <button data-action="bed-heat" class="warn">Bed 100°C</button>
+  <button data-action="heat-off">Heater off</button>
+</div>
+<div id="log"></div>
+<div class="card" style="margin-top:16px">
+  <button id="camToggle" style="width:100%">Show camera</button>
+  <img id="cam" alt="printer camera">
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    $("conn").textContent = s.connected ? "connected" : "disconnected";
+    $("conn").className = s.connected ? "ok" : "bad";
+    $("state").textContent = s.gcodeState;
+    $("bed").textContent = `${fmt(s.bedTemp)} / ${fmt(s.bedTarget)}°C`;
+    $("nozzle").textContent = `${fmt(s.nozzleTemp)} / ${fmt(s.nozzleTarget)}°C`;
+    const p = s.progress;
+    $("progressRow").style.display = p == null ? "none" : "";
+    if (p != null) $("progress").textContent = `${p}%`;
+    document.querySelectorAll(".actions button").forEach(b => b.disabled = !s.actionsAllowed);
+  } catch {
+    $("conn").textContent = "bridge unreachable";
+    $("conn").className = "bad";
+    document.querySelectorAll(".actions button").forEach(b => b.disabled = true);
+  }
+}
+refresh();
+setInterval(refresh, 2000);
+
+document.querySelectorAll(".actions button").forEach(b =>
+  b.addEventListener("click", async () => {
+    try {
+      const r = await fetch(`/api/actions/${b.dataset.action}`, { method: "POST" });
+      $("log").textContent = await r.text();
+    } catch {
+      $("log").textContent = "request failed";
+    }
+  }));
+
+$("camToggle").addEventListener("click", () => {
+  const img = $("cam");
+  const showing = img.style.display === "block";
+  if (showing) {
+    img.src = "";
+    img.style.display = "none";
+    $("camToggle").textContent = "Show camera";
+  } else {
+    img.src = "/camera/stream";
+    img.style.display = "block";
+    $("camToggle").textContent = "Hide camera";
+  }
+});
+</script>
+</body>
+</html>
