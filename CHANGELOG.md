@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-07-21
+
+### Changed
+
+- Pause and Resume are one toggle button: it reads "Pause print" while
+  printing and "Resume print" while paused.
+- "Bed 100°C" and "Heater off" are one toggle button, switching on whether
+  the bed currently has a target temperature.
+
 ## [0.2.0] - 2026-07-21
 
 ### Changed
@@ -45,6 +54,7 @@ follow [Semantic Versioning](https://semver.org/).
 - Monthly Dependabot updates for Go modules, GitHub Actions, and Docker base
   images
 
+[0.3.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.3.0
 [0.2.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.2.0
 [0.1.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.1.0
 [0.0.1]: https://github.com/brhelwig/bambu-util/releases/tag/v0.0.1
