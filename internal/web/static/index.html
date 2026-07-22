@@ -47,6 +47,12 @@
   <div class="row"><span>Bed</span><span id="bed">…</span></div>
   <div class="row"><span>Nozzle</span><span id="nozzle">…</span></div>
   <div class="row" id="progressRow" style="display:none"><span>Progress</span><span id="progress"></span></div>
+  <div class="row" id="jobRow" style="display:none"><span>Job</span><span id="jobName"></span></div>
+  <div class="row" id="layerRow" style="display:none"><span>Layer</span><span id="layer"></span></div>
+  <div class="row" id="timeRow" style="display:none"><span>Time remaining</span><span id="timeRemaining"></span></div>
+  <div class="row"><span>Chamber</span><span id="chamber">…</span></div>
+  <div class="row"><span>Wifi</span><span id="wifi">…</span></div>
+  <div class="row"><span>Fans (cool/aux/chamber)</span><span id="fans">…</span></div>
 </div>
 <div class="actions">
   <button data-action="lower-bed">Lower bed</button>
@@ -79,6 +85,17 @@ async function refresh() {
     const p = s.progress;
     $("progressRow").style.display = p == null ? "none" : "";
     if (p != null) $("progress").textContent = `${p}%`;
+    $("jobRow").style.display = s.jobName ? "" : "none";
+    if (s.jobName) $("jobName").textContent = s.jobName;
+    const hasLayers = s.totalLayerNum != null && s.totalLayerNum > 0;
+    $("layerRow").style.display = hasLayers ? "" : "none";
+    if (hasLayers) $("layer").textContent = `${s.layerNum ?? "?"} / ${s.totalLayerNum}`;
+    $("timeRow").style.display = s.remainingMinutes != null ? "" : "none";
+    if (s.remainingMinutes != null) $("timeRemaining").textContent = `${s.remainingMinutes} min`;
+    $("chamber").textContent = fmt(s.chamberTemp) + "°C";
+    $("wifi").textContent = s.wifiSignal ?? "?";
+    const fans = s.fans || {};
+    $("fans").textContent = `${fans.cooling ?? "?"} / ${fans.aux ?? "?"} / ${fans.chamber ?? "?"}`;
     // Heater button toggles between heating and turning the heater off,
     // based on whether the bed currently has a target temperature.
     const heating = (s.bedTarget ?? 0) > 0;
