@@ -18,6 +18,7 @@ type Commander interface {
 	LowerBed()
 	Home()
 	SetBedTemp(int)
+	SetNozzleTemp(int)
 	PausePrint()
 	ResumePrint()
 	StopPrint()
@@ -75,10 +76,12 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 }
 
 var actions = map[string]func(Commander){
-	"lower-bed": func(c Commander) { c.LowerBed() },
-	"home":      func(c Commander) { c.Home() },
-	"bed-heat":  func(c Commander) { c.SetBedTemp(p1s.BedDryTemp) },
-	"heat-off":  func(c Commander) { c.SetBedTemp(0) },
+	"lower-bed":       func(c Commander) { c.LowerBed() },
+	"home":            func(c Commander) { c.Home() },
+	"bed-heat":        func(c Commander) { c.SetBedTemp(p1s.BedDryTemp) },
+	"heat-off":        func(c Commander) { c.SetBedTemp(0) },
+	"nozzle-heat":     func(c Commander) { c.SetNozzleTemp(p1s.NozzleCleanTemp) },
+	"nozzle-heat-off": func(c Commander) { c.SetNozzleTemp(0) },
 }
 
 var printActions = map[string]func(Commander){

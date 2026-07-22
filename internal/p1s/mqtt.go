@@ -14,9 +14,10 @@ import (
 const (
 	// Z200 — 50mm above the bottom of the ~250mm travel; covers position
 	// drift without homing (a blind Z250 once hit the bottom limit).
-	BedDropGcode = "G90\nG1 Z200 F900\n"
-	HomeGcode    = "G28\n"
-	BedDryTemp   = 100
+	BedDropGcode    = "G90\nG1 Z200 F900\n"
+	HomeGcode       = "G28\n"
+	BedDryTemp      = 100
+	NozzleCleanTemp = 200
 )
 
 // Client is the MQTT link to the printer: cached merged state plus
@@ -84,6 +85,7 @@ func (c *Client) SendGcode(gcode string) {
 func (c *Client) LowerBed()        { c.SendGcode(BedDropGcode) }
 func (c *Client) Home()            { c.SendGcode(HomeGcode) }
 func (c *Client) SetBedTemp(t int) { c.SendGcode(fmt.Sprintf("M140 S%d\n", t)) }
+func (c *Client) SetNozzleTemp(t int) { c.SendGcode(fmt.Sprintf("M104 S%d\n", t)) }
 
 // printCommandPayload builds a print-flow command (pause/resume/stop) —
 // payload shape verified against ha-bambulab's pybambu commands.

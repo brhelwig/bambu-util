@@ -16,6 +16,7 @@ type fakeCommander struct{ calls []string }
 func (f *fakeCommander) LowerBed()        { f.calls = append(f.calls, "lower-bed") }
 func (f *fakeCommander) Home()            { f.calls = append(f.calls, "home") }
 func (f *fakeCommander) SetBedTemp(t int) { f.calls = append(f.calls, "bed-temp") }
+func (f *fakeCommander) SetNozzleTemp(t int) { f.calls = append(f.calls, "nozzle-temp") }
 func (f *fakeCommander) PausePrint()      { f.calls = append(f.calls, "pause") }
 func (f *fakeCommander) ResumePrint()     { f.calls = append(f.calls, "resume") }
 func (f *fakeCommander) StopPrint()       { f.calls = append(f.calls, "stop") }
@@ -178,5 +179,23 @@ func TestStatusIncludesPrintActions(t *testing.T) {
 		if s.PrintActions[k] != v {
 			t.Fatalf("printActions[%s] = %v, want %v (all: %v)", k, s.PrintActions[k], v, s.PrintActions)
 		}
+	}
+}
+
+func TestNozzleHeatActionAllowedWhenIdle(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/nozzle-heat", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "nozzle-temp" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestNozzleHeatOffAllowedWhenIdle(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/nozzle-heat-off", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "nozzle-temp" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
 	}
 }
