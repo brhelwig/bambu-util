@@ -24,6 +24,7 @@ type Commander interface {
 	SetNozzleTemp(int)
 	Extrude()
 	UnloadFilament()
+	LoadFilament(slot, currTemp, tarTemp int)
 	SetChamberLight(bool)
 	PausePrint()
 	ResumePrint()
@@ -169,6 +170,9 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	case "extrude":
 		s.extrude(w, connected, gs, fields)
 		return
+	case "load":
+		s.load(w, r, connected, gs, fields)
+		return
 	case "lamp-on", "lamp-off":
 		// The chamber light is safe to toggle in any state, so it skips the
 		// idle guard; it only needs the printer reachable.
@@ -242,6 +246,29 @@ func (s *Server) extrude(w http.ResponseWriter, connected bool, gs string, field
 	}
 	s.cmd.Extrude()
 	fmt.Fprint(w, "sent: extrude")
+}
+
+// load feeds an AMS tray (?slot=0-3) into the hotend. Per the chosen design it
+// heats to whatever nozzle target the user set via the slider, so it refuses
+// when no nozzle target is set.
+func (s *Server) load(w http.ResponseWriter, r *http.Request, connected bool, gs string, fields map[string]any) {
+	slot, err := strconv.Atoi(r.URL.Query().Get("slot"))
+	if err != nil || slot < 0 || slot > 3 {
+		http.Error(w, "invalid slot", http.StatusBadRequest)
+		return
+	}
+	if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
+		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
+		return
+	}
+	tar, _ := fields["nozzle_target_temper"].(float64)
+	if tar <= 0 {
+		http.Error(w, "blocked: set a nozzle temperature first", http.StatusConflict)
+		return
+	}
+	cur, _ := fields["nozzle_temper"].(float64)
+	s.cmd.LoadFilament(slot, int(cur), int(tar))
+	fmt.Fprintf(w, "sent: load slot %d", slot)
 }
 
 func (s *Server) camera(w http.ResponseWriter, r *http.Request) {

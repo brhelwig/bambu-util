@@ -96,6 +96,22 @@ func (c *Client) Extrude() { c.SendGcode("M83\nG1 E20 F150\n") }
 // OpenBambuAPI mqtt.md; unverified against this specific printer.
 func (c *Client) UnloadFilament() { c.sendPrintCommand("unload_filament") }
 
+// LoadFilament feeds the given AMS tray (0-3) into the hotend, heating to
+// tarTemp. currTemp is the current nozzle temperature. "ams_change_filament"
+// payload verified against OpenBambuAPI mqtt.md; unverified against this
+// printer.
+func (c *Client) LoadFilament(slot, currTemp, tarTemp int) {
+	req := map[string]any{"print": map[string]any{
+		"sequence_id": strconv.FormatInt(c.seq.Add(1), 10),
+		"command":     "ams_change_filament",
+		"target":      slot,
+		"curr_temp":   currTemp,
+		"tar_temp":    tarTemp,
+	}}
+	b, _ := json.Marshal(req)
+	c.publish(string(b))
+}
+
 // SetChamberLight turns the chamber LED on or off. "ledctrl" is a system-level
 // command (not print); the timing fields only matter for flashing mode but are
 // included to match the documented payload. Verified against OpenBambuAPI.

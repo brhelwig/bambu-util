@@ -15,6 +15,7 @@ type fakeCommander struct {
 	calls       []string
 	bedTemps    []int
 	nozzleTemps []int
+	loads       [][3]int // {slot, currTemp, tarTemp}
 }
 
 func (f *fakeCommander) LowerBed() { f.calls = append(f.calls, "lower-bed") }
@@ -29,6 +30,10 @@ func (f *fakeCommander) SetNozzleTemp(t int) {
 }
 func (f *fakeCommander) Extrude()        { f.calls = append(f.calls, "extrude") }
 func (f *fakeCommander) UnloadFilament() { f.calls = append(f.calls, "unload") }
+func (f *fakeCommander) LoadFilament(slot, currTemp, tarTemp int) {
+	f.calls = append(f.calls, "load")
+	f.loads = append(f.loads, [3]int{slot, currTemp, tarTemp})
+}
 func (f *fakeCommander) SetChamberLight(on bool) {
 	if on {
 		f.calls = append(f.calls, "lamp-on")
@@ -344,6 +349,48 @@ func TestLampBlockedWhenDisconnected(t *testing.T) {
 	ts, cmd := newTestServer(false, "IDLE")
 	defer ts.Close()
 	resp, _ := ts.Client().Post(ts.URL+"/api/actions/lamp-on", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestLoadUsesNozzleTargetTemp(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{
+		"gcode_state":          "IDLE",
+		"nozzle_temper":        float64(212),
+		"nozzle_target_temper": float64(225),
+	})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot=2", "", nil)
+	if resp.StatusCode != 200 || len(cmd.loads) != 1 || cmd.loads[0] != [3]int{2, 212, 225} {
+		t.Fatalf("status %d loads %v", resp.StatusCode, cmd.loads)
+	}
+}
+
+func TestLoadBlockedWithoutNozzleTemp(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_target_temper": float64(0)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot=0", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestLoadInvalidSlot(t *testing.T) {
+	for _, slot := range []string{"9", "-1", "x", ""} {
+		ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_target_temper": float64(225)})
+		resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot="+slot, "", nil)
+		if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+			t.Fatalf("slot %q: status %d calls %v", slot, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestLoadBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "RUNNING", "nozzle_target_temper": float64(225)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot=0", "", nil)
 	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
 		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
 	}
