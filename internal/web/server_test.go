@@ -13,13 +13,13 @@ import (
 
 type fakeCommander struct{ calls []string }
 
-func (f *fakeCommander) LowerBed()        { f.calls = append(f.calls, "lower-bed") }
-func (f *fakeCommander) Home()            { f.calls = append(f.calls, "home") }
-func (f *fakeCommander) SetBedTemp(t int) { f.calls = append(f.calls, "bed-temp") }
+func (f *fakeCommander) LowerBed()           { f.calls = append(f.calls, "lower-bed") }
+func (f *fakeCommander) Home()               { f.calls = append(f.calls, "home") }
+func (f *fakeCommander) SetBedTemp(t int)    { f.calls = append(f.calls, "bed-temp") }
 func (f *fakeCommander) SetNozzleTemp(t int) { f.calls = append(f.calls, "nozzle-temp") }
-func (f *fakeCommander) PausePrint()      { f.calls = append(f.calls, "pause") }
-func (f *fakeCommander) ResumePrint()     { f.calls = append(f.calls, "resume") }
-func (f *fakeCommander) StopPrint()       { f.calls = append(f.calls, "stop") }
+func (f *fakeCommander) PausePrint()         { f.calls = append(f.calls, "pause") }
+func (f *fakeCommander) ResumePrint()        { f.calls = append(f.calls, "resume") }
+func (f *fakeCommander) StopPrint()          { f.calls = append(f.calls, "stop") }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
 	cache := p1s.NewStateCache()

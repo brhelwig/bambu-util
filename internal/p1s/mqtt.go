@@ -82,9 +82,9 @@ func (c *Client) SendGcode(gcode string) {
 	c.publish(string(b))
 }
 
-func (c *Client) LowerBed()        { c.SendGcode(BedDropGcode) }
-func (c *Client) Home()            { c.SendGcode(HomeGcode) }
-func (c *Client) SetBedTemp(t int) { c.SendGcode(fmt.Sprintf("M140 S%d\n", t)) }
+func (c *Client) LowerBed()           { c.SendGcode(BedDropGcode) }
+func (c *Client) Home()               { c.SendGcode(HomeGcode) }
+func (c *Client) SetBedTemp(t int)    { c.SendGcode(fmt.Sprintf("M140 S%d\n", t)) }
 func (c *Client) SetNozzleTemp(t int) { c.SendGcode(fmt.Sprintf("M104 S%d\n", t)) }
 
 // printCommandPayload builds a print-flow command (pause/resume/stop) —
