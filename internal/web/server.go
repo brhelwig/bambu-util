@@ -23,6 +23,8 @@ type Commander interface {
 	SetBedTemp(int)
 	SetNozzleTemp(int)
 	Extrude()
+	UnloadFilament()
+	SetChamberLight(bool)
 	PausePrint()
 	ResumePrint()
 	StopPrint()
@@ -98,6 +100,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"totalLayerNum":    fields["total_layer_num"],
 		"remainingMinutes": fields["mc_remaining_time"],
 		"chamberTemp":      fields["chamber_temper"],
+		"chamberLight":     p1s.ChamberLightOn(fields),
 		"wifiSignal":       fields["wifi_signal"],
 		"fans": map[string]any{
 			"cooling": fields["cooling_fan_speed"],
@@ -121,6 +124,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 var actions = map[string]func(Commander){
 	"lower-bed": func(c Commander) { c.LowerBed() },
 	"home":      func(c Commander) { c.Home() },
+	"unload":    func(c Commander) { c.UnloadFilament() },
 }
 
 // Bounds for the parameterized temperature sliders. The P1S bed tops out
@@ -164,6 +168,16 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		return
 	case "extrude":
 		s.extrude(w, connected, gs, fields)
+		return
+	case "lamp-on", "lamp-off":
+		// The chamber light is safe to toggle in any state, so it skips the
+		// idle guard; it only needs the printer reachable.
+		if !connected {
+			http.Error(w, "blocked: not connected to printer", http.StatusConflict)
+			return
+		}
+		s.cmd.SetChamberLight(name == "lamp-on")
+		fmt.Fprintf(w, "sent: %s", name)
 		return
 	}
 

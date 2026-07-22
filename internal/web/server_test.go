@@ -27,7 +27,15 @@ func (f *fakeCommander) SetNozzleTemp(t int) {
 	f.calls = append(f.calls, "nozzle-temp")
 	f.nozzleTemps = append(f.nozzleTemps, t)
 }
-func (f *fakeCommander) Extrude()     { f.calls = append(f.calls, "extrude") }
+func (f *fakeCommander) Extrude()        { f.calls = append(f.calls, "extrude") }
+func (f *fakeCommander) UnloadFilament() { f.calls = append(f.calls, "unload") }
+func (f *fakeCommander) SetChamberLight(on bool) {
+	if on {
+		f.calls = append(f.calls, "lamp-on")
+	} else {
+		f.calls = append(f.calls, "lamp-off")
+	}
+}
 func (f *fakeCommander) PausePrint()  { f.calls = append(f.calls, "pause") }
 func (f *fakeCommander) ResumePrint() { f.calls = append(f.calls, "resume") }
 func (f *fakeCommander) StopPrint()   { f.calls = append(f.calls, "stop") }
@@ -294,6 +302,48 @@ func TestExtrudeBlockedWhenRunning(t *testing.T) {
 	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "RUNNING", "nozzle_temper": float64(220)})
 	defer ts.Close()
 	resp, _ := ts.Client().Post(ts.URL+"/api/actions/extrude", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestUnloadAllowedWhenIdle(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/unload", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "unload" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestUnloadBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/unload", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestLampTogglesInAnyState(t *testing.T) {
+	// The lamp is not idle-guarded: it works even mid-print.
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	if resp, _ := ts.Client().Post(ts.URL+"/api/actions/lamp-on", "", nil); resp.StatusCode != 200 {
+		t.Fatalf("lamp-on status %d, want 200", resp.StatusCode)
+	}
+	if resp, _ := ts.Client().Post(ts.URL+"/api/actions/lamp-off", "", nil); resp.StatusCode != 200 {
+		t.Fatalf("lamp-off status %d, want 200", resp.StatusCode)
+	}
+	if len(cmd.calls) != 2 || cmd.calls[0] != "lamp-on" || cmd.calls[1] != "lamp-off" {
+		t.Fatalf("calls %v", cmd.calls)
+	}
+}
+
+func TestLampBlockedWhenDisconnected(t *testing.T) {
+	ts, cmd := newTestServer(false, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/lamp-on", "", nil)
 	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
 		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
 	}

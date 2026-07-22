@@ -10,3 +10,23 @@ func JobName(fields map[string]any) any {
 	}
 	return fields["gcode_file"]
 }
+
+// ChamberLightOn reports whether the chamber LED is on, read from the printer's
+// "lights_report" array (entries like {"node":"chamber_light","mode":"on"}).
+// Defensive: any unexpected shape reads as off.
+func ChamberLightOn(fields map[string]any) bool {
+	arr, ok := fields["lights_report"].([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["node"] == "chamber_light" {
+			return m["mode"] == "on"
+		}
+	}
+	return false
+}

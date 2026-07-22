@@ -91,6 +91,33 @@ func (c *Client) SetNozzleTemp(t int) { c.SendGcode(fmt.Sprintf("M104 S%d\n", t)
 // caller guards on temperature.
 func (c *Client) Extrude() { c.SendGcode("M83\nG1 E20 F150\n") }
 
+// UnloadFilament ejects the currently loaded filament back to the AMS (or out
+// the top for an external spool). Payload verified against Doridian/
+// OpenBambuAPI mqtt.md; unverified against this specific printer.
+func (c *Client) UnloadFilament() { c.sendPrintCommand("unload_filament") }
+
+// SetChamberLight turns the chamber LED on or off. "ledctrl" is a system-level
+// command (not print); the timing fields only matter for flashing mode but are
+// included to match the documented payload. Verified against OpenBambuAPI.
+func (c *Client) SetChamberLight(on bool) {
+	mode := "off"
+	if on {
+		mode = "on"
+	}
+	req := map[string]any{"system": map[string]any{
+		"sequence_id":   strconv.FormatInt(c.seq.Add(1), 10),
+		"command":       "ledctrl",
+		"led_node":      "chamber_light",
+		"led_mode":      mode,
+		"led_on_time":   500,
+		"led_off_time":  500,
+		"loop_times":    1,
+		"interval_time": 1000,
+	}}
+	b, _ := json.Marshal(req)
+	c.publish(string(b))
+}
+
 // printCommandPayload builds a print-flow command (pause/resume/stop) —
 // payload shape verified against ha-bambulab's pybambu commands.
 func printCommandPayload(seq int64, command string) string {
