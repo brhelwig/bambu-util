@@ -377,7 +377,7 @@ func TestLoadBlockedWithoutNozzleTemp(t *testing.T) {
 }
 
 func TestLoadInvalidSlot(t *testing.T) {
-	for _, slot := range []string{"9", "-1", "x", ""} {
+	for _, slot := range []string{"16", "-1", "x", ""} {
 		ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_target_temper": float64(225)})
 		resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot="+slot, "", nil)
 		if resp.StatusCode != 400 || len(cmd.calls) != 0 {

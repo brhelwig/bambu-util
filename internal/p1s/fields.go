@@ -11,13 +11,15 @@ func JobName(fields map[string]any) any {
 	return fields["gcode_file"]
 }
 
-// ChamberLightOn reports whether the chamber LED is on, read from the printer's
+// ChamberLight reports the chamber LED state from the printer's
 // "lights_report" array (entries like {"node":"chamber_light","mode":"on"}).
-// Defensive: any unexpected shape reads as off.
-func ChamberLightOn(fields map[string]any) bool {
+// It returns a *bool so callers can tell "off" apart from "not yet reported":
+// nil means unknown (no lights_report or no chamber_light entry yet), so the UI
+// won't assert a state it hasn't actually seen.
+func ChamberLight(fields map[string]any) *bool {
 	arr, ok := fields["lights_report"].([]any)
 	if !ok {
-		return false
+		return nil
 	}
 	for _, item := range arr {
 		m, ok := item.(map[string]any)
@@ -25,8 +27,9 @@ func ChamberLightOn(fields map[string]any) bool {
 			continue
 		}
 		if m["node"] == "chamber_light" {
-			return m["mode"] == "on"
+			on := m["mode"] == "on"
+			return &on
 		}
 	}
-	return false
+	return nil
 }

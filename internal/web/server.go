@@ -101,7 +101,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"totalLayerNum":    fields["total_layer_num"],
 		"remainingMinutes": fields["mc_remaining_time"],
 		"chamberTemp":      fields["chamber_temper"],
-		"chamberLight":     p1s.ChamberLightOn(fields),
+		"chamberLight":     p1s.ChamberLight(fields),
 		"wifiSignal":       fields["wifi_signal"],
 		"fans": map[string]any{
 			"cooling": fields["cooling_fan_speed"],
@@ -185,22 +185,33 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var guardErr error
 	act, ok := actions[name]
 	if ok {
-		guardErr = p1s.ActionAllowed(connected, gs)
+		if !guardIdle(w, connected, gs) {
+			return
+		}
 	} else if act, ok = printActions[name]; ok {
-		guardErr = p1s.PrintActionAllowed(connected, gs, name)
+		if err := p1s.PrintActionAllowed(connected, gs, name); err != nil {
+			http.Error(w, "blocked: "+err.Error(), http.StatusConflict)
+			return
+		}
 	} else {
 		http.Error(w, "unknown action", http.StatusNotFound)
 		return
 	}
-	if guardErr != nil {
-		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
-		return
-	}
 	act(s.cmd)
 	fmt.Fprintf(w, "sent: %s", name)
+}
+
+// guardIdle writes a 409 and returns false when a bed/nozzle/AMS action isn't
+// currently allowed (disconnected or mid-print). Shared by every idle-only
+// command so the guard is wired in exactly one place.
+func guardIdle(w http.ResponseWriter, connected bool, gs string) bool {
+	if err := p1s.ActionAllowed(connected, gs); err != nil {
+		http.Error(w, "blocked: "+err.Error(), http.StatusConflict)
+		return false
+	}
+	return true
 }
 
 // setTemp handles the parameterized set-bed-temp / set-nozzle-temp endpoints:
@@ -211,8 +222,7 @@ func (s *Server) setTemp(w http.ResponseWriter, r *http.Request, connected bool,
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
-		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
+	if !guardIdle(w, connected, gs) {
 		return
 	}
 	set(temp)
@@ -235,8 +245,7 @@ func nilIfNeg(secs int) any {
 const ExtrudeMinTemp = 170
 
 func (s *Server) extrude(w http.ResponseWriter, connected bool, gs string, fields map[string]any) {
-	if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
-		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
+	if !guardIdle(w, connected, gs) {
 		return
 	}
 	nt, ok := fields["nozzle_temper"].(float64)
@@ -248,17 +257,20 @@ func (s *Server) extrude(w http.ResponseWriter, connected bool, gs string, field
 	fmt.Fprint(w, "sent: extrude")
 }
 
-// load feeds an AMS tray (?slot=0-3) into the hotend. Per the chosen design it
-// heats to whatever nozzle target the user set via the slider, so it refuses
-// when no nozzle target is set.
+// MaxAMSSlot is the highest global tray index Load accepts. Bambu supports up
+// to 4 AMS units of 4 trays, addressed as ams_id*4 + tray_id (0-15).
+const MaxAMSSlot = 15
+
+// load feeds an AMS tray (?slot=0-15, the global ams_id*4+tray_id index) into
+// the hotend. Per the chosen design it heats to whatever nozzle target the user
+// set via the slider, so it refuses when no nozzle target is set.
 func (s *Server) load(w http.ResponseWriter, r *http.Request, connected bool, gs string, fields map[string]any) {
 	slot, err := strconv.Atoi(r.URL.Query().Get("slot"))
-	if err != nil || slot < 0 || slot > 3 {
+	if err != nil || slot < 0 || slot > MaxAMSSlot {
 		http.Error(w, "invalid slot", http.StatusBadRequest)
 		return
 	}
-	if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
-		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
+	if !guardIdle(w, connected, gs) {
 		return
 	}
 	tar, _ := fields["nozzle_target_temper"].(float64)
