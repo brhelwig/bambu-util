@@ -136,6 +136,7 @@ function renderAms(ams) {
   }
   card.style.display = "";
   container.innerHTML = "";
+  let slotNum = 0; // global tray index across units, for the load target
   valid.forEach(unit => {
     const hum = amsHumidityText(unit);
     if (hum) {
@@ -149,8 +150,9 @@ function renderAms(ams) {
       container.appendChild(row);
     }
     unit.tray.forEach(slot => {
+      const idx = slotNum++; // consume an index even for empty/invalid slots
       if (!slot || typeof slot !== "object") return;
-      const type = typeof slot.tray_type === "string" && slot.tray_type ? slot.tray_type : "empty";
+      const hasFilament = typeof slot.tray_type === "string" && slot.tray_type !== "";
       const colorHex = typeof slot.tray_color === "string" ? slot.tray_color.slice(0, 6) : "666666";
       const row = document.createElement("div");
       row.className = "ams-slot";
@@ -158,7 +160,17 @@ function renderAms(ams) {
       swatch.className = "ams-swatch";
       swatch.style.background = "#" + colorHex;
       row.appendChild(swatch);
-      row.appendChild(document.createTextNode(type));
+      row.appendChild(document.createTextNode(hasFilament ? slot.tray_type : "empty"));
+      if (hasFilament) {
+        // Load feeds this tray at the nozzle temp set on the slider (server
+        // refuses if the nozzle is off).
+        const load = document.createElement("button");
+        load.textContent = "Load";
+        load.dataset.action = `load?slot=${idx}`;
+        load.style.cssText = "margin-left:auto; padding:6px 14px; font-size:0.8rem; border-radius:8px";
+        load.addEventListener("click", () => post(load.dataset.action));
+        row.appendChild(load);
+      }
       container.appendChild(row);
     });
   });
@@ -355,6 +367,11 @@ async function post(action) {
     if (action === "lamp-on" || action === "lamp-off") {
       demoLampOn = action === "lamp-on";
       $("log").textContent = `demo: lamp ${demoLampOn ? "on" : "off"}`;
+      return;
+    }
+    const lm = action.match(/^load\?slot=(\d+)/);
+    if (lm) {
+      $("log").textContent = `demo: load slot ${lm[1]}`;
       return;
     }
     const m = action.match(/^set-(bed|nozzle)-temp\?temp=(\d+)/);
