@@ -63,6 +63,7 @@
   <button data-action="nozzle-heat" class="warn" id="nozzleHeatBtn">Nozzle 200°C</button>
 </div>
 <div id="log"></div>
+<div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
 <div class="actions" id="printControls" style="margin-top:16px">
   <button data-print-action="pause" id="pauseBtn" disabled>Pause print</button>
   <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
@@ -128,6 +129,14 @@ async function refresh() {
     const fans = s.fans || {};
     $("fans").textContent = `${fans.cooling ?? "?"} / ${fans.aux ?? "?"} / ${fans.chamber ?? "?"}`;
     renderAms(s.ams);
+    const hms = Array.isArray(s.hms) ? s.hms : [];
+    const banner = $("hmsBanner");
+    if (hms.length === 0) {
+      banner.style.display = "none";
+    } else {
+      banner.style.display = "";
+      banner.textContent = hms.map(e => `⚠️ ${e.message}`).join(" · ");
+    }
     // Heater button toggles between heating and turning the heater off,
     // based on whether the bed currently has a target temperature.
     const heating = (s.bedTarget ?? 0) > 0;
