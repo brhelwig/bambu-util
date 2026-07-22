@@ -87,6 +87,7 @@
   <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
 </div>
 <div class="card" id="amsCard" style="display:none">
+  <h2>Filament (AMS)</h2>
   <div id="amsSlots"></div>
 </div>
 <div id="log"></div>
@@ -191,15 +192,18 @@ $("nozzleSlider").addEventListener("change", () => {
 // the UI can be previewed live. No commands are sent — controls stay guarded.
 const DEMO = new URLSearchParams(location.search).has("demo");
 let demoTick = 0;
+// Demo targets are mutable so the sliders actually do something: in demo the
+// controls are enabled and their changes update these locally (see post()).
+let demoBedTarget = 55, demoNozzleTarget = 220;
 function demoStatus() {
   demoTick++;
   const total = 240;
   const layer = Math.min(total, 20 + demoTick * 2);
   const progress = Math.min(99, Math.round((layer / total) * 100));
   return {
-    connected: true, gcodeState: "RUNNING", actionsAllowed: false,
-    bedTemp: 54.4 + Math.sin(demoTick) * 0.3, bedTarget: 55,
-    nozzleTemp: 219 + Math.sin(demoTick) * 1.2, nozzleTarget: 220,
+    connected: true, gcodeState: "RUNNING", actionsAllowed: true,
+    bedTemp: (demoBedTarget || 22) - 0.6 + Math.sin(demoTick) * 0.3, bedTarget: demoBedTarget,
+    nozzleTemp: (demoNozzleTarget || 24) - 1 + Math.sin(demoTick) * 1.2, nozzleTarget: demoNozzleTarget,
     progress, jobName: "demo_benchy.3mf",
     layerNum: layer, totalLayerNum: total,
     remainingMinutes: Math.max(1, Math.round((total - layer) * 0.6)),
@@ -282,6 +286,18 @@ refresh();
 setInterval(refresh, 2000);
 
 async function post(action) {
+  // In demo there is no printer: apply slider changes locally, no-op the rest.
+  if (DEMO) {
+    const m = action.match(/^set-(bed|nozzle)-temp\?temp=(\d+)/);
+    if (m) {
+      const t = Number(m[2]);
+      if (m[1] === "bed") demoBedTarget = t; else demoNozzleTarget = t;
+      $("log").textContent = `demo: set ${m[1]} to ${t}°C`;
+    } else {
+      $("log").textContent = `demo: ${action} (no printer connected)`;
+    }
+    return;
+  }
   try {
     const r = await fetch(`/api/actions/${action}`, { method: "POST" });
     $("log").textContent = await r.text();
