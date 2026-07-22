@@ -1,12 +1,14 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
@@ -26,13 +28,36 @@ type Commander interface {
 }
 
 type Server struct {
-	cache *p1s.StateCache
-	cmd   Commander
-	hub   *Hub
+	cache   *p1s.StateCache
+	cmd     Commander
+	hub     *Hub
+	autoOff *autoOff
 }
 
 func NewServer(cache *p1s.StateCache, cmd Commander, hub *Hub) *Server {
-	return &Server{cache: cache, cmd: cmd, hub: hub}
+	return &Server{cache: cache, cmd: cmd, hub: hub, autoOff: newAutoOff()}
+}
+
+// EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
+// Call once (from main); the HTTP handlers do not need it to serve countdowns.
+func (s *Server) EnforceAutoOff(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if bed, nozzle := s.autoOff.due(); bed || nozzle {
+				if bed {
+					s.cmd.SetBedTemp(0)
+				}
+				if nozzle {
+					s.cmd.SetNozzleTemp(0)
+				}
+			}
+		}
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -57,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	fields, connected := s.cache.Snapshot()
 	gs := p1s.GcodeState(fields)
+	bedOff, nozzleOff := s.autoOff.remaining()
 	resp := map[string]any{
 		"connected":        connected,
 		"gcodeState":       gs,
@@ -77,8 +103,10 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 			"aux":     fields["big_fan1_speed"],
 			"chamber": fields["big_fan2_speed"],
 		},
-		"ams": fields["ams"],
-		"hms": p1s.HMSErrors(fields),
+		"ams":         fields["ams"],
+		"hms":         p1s.HMSErrors(fields),
+		"bedOffIn":    nilIfNeg(bedOff),
+		"nozzleOffIn": nilIfNeg(nozzleOff),
 		"printActions": map[string]bool{
 			"pause":  p1s.PrintActionAllowed(connected, gs, "pause") == nil,
 			"resume": p1s.PrintActionAllowed(connected, gs, "resume") == nil,
@@ -128,10 +156,10 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	// separately from the fixed actions map.
 	switch name {
 	case "set-bed-temp":
-		s.setTemp(w, r, connected, gs, name, BedMaxTemp, s.cmd.SetBedTemp)
+		s.setTemp(w, r, connected, gs, name, BedMaxTemp, s.cmd.SetBedTemp, s.autoOff.setBed)
 		return
 	case "set-nozzle-temp":
-		s.setTemp(w, r, connected, gs, name, NozzleMaxTemp, s.cmd.SetNozzleTemp)
+		s.setTemp(w, r, connected, gs, name, NozzleMaxTemp, s.cmd.SetNozzleTemp, s.autoOff.setNozzle)
 		return
 	}
 
@@ -155,7 +183,7 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 
 // setTemp handles the parameterized set-bed-temp / set-nozzle-temp endpoints:
 // parse and range-check the temp, apply the idle guard, then send it.
-func (s *Server) setTemp(w http.ResponseWriter, r *http.Request, connected bool, gs, name string, max int, set func(int)) {
+func (s *Server) setTemp(w http.ResponseWriter, r *http.Request, connected bool, gs, name string, max int, set, record func(int)) {
 	temp, err := parseTemp(r.URL.Query().Get("temp"), max)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -166,7 +194,17 @@ func (s *Server) setTemp(w http.ResponseWriter, r *http.Request, connected bool,
 		return
 	}
 	set(temp)
+	record(temp) // arm/reset/cancel the safety auto-off
 	fmt.Fprintf(w, "sent: %s %d", name, temp)
+}
+
+// nilIfNeg maps the auto-off "inactive" sentinel (-1) to JSON null and passes
+// real second counts through unchanged.
+func nilIfNeg(secs int) any {
+	if secs < 0 {
+		return nil
+	}
+	return secs
 }
 
 func (s *Server) camera(w http.ResponseWriter, r *http.Request) {

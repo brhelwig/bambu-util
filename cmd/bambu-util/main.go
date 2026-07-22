@@ -40,6 +40,11 @@ func main() {
 		return p1s.StreamFrames(ctx, net.JoinHostPort(ip, "6000"), "bblp", accessCode, yield)
 	})
 
+	srv := web.NewServer(cache, client, hub)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.EnforceAutoOff(ctx)
+
 	log.Printf("bambu-util listening on %s (printer %s)", addr, ip)
-	log.Fatal(http.ListenAndServe(addr, web.NewServer(cache, client, hub).Handler()))
+	log.Fatal(http.ListenAndServe(addr, srv.Handler()))
 }
