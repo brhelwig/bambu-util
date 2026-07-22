@@ -199,3 +199,79 @@ func TestNozzleHeatOffAllowedWhenIdle(t *testing.T) {
 		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
 	}
 }
+
+func TestStatusIncludesJobFields(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{
+		"gcode_state":       "RUNNING",
+		"subtask_name":      "benchy.gcode",
+		"layer_num":         float64(42),
+		"total_layer_num":   float64(120),
+		"mc_remaining_time": float64(37),
+		"chamber_temper":    float64(28.4),
+		"wifi_signal":       "-45dBm",
+		"cooling_fan_speed": float64(15),
+		"big_fan1_speed":    float64(0),
+		"big_fan2_speed":    float64(8),
+		"ams":               map[string]any{"ams": []any{}},
+	})
+	cmd := &fakeCommander{}
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
+	ts := httptest.NewServer(NewServer(cache, cmd, hub).Handler())
+	defer ts.Close()
+
+	resp, _ := ts.Client().Get(ts.URL + "/api/status")
+	var s map[string]any
+	json.NewDecoder(resp.Body).Decode(&s)
+
+	if s["jobName"] != "benchy.gcode" {
+		t.Errorf("jobName = %v", s["jobName"])
+	}
+	if s["layerNum"] != float64(42) || s["totalLayerNum"] != float64(120) {
+		t.Errorf("layerNum/totalLayerNum = %v/%v", s["layerNum"], s["totalLayerNum"])
+	}
+	if s["remainingMinutes"] != float64(37) {
+		t.Errorf("remainingMinutes = %v", s["remainingMinutes"])
+	}
+	if s["chamberTemp"] != 28.4 {
+		t.Errorf("chamberTemp = %v", s["chamberTemp"])
+	}
+	if s["wifiSignal"] != "-45dBm" {
+		t.Errorf("wifiSignal = %v", s["wifiSignal"])
+	}
+	fans, ok := s["fans"].(map[string]any)
+	if !ok || fans["cooling"] != float64(15) || fans["aux"] != float64(0) || fans["chamber"] != float64(8) {
+		t.Errorf("fans = %v", s["fans"])
+	}
+	if _, ok := s["ams"]; !ok {
+		t.Error("expected ams key present")
+	}
+	if _, ok := s["hms"]; !ok {
+		t.Error("expected hms key present")
+	}
+}
+
+func TestStatusHMSPopulated(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{
+		"gcode_state": "IDLE",
+		"hms": []any{
+			map[string]any{"attr": float64(0x03008000), "code": float64(0x00030002)},
+		},
+	})
+	cmd := &fakeCommander{}
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
+	ts := httptest.NewServer(NewServer(cache, cmd, hub).Handler())
+	defer ts.Close()
+
+	resp, _ := ts.Client().Get(ts.URL + "/api/status")
+	var s struct {
+		HMS []p1s.HMSEntry `json:"hms"`
+	}
+	json.NewDecoder(resp.Body).Decode(&s)
+	if len(s.HMS) != 1 || s.HMS[0].Code != "0300-8000-0003-0002" {
+		t.Fatalf("hms = %+v", s.HMS)
+	}
+}
