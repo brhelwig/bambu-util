@@ -79,12 +79,13 @@
   <div class="row" id="dryTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="dryTimer"></span></div>
 </div>
 <div class="card" id="nozzleCard">
-  <h2>Nozzle</h2>
+  <h2>Nozzle (cold pull / clean)</h2>
   <div class="row"><span>Nozzle target</span><span id="nozzleLabel">Off</span></div>
   <input type="range" id="nozzleSlider" min="0" max="4" step="1" value="0">
   <div class="row" id="nozzleTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="nozzleTimer"></span></div>
+  <button data-action="extrude" id="extrudeBtn" style="width:100%; margin-top:10px">Extrude</button>
 </div>
-<div class="actions" id="printControls">
+<div class="actions" id="printControls" style="margin-bottom:16px">
   <button data-print-action="pause" id="pauseBtn" disabled>Pause print</button>
   <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
 </div>
@@ -173,7 +174,7 @@ const DRY_STOPS = [
   { t: 80,  label: "80°C · PETG" },
   { t: 85,  label: "85°C · TPU" },
   { t: 90,  label: "90°C · ABS/ASA/PC" },
-  { t: 100, label: "100°C · PA/PVA/max" },
+  { t: 100, label: "100°C · PA/PVA/desiccant" },
 ];
 let dryDragging = false;
 
@@ -199,16 +200,16 @@ $("drySlider").addEventListener("change", () => {
   post(`set-bed-temp?temp=${DRY_STOPS[Number($("drySlider").value)].t}`);
 });
 
-// Nozzle presets are print/purge temperatures (for cleaning or filament
-// unload, which needs the nozzle at the material's print temp), based on
-// Bambu Studio material defaults — PLA ~220, PETG ~250, ABS/ASA/PC ~270,
-// PA/CF ~280-300. These are print temps, not the bed-drying table above.
+// Nozzle presets for cleaning / cold pulls. Bambu's cold-pull guide
+// (wiki.bambulab.com/en/p1/manual/p1s-cold-pull) sets the nozzle slightly
+// above the material's print temp before extruding, so these are print temp
+// + ~5°C: PLA 225, PETG 255, ABS/ASA/PC 275, PA/CF 295.
 const NOZZLE_STOPS = [
   { t: 0,   label: "Off" },
-  { t: 220, label: "220°C · PLA" },
-  { t: 250, label: "250°C · PETG" },
-  { t: 270, label: "270°C · ABS/PC" },
-  { t: 290, label: "290°C · PA/CF" },
+  { t: 225, label: "225°C · PLA" },
+  { t: 255, label: "255°C · PETG" },
+  { t: 275, label: "275°C · ABS/PC" },
+  { t: 295, label: "295°C · PA/CF" },
 ];
 let nozzleDragging = false;
 
@@ -238,7 +239,7 @@ const DEMO = new URLSearchParams(location.search).has("demo");
 let demoTick = 0;
 // Demo targets are mutable so the sliders actually do something: in demo the
 // controls are enabled and their changes update these locally (see post()).
-let demoBedTarget = 60, demoNozzleTarget = 220;
+let demoBedTarget = 60, demoNozzleTarget = 225;
 let demoBedSetTick = 0, demoNozzleSetTick = 0; // demoTick when each was last set
 function demoStatus() {
   demoTick++;
@@ -314,6 +315,9 @@ async function refresh() {
     showTimer("dryTimerRow", "dryTimer", s.bedOffIn);
     showTimer("nozzleTimerRow", "nozzleTimer", s.nozzleOffIn);
     document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
+    // Extrude also needs a hot nozzle (cold extrusion strips filament); the
+    // printer enforces this too, but disable the button to make it obvious.
+    $("extrudeBtn").disabled = !s.actionsAllowed || (s.nozzleTemp ?? 0) < 170;
 
     // Pause button toggles to Resume while the print is paused.
     const pa = s.printActions || {};
