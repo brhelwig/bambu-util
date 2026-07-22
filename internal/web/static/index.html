@@ -75,7 +75,7 @@
 <div class="card" id="dryCard" style="margin-top:16px">
   <h2>Bed drying</h2>
   <div class="row"><span>Bed target</span><span id="dryLabel">Off</span></div>
-  <input type="range" id="drySlider" min="0" max="7" step="1" value="0">
+  <input type="range" id="drySlider" min="0" max="6" step="1" value="0">
 </div>
 <div class="card" id="nozzleCard">
   <h2>Nozzle</h2>
@@ -121,17 +121,19 @@ function renderAms(ams) {
   });
 }
 
-// Bed-drying presets. Material hints are common-practice approximations,
-// not verified against Bambu docs — adjust to taste.
+// Bed-drying presets from Bambu's official P1S bed-drying table
+// (wiki.bambulab.com/en/filament-acc/filament/dry-filament): PLA 60-70,
+// PLA-CF/silk 65-75, PETG 75-85, TPU 80-90, support-ABS 85-95,
+// ABS/ASA/PC/PVA/PA/PET-CF 90-100. PPA-CF/PPS-CF want 110-120, which the P1S
+// bed can't reach — those need a dedicated dryer.
 const DRY_STOPS = [
   { t: 0,   label: "Off" },
-  { t: 40,  label: "40°C" },
-  { t: 45,  label: "45°C · PLA" },
-  { t: 50,  label: "50°C" },
-  { t: 55,  label: "55°C" },
-  { t: 65,  label: "65°C · PETG" },
-  { t: 80,  label: "80°C · ABS" },
-  { t: 100, label: "100°C · desiccant" },
+  { t: 60,  label: "60°C · PLA" },
+  { t: 70,  label: "70°C · PLA-CF/silk" },
+  { t: 80,  label: "80°C · PETG" },
+  { t: 85,  label: "85°C · TPU" },
+  { t: 90,  label: "90°C · ABS/ASA/PC" },
+  { t: 100, label: "100°C · PA/PVA/max" },
 ];
 let dryDragging = false;
 
@@ -157,14 +159,16 @@ $("drySlider").addEventListener("change", () => {
   post(`set-bed-temp?temp=${DRY_STOPS[Number($("drySlider").value)].t}`);
 });
 
-// Nozzle presets, mirroring the bed-drying slider. Material hints are
-// common-practice approximations, not verified against Bambu docs.
+// Nozzle presets are print/purge temperatures (for cleaning or filament
+// unload, which needs the nozzle at the material's print temp), based on
+// Bambu Studio material defaults — PLA ~220, PETG ~250, ABS/ASA/PC ~270,
+// PA/CF ~280-300. These are print temps, not the bed-drying table above.
 const NOZZLE_STOPS = [
   { t: 0,   label: "Off" },
-  { t: 200, label: "200°C · PLA" },
-  { t: 220, label: "220°C" },
-  { t: 240, label: "240°C · PETG" },
-  { t: 260, label: "260°C · ABS" },
+  { t: 220, label: "220°C · PLA" },
+  { t: 250, label: "250°C · PETG" },
+  { t: 270, label: "270°C · ABS/PC" },
+  { t: 290, label: "290°C · PA/CF" },
 ];
 let nozzleDragging = false;
 
@@ -194,7 +198,7 @@ const DEMO = new URLSearchParams(location.search).has("demo");
 let demoTick = 0;
 // Demo targets are mutable so the sliders actually do something: in demo the
 // controls are enabled and their changes update these locally (see post()).
-let demoBedTarget = 55, demoNozzleTarget = 220;
+let demoBedTarget = 60, demoNozzleTarget = 220;
 function demoStatus() {
   demoTick++;
   const total = 240;
