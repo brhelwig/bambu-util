@@ -52,6 +52,7 @@
   <button data-action="lower-bed">Lower bed</button>
   <button data-action="home">Home</button>
   <button data-action="bed-heat" class="warn" id="heatBtn">Bed 100°C</button>
+  <button data-action="nozzle-heat" class="warn" id="nozzleHeatBtn">Nozzle 200°C</button>
 </div>
 <div id="log"></div>
 <div class="actions" id="printControls" style="margin-top:16px">
@@ -85,6 +86,11 @@ async function refresh() {
     heat.dataset.action = heating ? "heat-off" : "bed-heat";
     heat.textContent = heating ? "Heater off" : "Bed 100°C";
     heat.classList.toggle("warn", !heating);
+    const nozzleHeating = (s.nozzleTarget ?? 0) > 0;
+    const nozzleHeat = $("nozzleHeatBtn");
+    nozzleHeat.dataset.action = nozzleHeating ? "nozzle-heat-off" : "nozzle-heat";
+    nozzleHeat.textContent = nozzleHeating ? "Heater off" : "Nozzle 200°C";
+    nozzleHeat.classList.toggle("warn", !nozzleHeating);
     document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
 
     // Pause button toggles to Resume while the print is paused.
