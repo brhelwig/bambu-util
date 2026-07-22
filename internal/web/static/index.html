@@ -42,6 +42,20 @@
   .card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0a6; font-weight: 600; margin: 0 0 10px; }
   input[type=range] { width: 100%; margin: 6px 0 2px; accent-color: #c98a2b; }
   input[type=range]:disabled { opacity: 0.4; }
+  .iconrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .iconbtn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 13px 4px; }
+  .iconbtn svg { width: 26px; height: 26px; display: block; }
+  .iconbtn .cap { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.02em; }
+  .iconbtn.on { color: #c98a2b; }
+  .iconbtn.danger { background: #6e2222; }
+  .iconbtn.danger.armed { background: #b02a2a; }
+  .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
+  .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
+  .ams-edit-row label { color: #9aa0a6; }
+  .ams-editor input[type=text], .ams-editor input[type=number] { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.85rem; }
+  .ams-editor input.temp { width: 60px; }
+  .ams-editor input[type=color] { width: 46px; height: 30px; background: none; border: 0; padding: 0; }
+  .ams-editor .ams-save { width: 100%; margin-top: 6px; padding: 10px; font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -65,13 +79,28 @@
   <div class="row"><span>Fans (cool/aux/chamber)</span><span id="fans">…</span></div>
 </div>
 <div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
-<div class="card">
-  <img id="cam" alt="printer camera" src="/camera/stream">
-  <button id="lampBtn" style="width:100%; margin-top:12px" disabled>Lamp</button>
+<div class="iconrow" id="row1">
+  <button class="iconbtn" id="camBtn" aria-label="Turn camera on">
+    <span class="ico"></span><span class="cap">Camera</span></button>
+  <button class="iconbtn" id="lampBtn" aria-label="Chamber lamp" disabled>
+    <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 2a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.2v.3h6v-.3c0-.8.4-1.6 1-2.2A6 6 0 0 0 12 2z"/></svg></span><span class="cap">Lamp</span></button>
+  <button class="iconbtn" id="pauseBtn" data-print-action="pause" aria-label="Pause print" disabled>
+    <span class="ico"></span><span class="cap">Pause</span></button>
+  <button class="iconbtn danger" id="stopBtn" data-print-action="stop" aria-label="Stop print" disabled>
+    <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></span><span class="cap">Stop</span></button>
 </div>
-<div class="actions">
-  <button data-action="lower-bed">Lower bed</button>
-  <button data-action="home">Home</button>
+<div class="iconrow" id="row2">
+  <button class="iconbtn" data-action="lower-bed" aria-label="Lower bed">
+    <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M12 4v9"/><path d="M8 9l4 4 4-4"/></svg></span><span class="cap">Bed down</span></button>
+  <button class="iconbtn" data-action="home" aria-label="Home axes">
+    <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg></span><span class="cap">Home</span></button>
+  <button class="iconbtn" data-action="extrude" id="extrudeBtn" aria-label="Extrude filament">
+    <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 4h14a1 1 0 0 1 .95 1.32l-2.4 6.9a1 1 0 0 1-.95.68H7.4a1 1 0 0 1-.95-.68l-2.4-6.9A1 1 0 0 1 5 4z"/><path d="M12 13.6c-1.5 2-2.2 3.4-2.2 4.5a2.2 2.2 0 0 0 4.4 0c0-1.1-.7-2.5-2.2-4.5z"/></svg></span><span class="cap">Extrude</span></button>
+  <button class="iconbtn" data-action="unload" id="ejectBtn" aria-label="Eject loaded filament" disabled>
+    <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l7 9H5z"/><rect x="5" y="16" width="14" height="3" rx="1.5"/></svg></span><span class="cap">Eject</span></button>
+</div>
+<div class="card" id="camCard" style="display:none; padding:8px">
+  <img id="cam" alt="printer camera">
 </div>
 <div class="card" id="dryCard" style="margin-top:16px">
   <h2>Bed drying</h2>
@@ -84,12 +113,6 @@
   <div class="row"><span>Nozzle target</span><span id="nozzleLabel">Off</span></div>
   <input type="range" id="nozzleSlider" min="0" max="4" step="1" value="0">
   <div class="row" id="nozzleTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="nozzleTimer"></span></div>
-  <button data-action="extrude" id="extrudeBtn" style="width:100%; margin-top:10px">Extrude</button>
-  <button data-action="unload" id="unloadBtn" style="width:100%; margin-top:10px">Unload filament</button>
-</div>
-<div class="actions" id="printControls" style="margin-bottom:16px">
-  <button data-print-action="pause" id="pauseBtn" disabled>Pause print</button>
-  <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
 </div>
 <div class="card" id="amsCard" style="display:none">
   <h2>Filament (AMS)</h2>
@@ -99,6 +122,41 @@
 <script>
 const $ = id => document.getElementById(id);
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
+
+// Icons that swap with state (the rest are inline in the markup).
+const SVG_CAM_ON  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M22 8l-5 4 5 4V8z"/></svg>`;
+const SVG_CAM_OFF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M22 8l-5 4 5 4V8z"/><line x1="3" y1="3" x2="21" y2="21"/></svg>`;
+const SVG_PLAY  = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg>`;
+const SVG_PAUSE = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`;
+
+// setIco updates an icon button's glyph and/or caption without clobbering the
+// other span (icon buttons hold an .ico and a .cap child).
+function setIco(btn, svg, cap) {
+  if (svg != null) btn.querySelector(".ico").innerHTML = svg;
+  if (cap != null) btn.querySelector(".cap").textContent = cap;
+}
+
+// Camera is a manual toggle whose last state persists across reloads, so it
+// only pulls the MJPEG feed (and holds the printer's camera connection open) if
+// the user left it on. Default off on a fresh browser.
+let camOn = localStorage.getItem("camOn") === "1";
+function applyCam() {
+  const btn = $("camBtn");
+  setIco(btn, camOn ? SVG_CAM_ON : SVG_CAM_OFF, camOn ? "Camera on" : "Camera off");
+  btn.classList.toggle("on", camOn);
+  btn.setAttribute("aria-label", camOn ? "Turn camera off" : "Turn camera on");
+  $("camCard").style.display = camOn ? "" : "none";
+  const cam = $("cam");
+  // Setting src starts the stream; clearing it drops the connection.
+  if (camOn) { if (cam.getAttribute("src") !== "/camera/stream") cam.src = "/camera/stream"; }
+  else { cam.removeAttribute("src"); }
+}
+$("camBtn").addEventListener("click", () => {
+  camOn = !camOn;
+  localStorage.setItem("camOn", camOn ? "1" : "0");
+  applyCam();
+});
+applyCam();
 
 // Declared up here (not by the stop-button wiring below) because refresh() can
 // call disarmStop() on its very first, synchronous run — before that wiring
@@ -140,9 +198,24 @@ function amsTarget(unit, slot) {
   return u * 4 + t;
 }
 
-function renderAms(ams) {
+// loadedTray returns the global index of the tray currently fed to the nozzle
+// (ams.tray_now), or null when nothing is loaded. Bambu uses 254 (external
+// spool) and 255 (none) as sentinels, so anything >= 254 means "not an AMS
+// tray".
+function loadedTray(ams) {
+  const n = parseInt(ams && ams.tray_now, 10);
+  return Number.isInteger(n) && n < 254 ? n : null;
+}
+
+let amsEditing = false;
+function renderAms(ams, canEdit) {
   const card = $("amsCard");
   const container = $("amsSlots");
+  // While an inline filament editor is open, leave the DOM alone — the 2s
+  // refresh would otherwise wipe the half-filled form (same idea as the slider
+  // drag guards).
+  if (amsEditing) return;
+  const loadedIdx = loadedTray(ams);
   const units = ams && Array.isArray(ams.ams) ? ams.ams : [];
   const valid = units.filter(u => u && typeof u === "object" && Array.isArray(u.tray));
   if (!valid.some(u => u.tray.length > 0)) {
@@ -174,20 +247,101 @@ function renderAms(ams) {
       swatch.style.background = "#" + colorHex;
       row.appendChild(swatch);
       row.appendChild(document.createTextNode(hasFilament ? slot.tray_type : "empty"));
-      const target = hasFilament ? amsTarget(unit, slot) : null;
-      if (target != null) {
-        // Load feeds this tray at the nozzle temp set on the slider (server
-        // refuses if the nozzle is off).
-        const load = document.createElement("button");
-        load.textContent = "Load";
-        load.dataset.action = `load?slot=${target}`;
-        load.style.cssText = "margin-left:auto; padding:6px 14px; font-size:0.8rem; border-radius:8px";
-        load.addEventListener("click", () => post(load.dataset.action));
-        row.appendChild(load);
+      const right = document.createElement("span");
+      right.style.cssText = "margin-left:auto; display:flex; align-items:center; gap:8px";
+      // Mark whichever tray is currently fed to the nozzle so the Eject button
+      // (the only load/unload control) has an obvious referent.
+      if (hasFilament && amsTarget(unit, slot) === loadedIdx) {
+        const tag = document.createElement("span");
+        tag.textContent = "loaded";
+        tag.style.cssText = "font-size:0.72rem; font-weight:600; color:#c98a2b";
+        right.appendChild(tag);
       }
+      // Edit opens an inline profile editor (colour/type/temps). Idle-only,
+      // matching the server guard on set-filament.
+      const edit = document.createElement("button");
+      edit.textContent = "Edit";
+      edit.style.cssText = "padding:5px 12px; font-size:0.78rem; border-radius:8px";
+      edit.disabled = !canEdit;
+      right.appendChild(edit);
+      row.appendChild(right);
       container.appendChild(row);
+
+      const editor = buildFilamentEditor(unit, slot);
+      editor.style.display = "none";
+      container.appendChild(editor);
+      edit.addEventListener("click", () => {
+        const open = editor.style.display === "none";
+        editor.style.display = open ? "" : "none";
+        amsEditing = open;
+      });
     });
   });
+}
+
+// buildFilamentEditor makes the inline per-tray profile form, prefilled from the
+// tray's current reported values. tray_info_idx (the printer's own profile id,
+// which the reference is unsure about) is carried through hidden and unchanged
+// so a colour/type edit doesn't clobber it.
+function buildFilamentEditor(unit, slot) {
+  const box = document.createElement("div");
+  box.className = "ams-editor";
+  const color6 = typeof slot.tray_color === "string" ? slot.tray_color.slice(0, 6) : "666666";
+  const type = typeof slot.tray_type === "string" ? slot.tray_type : "";
+  const tmin = slot.nozzle_temp_min ?? "";
+  const tmax = slot.nozzle_temp_max ?? "";
+  const idx = typeof slot.tray_info_idx === "string" ? slot.tray_info_idx : "";
+
+  const colorIn = mkInput("color", "#" + color6);
+  const typeIn = mkInput("text", type);
+  typeIn.maxLength = 20; typeIn.placeholder = "PLA";
+  const minIn = mkInput("number", tmin); minIn.min = 0; minIn.max = 300; minIn.className = "temp";
+  const maxIn = mkInput("number", tmax); maxIn.min = 0; maxIn.max = 300; maxIn.className = "temp";
+
+  box.append(
+    editRow("Color", colorIn),
+    editRow("Type", typeIn),
+    editRow("Temp °C", spanOf(minIn, document.createTextNode(" – "), maxIn)),
+  );
+  const save = document.createElement("button");
+  save.textContent = "Save";
+  save.className = "ams-save";
+  box.appendChild(save);
+
+  save.addEventListener("click", () => {
+    const type = typeIn.value.trim();
+    if (!type) { $("log").textContent = "type is required"; return; }
+    const q = new URLSearchParams({
+      ams_id: unit.id, tray_id: slot.id,
+      tray_color: colorIn.value.slice(1) + "FF", // #RRGGBB -> RRGGBBAA
+      tray_type: type,
+      nozzle_temp_min: minIn.value || "0",
+      nozzle_temp_max: maxIn.value || "0",
+      tray_info_idx: idx,
+    });
+    amsEditing = false; // let the next refresh redraw with the new values
+    post("set-filament?" + q.toString());
+  });
+  return box;
+}
+function mkInput(type, value) {
+  const el = document.createElement("input");
+  el.type = type;
+  if (value !== "" && value != null) el.value = value;
+  return el;
+}
+function editRow(label, control) {
+  const row = document.createElement("div");
+  row.className = "ams-edit-row";
+  const l = document.createElement("label");
+  l.textContent = label;
+  row.append(l, control);
+  return row;
+}
+function spanOf(...nodes) {
+  const s = document.createElement("span");
+  s.append(...nodes);
+  return s;
 }
 
 // Bed-drying presets from Bambu's official P1S bed-drying table
@@ -274,6 +428,13 @@ let demoTick = 0;
 let demoBedTarget = 60, demoNozzleTarget = 225;
 let demoBedSetTick = 0, demoNozzleSetTick = 0; // demoTick when each was last set
 let demoLampOn = true;
+// Mutable so the demo filament editor's saves visibly update the swatches.
+let demoTrays = [
+  { id: "0", tray_type: "PLA",  tray_color: "FF6B35FF", nozzle_temp_min: "190", nozzle_temp_max: "230", tray_info_idx: "GFA00" },
+  { id: "1", tray_type: "PETG", tray_color: "2E86ABFF", nozzle_temp_min: "220", nozzle_temp_max: "260", tray_info_idx: "GFG00" },
+  { id: "2", tray_type: "ABS",  tray_color: "111418FF", nozzle_temp_min: "240", nozzle_temp_max: "270", tray_info_idx: "GFB00" },
+  { id: "3", tray_type: "PLA",  tray_color: "F2F2F2FF", nozzle_temp_min: "190", nozzle_temp_max: "230", tray_info_idx: "GFA01" },
+];
 function demoStatus() {
   demoTick++;
   const base = {
@@ -285,12 +446,7 @@ function demoStatus() {
     bedOffIn: demoBedTarget > 0 ? Math.max(0, 86400 - (demoTick - demoBedSetTick) * 2) : null,
     nozzleOffIn: demoNozzleTarget > 0 ? Math.max(0, 900 - (demoTick - demoNozzleSetTick) * 2) : null,
     fans: { cooling: 15, aux: 0, chamber: 8 },
-    ams: { ams: [{ id: "0", humidity: "2", humidity_raw: "24", tray: [
-      { id: "0", tray_type: "PLA",  tray_color: "FF6B35FF" },
-      { id: "1", tray_type: "PETG", tray_color: "2E86ABFF" },
-      { id: "2", tray_type: "ABS",  tray_color: "111418FF" },
-      { id: "3", tray_type: "PLA",  tray_color: "F2F2F2FF" },
-    ] }] },
+    ams: { tray_now: "0", ams: [{ id: "0", humidity: "2", humidity_raw: "24", tray: demoTrays }] },
     hms: [],
   };
   if (DEMO_PRINT) {
@@ -336,7 +492,7 @@ async function refresh() {
     $("wifi").textContent = s.wifiSignal ?? "?";
     const fans = s.fans || {};
     $("fans").textContent = `${fans.cooling ?? "?"} / ${fans.aux ?? "?"} / ${fans.chamber ?? "?"}`;
-    renderAms(s.ams);
+    renderAms(s.ams, s.actionsAllowed);
     const hms = Array.isArray(s.hms) ? s.hms : [];
     const banner = $("hmsBanner");
     if (hms.length === 0) {
@@ -345,6 +501,12 @@ async function refresh() {
       banner.style.display = "";
       banner.textContent = hms.map(e => `⚠️ ${e.message}`).join(" · ");
     }
+    // The drying and nozzle cards are idle-only tools. During a print the
+    // printer drives bed/nozzle temps itself, so the sliders would show a
+    // preset that disagrees with the live machine status (e.g. slider 60 vs
+    // bed 55). Hide them entirely unless the printer is idle and reachable.
+    $("dryCard").style.display = s.actionsAllowed ? "" : "none";
+    $("nozzleCard").style.display = s.actionsAllowed ? "" : "none";
     // Sliders mirror the printer's targets unless the user is dragging them.
     if (!dryDragging) setDrySliderFromTarget(s.bedTarget);
     $("drySlider").disabled = !s.actionsAllowed;
@@ -356,6 +518,9 @@ async function refresh() {
     // Extrude also needs a hot nozzle (cold extrusion strips filament); the
     // printer enforces this too, but disable the button to make it obvious.
     $("extrudeBtn").disabled = !s.actionsAllowed || (s.nozzleTemp ?? 0) < 170;
+    // Eject unloads the currently-fed filament; grey it out when nothing is
+    // loaded (no tray_now) or the printer is busy.
+    $("ejectBtn").disabled = !s.actionsAllowed || loadedTray(s.ams) == null;
     // Lamp toggles in any state, so it's gated on connection only. chamberLight
     // is null until the printer reports it — stay neutral and disabled until
     // then rather than assert a state we haven't seen.
@@ -363,14 +528,18 @@ async function refresh() {
     const lampOn = s.chamberLight === true;
     const lamp = $("lampBtn");
     lamp.dataset.lamp = lampOn ? "lamp-off" : "lamp-on";
-    lamp.textContent = lampKnown ? (lampOn ? "Lamp off" : "Lamp on") : "Lamp";
+    setIco(lamp, null, lampKnown ? (lampOn ? "Lamp on" : "Lamp off") : "Lamp");
+    lamp.classList.toggle("on", lampOn);
+    lamp.setAttribute("aria-label", lampOn ? "Turn chamber lamp off" : "Turn chamber lamp on");
     lamp.disabled = !s.connected || !lampKnown;
 
-    // Pause button toggles to Resume while the print is paused.
+    // Pause button toggles to Resume (play icon) while the print is paused.
     const pa = s.printActions || {};
     const pause = $("pauseBtn");
-    pause.dataset.printAction = pa.resume ? "resume" : "pause";
-    pause.textContent = pa.resume ? "Resume print" : "Pause print";
+    const paused = pa.resume;
+    pause.dataset.printAction = paused ? "resume" : "pause";
+    setIco(pause, paused ? SVG_PLAY : SVG_PAUSE, paused ? "Resume" : "Pause");
+    pause.setAttribute("aria-label", paused ? "Resume print" : "Pause print");
     document.querySelectorAll("[data-print-action]").forEach(b => {
       b.disabled = !pa[b.dataset.printAction];
     });
@@ -379,6 +548,8 @@ async function refresh() {
     $("conn").textContent = "bridge unreachable";
     $("conn").className = "bad";
     document.querySelectorAll("[data-action], [data-print-action]").forEach(b => b.disabled = true);
+    $("dryCard").style.display = "none";
+    $("nozzleCard").style.display = "none";
     $("drySlider").disabled = true;
     $("nozzleSlider").disabled = true;
     $("lampBtn").disabled = true;
@@ -398,9 +569,17 @@ async function post(action) {
       $("log").textContent = `demo: lamp ${demoLampOn ? "on" : "off"}`;
       return;
     }
-    const lm = action.match(/^load\?slot=(\d+)/);
-    if (lm) {
-      $("log").textContent = `demo: load slot ${lm[1]}`;
+    const fm = action.match(/^set-filament\?(.*)/);
+    if (fm) {
+      const p = new URLSearchParams(fm[1]);
+      const tray = demoTrays.find(t => t.id === p.get("tray_id"));
+      if (tray) {
+        tray.tray_color = p.get("tray_color");
+        tray.tray_type = p.get("tray_type");
+        tray.nozzle_temp_min = p.get("nozzle_temp_min");
+        tray.nozzle_temp_max = p.get("nozzle_temp_max");
+      }
+      $("log").textContent = `demo: set filament tray ${p.get("tray_id")}`;
       return;
     }
     const m = action.match(/^set-(bed|nozzle)-temp\?temp=(\d+)/);
@@ -432,7 +611,7 @@ $("lampBtn").addEventListener("click", () => post($("lampBtn").dataset.lamp));
 function disarmStop() {
   const b = $("stopBtn");
   b.classList.remove("armed");
-  b.textContent = "Stop print";
+  setIco(b, null, "Stop");
   if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
 }
 
@@ -444,7 +623,7 @@ document.querySelectorAll("[data-print-action]").forEach(b =>
       post("stop");
     } else {
       b.classList.add("armed");
-      b.textContent = "Tap again to stop";
+      setIco(b, null, "Confirm?");
       stopTimer = setTimeout(disarmStop, 4000);
     }
   }));

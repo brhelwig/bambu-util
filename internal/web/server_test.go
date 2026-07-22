@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -16,6 +17,13 @@ type fakeCommander struct {
 	bedTemps    []int
 	nozzleTemps []int
 	loads       [][3]int // {slot, currTemp, tarTemp}
+	filaments   []filamentCall
+}
+
+type filamentCall struct {
+	amsID, trayID           int
+	trayInfoIdx, color, typ string
+	tempMin, tempMax        int
 }
 
 func (f *fakeCommander) LowerBed() { f.calls = append(f.calls, "lower-bed") }
@@ -33,6 +41,10 @@ func (f *fakeCommander) UnloadFilament() { f.calls = append(f.calls, "unload") }
 func (f *fakeCommander) LoadFilament(slot, currTemp, tarTemp int) {
 	f.calls = append(f.calls, "load")
 	f.loads = append(f.loads, [3]int{slot, currTemp, tarTemp})
+}
+func (f *fakeCommander) SetAmsFilament(amsID, trayID int, trayInfoIdx, color, typ string, tempMin, tempMax int) {
+	f.calls = append(f.calls, "set-filament")
+	f.filaments = append(f.filaments, filamentCall{amsID, trayID, trayInfoIdx, color, typ, tempMin, tempMax})
 }
 func (f *fakeCommander) SetChamberLight(on bool) {
 	if on {
@@ -391,6 +403,84 @@ func TestLoadBlockedWhileRunning(t *testing.T) {
 	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "RUNNING", "nozzle_target_temper": float64(225)})
 	defer ts.Close()
 	resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot=0", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func setFilamentURL(base string, q url.Values) string {
+	return base + "/api/actions/set-filament?" + q.Encode()
+}
+
+func validFilamentQuery() url.Values {
+	q := url.Values{}
+	q.Set("ams_id", "0")
+	q.Set("tray_id", "2")
+	q.Set("tray_color", "FF6B35FF")
+	q.Set("tray_type", "PETG")
+	q.Set("nozzle_temp_min", "220")
+	q.Set("nozzle_temp_max", "260")
+	q.Set("tray_info_idx", "Pe352488")
+	return q
+}
+
+func TestSetFilamentValid(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE"})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(setFilamentURL(ts.URL, validFilamentQuery()), "", nil)
+	want := filamentCall{0, 2, "Pe352488", "FF6B35FF", "PETG", 220, 260}
+	if resp.StatusCode != 200 || len(cmd.filaments) != 1 || cmd.filaments[0] != want {
+		t.Fatalf("status %d filaments %v", resp.StatusCode, cmd.filaments)
+	}
+}
+
+func TestSetFilamentNormalizesShortColor(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE"})
+	defer ts.Close()
+	q := validFilamentQuery()
+	q.Set("tray_color", "ff6b35") // 6-hex, lowercase → RRGGBBAA uppercase
+	resp, _ := ts.Client().Post(setFilamentURL(ts.URL, q), "", nil)
+	if resp.StatusCode != 200 || len(cmd.filaments) != 1 || cmd.filaments[0].color != "FF6B35FF" {
+		t.Fatalf("status %d filaments %v", resp.StatusCode, cmd.filaments)
+	}
+}
+
+func TestSetFilamentInvalid(t *testing.T) {
+	bad := map[string]string{
+		"ams_id":          "4",   // > max unit index
+		"tray_id":         "4",   // > 3
+		"tray_color":      "xyz", // not hex
+		"tray_type":       "",    // empty
+		"nozzle_temp_min": "999", // out of range
+	}
+	for field, val := range bad {
+		ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE"})
+		q := validFilamentQuery()
+		q.Set(field, val)
+		resp, _ := ts.Client().Post(setFilamentURL(ts.URL, q), "", nil)
+		if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+			t.Fatalf("bad %s=%q: status %d calls %v", field, val, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestSetFilamentRejectsMinAboveMax(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE"})
+	defer ts.Close()
+	q := validFilamentQuery()
+	q.Set("nozzle_temp_min", "260")
+	q.Set("nozzle_temp_max", "220")
+	resp, _ := ts.Client().Post(setFilamentURL(ts.URL, q), "", nil)
+	if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 400 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestSetFilamentBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "RUNNING"})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(setFilamentURL(ts.URL, validFilamentQuery()), "", nil)
 	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
 		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
 	}

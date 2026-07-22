@@ -19,8 +19,23 @@ func NewStateCache() *StateCache {
 func (s *StateCache) Merge(fields map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for k, v := range fields {
-		s.fields[k] = v
+	deepMerge(s.fields, fields)
+}
+
+// deepMerge recursively merges src into dst. Nested JSON objects are merged
+// key-by-key so a partial report doesn't wipe sibling fields an earlier fuller
+// report set — e.g. an "ams" delta that omits tray_now (the loaded tray) must
+// not erase it. Arrays and scalars replace wholesale: the printer resends whole
+// arrays (like the tray list), so element-wise merging isn't needed.
+func deepMerge(dst, src map[string]any) {
+	for k, v := range src {
+		if srcMap, ok := v.(map[string]any); ok {
+			if dstMap, ok := dst[k].(map[string]any); ok {
+				deepMerge(dstMap, srcMap)
+				continue
+			}
+		}
+		dst[k] = v
 	}
 }
 

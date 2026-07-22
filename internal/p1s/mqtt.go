@@ -112,6 +112,28 @@ func (c *Client) LoadFilament(slot, currTemp, tarTemp int) {
 	c.publish(string(b))
 }
 
+// SetAmsFilament writes the profile for one AMS tray: material type, colour
+// (tray_color as RRGGBBAA hex), and the nozzle temperature range. trayInfoIdx
+// is the printer's own filament-profile id — we round-trip whatever the last
+// report carried so a colour edit doesn't clobber it. This is a full-tray write
+// (ams_filament_setting), so every field is sent, not just the changed one.
+// Payload from OpenBambuAPI mqtt.md; unverified against this printer.
+func (c *Client) SetAmsFilament(amsID, trayID int, trayInfoIdx, color, trayType string, tempMin, tempMax int) {
+	req := map[string]any{"print": map[string]any{
+		"sequence_id":     strconv.FormatInt(c.seq.Add(1), 10),
+		"command":         "ams_filament_setting",
+		"ams_id":          amsID,
+		"tray_id":         trayID,
+		"tray_info_idx":   trayInfoIdx,
+		"tray_color":      color,
+		"nozzle_temp_min": tempMin,
+		"nozzle_temp_max": tempMax,
+		"tray_type":       trayType,
+	}}
+	b, _ := json.Marshal(req)
+	c.publish(string(b))
+}
+
 // SetChamberLight turns the chamber LED on or off. "ledctrl" is a system-level
 // command (not print); the timing fields only matter for flashing mode but are
 // included to match the documented payload. Verified against OpenBambuAPI.

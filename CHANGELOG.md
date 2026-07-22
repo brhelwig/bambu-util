@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-22
+
+### Added
+
+- Per-tray filament editor in the AMS card: an Edit button opens an inline form
+  to set a tray's colour, material type, and nozzle temperature range
+  (`ams_filament_setting`). It prefills from the tray's reported values and
+  resends the whole profile — including the printer's `tray_info_idx` unchanged
+  — so editing one field doesn't blank the others. Idle-only.
+
+### Fixed
+
+- State cache now deep-merges partial MQTT reports. Nested fields like the AMS
+  `tray_now` (the tray currently fed to the nozzle) previously got wiped
+  whenever a later partial report re-sent the `ams` object without them, so the
+  UI could never tell which bay was loaded. They now survive partial updates.
+
+### Changed
+
+- Bed/print controls are reworked into a compact icon grid with accessible
+  labels: camera, lamp, pause/resume, stop on the first row; lower bed, home,
+  extrude, eject on the second.
+- Camera is now a manual toggle that remembers its last state per browser and
+  only requests the feed if it was left on, instead of auto-starting.
+- The bed-drying and nozzle cards are hidden while a print is running: the
+  printer drives those temperatures itself, so the sliders' nearest-preset
+  value would disagree with the live machine status (e.g. slider 60 vs bed 55).
+- Filament handling is unload-only. A single Eject button — disabled when
+  nothing is loaded — replaces the per-slot load/unload buttons, since the
+  printer loads filament on its own. The AMS card marks the loaded tray.
+
 ## [0.4.0] - 2026-07-22
 
 ### Added
