@@ -76,11 +76,13 @@
   <h2>Bed drying</h2>
   <div class="row"><span>Bed target</span><span id="dryLabel">Off</span></div>
   <input type="range" id="drySlider" min="0" max="6" step="1" value="0">
+  <div class="row" id="dryTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="dryTimer"></span></div>
 </div>
 <div class="card" id="nozzleCard">
   <h2>Nozzle</h2>
   <div class="row"><span>Nozzle target</span><span id="nozzleLabel">Off</span></div>
   <input type="range" id="nozzleSlider" min="0" max="4" step="1" value="0">
+  <div class="row" id="nozzleTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="nozzleTimer"></span></div>
 </div>
 <div class="actions" id="printControls">
   <button data-print-action="pause" id="pauseBtn" disabled>Pause print</button>
@@ -95,29 +97,67 @@
 const $ = id => document.getElementById(id);
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
 
+// Countdown text: "23h 59m" while over an hour, "14:32" (m:ss) under it.
+function fmtCountdown(secs) {
+  if (secs >= 3600) {
+    return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  }
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+}
+
+function showTimer(rowId, valId, secs) {
+  const active = typeof secs === "number";
+  $(rowId).style.display = active ? "" : "none";
+  if (active) $(valId).textContent = fmtCountdown(secs);
+}
+
+// amsHumidityText reports whatever the unit sends without inventing units or a
+// good/bad scale we can't verify: a raw RH% (newer AMS) and/or a 1-5 level.
+function amsHumidityText(unit) {
+  const parts = [];
+  const raw = unit.humidity_raw;
+  if (typeof raw === "number" || (typeof raw === "string" && raw !== "")) parts.push(`${raw}%`);
+  const level = unit.humidity;
+  if (typeof level === "number" || (typeof level === "string" && level !== "")) parts.push(`level ${level}`);
+  return parts.join(" · ");
+}
+
 function renderAms(ams) {
   const card = $("amsCard");
   const container = $("amsSlots");
   const units = ams && Array.isArray(ams.ams) ? ams.ams : [];
-  const slots = units.flatMap(u => (u && typeof u === "object" && Array.isArray(u.tray)) ? u.tray : []);
-  if (slots.length === 0) {
+  const valid = units.filter(u => u && typeof u === "object" && Array.isArray(u.tray));
+  if (!valid.some(u => u.tray.length > 0)) {
     card.style.display = "none";
     return;
   }
   card.style.display = "";
   container.innerHTML = "";
-  slots.forEach(slot => {
-    if (!slot || typeof slot !== "object") return;
-    const type = typeof slot.tray_type === "string" ? slot.tray_type : "?";
-    const colorHex = typeof slot.tray_color === "string" ? slot.tray_color.slice(0, 6) : "666666";
-    const row = document.createElement("div");
-    row.className = "ams-slot";
-    const swatch = document.createElement("span");
-    swatch.className = "ams-swatch";
-    swatch.style.background = "#" + colorHex;
-    row.appendChild(swatch);
-    row.appendChild(document.createTextNode(type));
-    container.appendChild(row);
+  valid.forEach(unit => {
+    const hum = amsHumidityText(unit);
+    if (hum) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("span");
+      label.textContent = "Humidity";
+      const val = document.createElement("span");
+      val.textContent = hum;
+      row.append(label, val);
+      container.appendChild(row);
+    }
+    unit.tray.forEach(slot => {
+      if (!slot || typeof slot !== "object") return;
+      const type = typeof slot.tray_type === "string" && slot.tray_type ? slot.tray_type : "empty";
+      const colorHex = typeof slot.tray_color === "string" ? slot.tray_color.slice(0, 6) : "666666";
+      const row = document.createElement("div");
+      row.className = "ams-slot";
+      const swatch = document.createElement("span");
+      swatch.className = "ams-swatch";
+      swatch.style.background = "#" + colorHex;
+      row.appendChild(swatch);
+      row.appendChild(document.createTextNode(type));
+      container.appendChild(row);
+    });
   });
 }
 
@@ -199,6 +239,7 @@ let demoTick = 0;
 // Demo targets are mutable so the sliders actually do something: in demo the
 // controls are enabled and their changes update these locally (see post()).
 let demoBedTarget = 60, demoNozzleTarget = 220;
+let demoBedSetTick = 0, demoNozzleSetTick = 0; // demoTick when each was last set
 function demoStatus() {
   demoTick++;
   const total = 240;
@@ -212,8 +253,11 @@ function demoStatus() {
     layerNum: layer, totalLayerNum: total,
     remainingMinutes: Math.max(1, Math.round((total - layer) * 0.6)),
     chamberTemp: 28.6, wifiSignal: "-46dBm",
+    // Each demo refresh ≈ 2s, so convert elapsed ticks to seconds remaining.
+    bedOffIn: demoBedTarget > 0 ? Math.max(0, 86400 - (demoTick - demoBedSetTick) * 2) : null,
+    nozzleOffIn: demoNozzleTarget > 0 ? Math.max(0, 900 - (demoTick - demoNozzleSetTick) * 2) : null,
     fans: { cooling: 15, aux: 0, chamber: 8 },
-    ams: { ams: [{ tray: [
+    ams: { ams: [{ humidity: "2", humidity_raw: "24", tray: [
       { tray_type: "PLA",  tray_color: "FF6B35FF" },
       { tray_type: "PETG", tray_color: "2E86ABFF" },
       { tray_type: "ABS",  tray_color: "111418FF" },
@@ -267,6 +311,8 @@ async function refresh() {
     $("drySlider").disabled = !s.actionsAllowed;
     if (!nozzleDragging) setNozzleSliderFromTarget(s.nozzleTarget);
     $("nozzleSlider").disabled = !s.actionsAllowed;
+    showTimer("dryTimerRow", "dryTimer", s.bedOffIn);
+    showTimer("nozzleTimerRow", "nozzleTimer", s.nozzleOffIn);
     document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
 
     // Pause button toggles to Resume while the print is paused.
@@ -295,7 +341,8 @@ async function post(action) {
     const m = action.match(/^set-(bed|nozzle)-temp\?temp=(\d+)/);
     if (m) {
       const t = Number(m[2]);
-      if (m[1] === "bed") demoBedTarget = t; else demoNozzleTarget = t;
+      if (m[1] === "bed") { demoBedTarget = t; demoBedSetTick = demoTick; }
+      else { demoNozzleTarget = t; demoNozzleSetTick = demoTick; }
       $("log").textContent = `demo: set ${m[1]} to ${t}°C`;
     } else {
       $("log").textContent = `demo: ${action} (no printer connected)`;
