@@ -36,22 +36,29 @@
   button.danger { background: #6e2222; }
   button.danger.armed { background: #b02a2a; }
   #log { min-height: 1.2em; color: #9aa0a6; font-size: 0.85rem; margin-top: 12px; }
-  #cam { width: 100%; border-radius: 12px; margin-top: 12px; display: none; }
+  #cam { width: 100%; border-radius: 12px; display: block; background: #0d0f12; min-height: 120px; }
   .ams-slot { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.95rem; }
   .ams-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid #333; }
+  .card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0a6; font-weight: 600; margin: 0 0 10px; }
+  input[type=range] { width: 100%; margin: 6px 0 2px; accent-color: #c98a2b; }
+  input[type=range]:disabled { opacity: 0.4; }
 </style>
 </head>
 <body>
 <h1>P1S bed control</h1>
-<div class="card">
-  <div class="row"><span>Connection</span><span id="conn">…</span></div>
-  <div class="row"><span>State</span><span id="state">…</span></div>
-  <div class="row"><span>Bed</span><span id="bed">…</span></div>
-  <div class="row"><span>Nozzle</span><span id="nozzle">…</span></div>
+<div class="card" id="jobCard" style="display:none">
+  <h2>Job status</h2>
   <div class="row" id="progressRow" style="display:none"><span>Progress</span><span id="progress"></span></div>
   <div class="row" id="jobRow" style="display:none"><span>Job</span><span id="jobName"></span></div>
   <div class="row" id="layerRow" style="display:none"><span>Layer</span><span id="layer"></span></div>
   <div class="row" id="timeRow" style="display:none"><span>Time remaining</span><span id="timeRemaining"></span></div>
+</div>
+<div class="card">
+  <h2>Machine status</h2>
+  <div class="row"><span>Connection</span><span id="conn">…</span></div>
+  <div class="row"><span>State</span><span id="state">…</span></div>
+  <div class="row"><span>Bed</span><span id="bed">…</span></div>
+  <div class="row"><span>Nozzle</span><span id="nozzle">…</span></div>
   <div class="row"><span>Chamber</span><span id="chamber">…</span></div>
   <div class="row"><span>Wifi</span><span id="wifi">…</span></div>
   <div class="row"><span>Fans (cool/aux/chamber)</span><span id="fans">…</span></div>
@@ -59,8 +66,12 @@
 <div class="actions">
   <button data-action="lower-bed">Lower bed</button>
   <button data-action="home">Home</button>
-  <button data-action="bed-heat" class="warn" id="heatBtn">Bed 100°C</button>
   <button data-action="nozzle-heat" class="warn" id="nozzleHeatBtn">Nozzle 200°C</button>
+</div>
+<div class="card" id="dryCard" style="margin-top:16px">
+  <h2>Bed drying</h2>
+  <div class="row"><span>Bed target</span><span id="dryLabel">Off</span></div>
+  <input type="range" id="drySlider" min="0" max="7" step="1" value="0">
 </div>
 <div id="log"></div>
 <div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
@@ -69,8 +80,7 @@
   <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
 </div>
 <div class="card" style="margin-top:16px">
-  <button id="camToggle" style="width:100%">Show camera</button>
-  <img id="cam" alt="printer camera">
+  <img id="cam" alt="printer camera" src="/camera/stream">
 </div>
 <div class="card" id="amsCard" style="display:none">
   <div id="amsSlots"></div>
@@ -105,6 +115,42 @@ function renderAms(ams) {
   });
 }
 
+// Bed-drying presets. Material hints are common-practice approximations,
+// not verified against Bambu docs — adjust to taste.
+const DRY_STOPS = [
+  { t: 0,   label: "Off" },
+  { t: 40,  label: "40°C" },
+  { t: 45,  label: "45°C · PLA" },
+  { t: 50,  label: "50°C" },
+  { t: 55,  label: "55°C" },
+  { t: 65,  label: "65°C · PETG" },
+  { t: 80,  label: "80°C · ABS" },
+  { t: 100, label: "100°C · desiccant" },
+];
+let dryDragging = false;
+
+// Mirror the printer's reported bed target onto the slider by snapping to
+// the nearest preset.
+function setDrySliderFromTarget(target) {
+  const t = typeof target === "number" ? target : 0;
+  let best = 0, bestDiff = Infinity;
+  DRY_STOPS.forEach((stop, i) => {
+    const d = Math.abs(stop.t - t);
+    if (d < bestDiff) { bestDiff = d; best = i; }
+  });
+  $("drySlider").value = best;
+  $("dryLabel").textContent = DRY_STOPS[best].label;
+}
+
+$("drySlider").addEventListener("input", () => {
+  dryDragging = true;
+  $("dryLabel").textContent = DRY_STOPS[Number($("drySlider").value)].label;
+});
+$("drySlider").addEventListener("change", () => {
+  dryDragging = false;
+  post(`set-bed-temp?temp=${DRY_STOPS[Number($("drySlider").value)].t}`);
+});
+
 async function refresh() {
   try {
     const r = await fetch("/api/status");
@@ -115,6 +161,7 @@ async function refresh() {
     $("bed").textContent = `${fmt(s.bedTemp)} / ${fmt(s.bedTarget)}°C`;
     $("nozzle").textContent = `${fmt(s.nozzleTemp)} / ${fmt(s.nozzleTarget)}°C`;
     const p = s.progress;
+    $("jobCard").style.display = (p != null || s.jobName) ? "" : "none";
     $("progressRow").style.display = p == null ? "none" : "";
     if (p != null) $("progress").textContent = `${p}%`;
     $("jobRow").style.display = s.jobName ? "" : "none";
@@ -137,13 +184,9 @@ async function refresh() {
       banner.style.display = "";
       banner.textContent = hms.map(e => `⚠️ ${e.message}`).join(" · ");
     }
-    // Heater button toggles between heating and turning the heater off,
-    // based on whether the bed currently has a target temperature.
-    const heating = (s.bedTarget ?? 0) > 0;
-    const heat = $("heatBtn");
-    heat.dataset.action = heating ? "heat-off" : "bed-heat";
-    heat.textContent = heating ? "Heater off" : "Bed 100°C";
-    heat.classList.toggle("warn", !heating);
+    // Drying slider mirrors the bed target unless the user is dragging it.
+    if (!dryDragging) setDrySliderFromTarget(s.bedTarget);
+    $("drySlider").disabled = !s.actionsAllowed;
     const nozzleHeating = (s.nozzleTarget ?? 0) > 0;
     const nozzleHeat = $("nozzleHeatBtn");
     nozzleHeat.dataset.action = nozzleHeating ? "nozzle-heat-off" : "nozzle-heat";
@@ -164,6 +207,7 @@ async function refresh() {
     $("conn").textContent = "bridge unreachable";
     $("conn").className = "bad";
     document.querySelectorAll("[data-action], [data-print-action]").forEach(b => b.disabled = true);
+    $("drySlider").disabled = true;
   }
 }
 refresh();
@@ -203,20 +247,6 @@ document.querySelectorAll("[data-print-action]").forEach(b =>
       stopTimer = setTimeout(disarmStop, 4000);
     }
   }));
-
-$("camToggle").addEventListener("click", () => {
-  const img = $("cam");
-  const showing = img.style.display === "block";
-  if (showing) {
-    img.src = "";
-    img.style.display = "none";
-    $("camToggle").textContent = "Show camera";
-  } else {
-    img.src = "/camera/stream";
-    img.style.display = "block";
-    $("camToggle").textContent = "Hide camera";
-  }
-});
 </script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strconv"
 
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
@@ -91,10 +92,23 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 var actions = map[string]func(Commander){
 	"lower-bed":       func(c Commander) { c.LowerBed() },
 	"home":            func(c Commander) { c.Home() },
-	"bed-heat":        func(c Commander) { c.SetBedTemp(p1s.BedDryTemp) },
-	"heat-off":        func(c Commander) { c.SetBedTemp(0) },
 	"nozzle-heat":     func(c Commander) { c.SetNozzleTemp(p1s.NozzleCleanTemp) },
 	"nozzle-heat-off": func(c Commander) { c.SetNozzleTemp(0) },
+}
+
+// BedMaxTemp bounds the drying-slider target. The P1S bed tops out near
+// 100°C; the small headroom just guards the top preset against rounding.
+const BedMaxTemp = 110
+
+func parseBedTemp(raw string) (int, error) {
+	t, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid temp %q", raw)
+	}
+	if t < 0 || t > BedMaxTemp {
+		return 0, fmt.Errorf("temp %d out of range 0-%d", t, BedMaxTemp)
+	}
+	return t, nil
 }
 
 var printActions = map[string]func(Commander){
@@ -107,6 +121,23 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	fields, connected := s.cache.Snapshot()
 	gs := p1s.GcodeState(fields)
+
+	// The drying slider posts an arbitrary bed target, so it is handled
+	// separately from the fixed actions map.
+	if name == "set-bed-temp" {
+		temp, err := parseBedTemp(r.URL.Query().Get("temp"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
+			http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
+			return
+		}
+		s.cmd.SetBedTemp(temp)
+		fmt.Fprintf(w, "sent: set-bed-temp %d", temp)
+		return
+	}
 
 	var guardErr error
 	act, ok := actions[name]

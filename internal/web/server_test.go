@@ -11,11 +11,17 @@ import (
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
-type fakeCommander struct{ calls []string }
+type fakeCommander struct {
+	calls    []string
+	bedTemps []int
+}
 
-func (f *fakeCommander) LowerBed()           { f.calls = append(f.calls, "lower-bed") }
-func (f *fakeCommander) Home()               { f.calls = append(f.calls, "home") }
-func (f *fakeCommander) SetBedTemp(t int)    { f.calls = append(f.calls, "bed-temp") }
+func (f *fakeCommander) LowerBed() { f.calls = append(f.calls, "lower-bed") }
+func (f *fakeCommander) Home()     { f.calls = append(f.calls, "home") }
+func (f *fakeCommander) SetBedTemp(t int) {
+	f.calls = append(f.calls, "bed-temp")
+	f.bedTemps = append(f.bedTemps, t)
+}
 func (f *fakeCommander) SetNozzleTemp(t int) { f.calls = append(f.calls, "nozzle-temp") }
 func (f *fakeCommander) PausePrint()         { f.calls = append(f.calls, "pause") }
 func (f *fakeCommander) ResumePrint()        { f.calls = append(f.calls, "resume") }
@@ -197,6 +203,47 @@ func TestNozzleHeatOffAllowedWhenIdle(t *testing.T) {
 	resp, _ := ts.Client().Post(ts.URL+"/api/actions/nozzle-heat-off", "", nil)
 	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "nozzle-temp" {
 		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestSetBedTempValid(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=55", "", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	if len(cmd.bedTemps) != 1 || cmd.bedTemps[0] != 55 {
+		t.Fatalf("bedTemps = %v, want [55]", cmd.bedTemps)
+	}
+}
+
+func TestSetBedTempOff(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=0", "", nil)
+	if resp.StatusCode != 200 || len(cmd.bedTemps) != 1 || cmd.bedTemps[0] != 0 {
+		t.Fatalf("status %d bedTemps %v", resp.StatusCode, cmd.bedTemps)
+	}
+}
+
+func TestSetBedTempInvalid(t *testing.T) {
+	for _, temp := range []string{"abc", "999", "-5", ""} {
+		ts, cmd := newTestServer(true, "IDLE")
+		resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp="+temp, "", nil)
+		if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+			t.Fatalf("temp %q: status %d calls %v, want 400 and no call", temp, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestSetBedTempBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=55", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
 	}
 }
 

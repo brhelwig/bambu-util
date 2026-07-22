@@ -16,7 +16,6 @@ const (
 	// drift without homing (a blind Z250 once hit the bottom limit).
 	BedDropGcode    = "G90\nG1 Z200 F900\n"
 	HomeGcode       = "G28\n"
-	BedDryTemp      = 100
 	NozzleCleanTemp = 200
 )
 
