@@ -1,11 +1,14 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
@@ -18,19 +21,47 @@ type Commander interface {
 	LowerBed()
 	Home()
 	SetBedTemp(int)
+	SetNozzleTemp(int)
+	Extrude()
+	UnloadFilament()
+	LoadFilament(slot, currTemp, tarTemp int)
+	SetChamberLight(bool)
 	PausePrint()
 	ResumePrint()
 	StopPrint()
 }
 
 type Server struct {
-	cache *p1s.StateCache
-	cmd   Commander
-	hub   *Hub
+	cache   *p1s.StateCache
+	cmd     Commander
+	hub     *Hub
+	autoOff *autoOff
 }
 
 func NewServer(cache *p1s.StateCache, cmd Commander, hub *Hub) *Server {
-	return &Server{cache: cache, cmd: cmd, hub: hub}
+	return &Server{cache: cache, cmd: cmd, hub: hub, autoOff: newAutoOff()}
+}
+
+// EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
+// Call once (from main); the HTTP handlers do not need it to serve countdowns.
+func (s *Server) EnforceAutoOff(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if bed, nozzle := s.autoOff.due(); bed || nozzle {
+				if bed {
+					s.cmd.SetBedTemp(0)
+				}
+				if nozzle {
+					s.cmd.SetNozzleTemp(0)
+				}
+			}
+		}
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -55,15 +86,32 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	fields, connected := s.cache.Snapshot()
 	gs := p1s.GcodeState(fields)
+	bedOff, nozzleOff := s.autoOff.remaining()
 	resp := map[string]any{
-		"connected":      connected,
-		"gcodeState":     gs,
-		"actionsAllowed": p1s.ActionAllowed(connected, gs) == nil,
-		"bedTemp":        fields["bed_temper"],
-		"bedTarget":      fields["bed_target_temper"],
-		"nozzleTemp":     fields["nozzle_temper"],
-		"nozzleTarget":   fields["nozzle_target_temper"],
-		"progress":       fields["mc_percent"],
+		"connected":        connected,
+		"gcodeState":       gs,
+		"actionsAllowed":   p1s.ActionAllowed(connected, gs) == nil,
+		"bedTemp":          fields["bed_temper"],
+		"bedTarget":        fields["bed_target_temper"],
+		"nozzleTemp":       fields["nozzle_temper"],
+		"nozzleTarget":     fields["nozzle_target_temper"],
+		"progress":         fields["mc_percent"],
+		"jobName":          p1s.JobName(fields),
+		"layerNum":         fields["layer_num"],
+		"totalLayerNum":    fields["total_layer_num"],
+		"remainingMinutes": fields["mc_remaining_time"],
+		"chamberTemp":      fields["chamber_temper"],
+		"chamberLight":     p1s.ChamberLight(fields),
+		"wifiSignal":       fields["wifi_signal"],
+		"fans": map[string]any{
+			"cooling": fields["cooling_fan_speed"],
+			"aux":     fields["big_fan1_speed"],
+			"chamber": fields["big_fan2_speed"],
+		},
+		"ams":         fields["ams"],
+		"hms":         p1s.HMSErrors(fields),
+		"bedOffIn":    nilIfNeg(bedOff),
+		"nozzleOffIn": nilIfNeg(nozzleOff),
 		"printActions": map[string]bool{
 			"pause":  p1s.PrintActionAllowed(connected, gs, "pause") == nil,
 			"resume": p1s.PrintActionAllowed(connected, gs, "resume") == nil,
@@ -77,8 +125,26 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 var actions = map[string]func(Commander){
 	"lower-bed": func(c Commander) { c.LowerBed() },
 	"home":      func(c Commander) { c.Home() },
-	"bed-heat":  func(c Commander) { c.SetBedTemp(p1s.BedDryTemp) },
-	"heat-off":  func(c Commander) { c.SetBedTemp(0) },
+	"unload":    func(c Commander) { c.UnloadFilament() },
+}
+
+// Bounds for the parameterized temperature sliders. The P1S bed tops out
+// near 100°C and the nozzle near 300°C; the small headroom just guards the
+// top preset against rounding.
+const (
+	BedMaxTemp    = 110
+	NozzleMaxTemp = 300
+)
+
+func parseTemp(raw string, max int) (int, error) {
+	t, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid temp %q", raw)
+	}
+	if t < 0 || t > max {
+		return 0, fmt.Errorf("temp %d out of range 0-%d", t, max)
+	}
+	return t, nil
 }
 
 var printActions = map[string]func(Commander){
@@ -92,22 +158,129 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	fields, connected := s.cache.Snapshot()
 	gs := p1s.GcodeState(fields)
 
-	var guardErr error
+	// The drying and nozzle sliders post an arbitrary target, handled
+	// separately from the fixed actions map.
+	switch name {
+	case "set-bed-temp":
+		s.setTemp(w, r, connected, gs, name, BedMaxTemp, s.cmd.SetBedTemp, s.autoOff.setBed)
+		return
+	case "set-nozzle-temp":
+		s.setTemp(w, r, connected, gs, name, NozzleMaxTemp, s.cmd.SetNozzleTemp, s.autoOff.setNozzle)
+		return
+	case "extrude":
+		s.extrude(w, connected, gs, fields)
+		return
+	case "load":
+		s.load(w, r, connected, gs, fields)
+		return
+	case "lamp-on", "lamp-off":
+		// The chamber light is safe to toggle in any state, so it skips the
+		// idle guard; it only needs the printer reachable.
+		if !connected {
+			http.Error(w, "blocked: not connected to printer", http.StatusConflict)
+			return
+		}
+		s.cmd.SetChamberLight(name == "lamp-on")
+		fmt.Fprintf(w, "sent: %s", name)
+		return
+	}
+
 	act, ok := actions[name]
 	if ok {
-		guardErr = p1s.ActionAllowed(connected, gs)
+		if !guardIdle(w, connected, gs) {
+			return
+		}
 	} else if act, ok = printActions[name]; ok {
-		guardErr = p1s.PrintActionAllowed(connected, gs, name)
+		if err := p1s.PrintActionAllowed(connected, gs, name); err != nil {
+			http.Error(w, "blocked: "+err.Error(), http.StatusConflict)
+			return
+		}
 	} else {
 		http.Error(w, "unknown action", http.StatusNotFound)
 		return
 	}
-	if guardErr != nil {
-		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
-		return
-	}
 	act(s.cmd)
 	fmt.Fprintf(w, "sent: %s", name)
+}
+
+// guardIdle writes a 409 and returns false when a bed/nozzle/AMS action isn't
+// currently allowed (disconnected or mid-print). Shared by every idle-only
+// command so the guard is wired in exactly one place.
+func guardIdle(w http.ResponseWriter, connected bool, gs string) bool {
+	if err := p1s.ActionAllowed(connected, gs); err != nil {
+		http.Error(w, "blocked: "+err.Error(), http.StatusConflict)
+		return false
+	}
+	return true
+}
+
+// setTemp handles the parameterized set-bed-temp / set-nozzle-temp endpoints:
+// parse and range-check the temp, apply the idle guard, then send it.
+func (s *Server) setTemp(w http.ResponseWriter, r *http.Request, connected bool, gs, name string, max int, set, record func(int)) {
+	temp, err := parseTemp(r.URL.Query().Get("temp"), max)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !guardIdle(w, connected, gs) {
+		return
+	}
+	set(temp)
+	record(temp) // arm/reset/cancel the safety auto-off
+	fmt.Fprintf(w, "sent: %s %d", name, temp)
+}
+
+// nilIfNeg maps the auto-off "inactive" sentinel (-1) to JSON null and passes
+// real second counts through unchanged.
+func nilIfNeg(secs int) any {
+	if secs < 0 {
+		return nil
+	}
+	return secs
+}
+
+// ExtrudeMinTemp guards manual extrusion: pushing filament through a cold
+// nozzle strips the filament and can jam the extruder. Bambu's firmware blocks
+// cold extrusion too; this matches it defensively.
+const ExtrudeMinTemp = 170
+
+func (s *Server) extrude(w http.ResponseWriter, connected bool, gs string, fields map[string]any) {
+	if !guardIdle(w, connected, gs) {
+		return
+	}
+	nt, ok := fields["nozzle_temper"].(float64)
+	if !ok || nt < ExtrudeMinTemp {
+		http.Error(w, fmt.Sprintf("blocked: nozzle below %d°C", ExtrudeMinTemp), http.StatusConflict)
+		return
+	}
+	s.cmd.Extrude()
+	fmt.Fprint(w, "sent: extrude")
+}
+
+// MaxAMSSlot is the highest global tray index Load accepts. Bambu supports up
+// to 4 AMS units of 4 trays, addressed as ams_id*4 + tray_id (0-15).
+const MaxAMSSlot = 15
+
+// load feeds an AMS tray (?slot=0-15, the global ams_id*4+tray_id index) into
+// the hotend. Per the chosen design it heats to whatever nozzle target the user
+// set via the slider, so it refuses when no nozzle target is set.
+func (s *Server) load(w http.ResponseWriter, r *http.Request, connected bool, gs string, fields map[string]any) {
+	slot, err := strconv.Atoi(r.URL.Query().Get("slot"))
+	if err != nil || slot < 0 || slot > MaxAMSSlot {
+		http.Error(w, "invalid slot", http.StatusBadRequest)
+		return
+	}
+	if !guardIdle(w, connected, gs) {
+		return
+	}
+	tar, _ := fields["nozzle_target_temper"].(float64)
+	if tar <= 0 {
+		http.Error(w, "blocked: set a nozzle temperature first", http.StatusConflict)
+		return
+	}
+	cur, _ := fields["nozzle_temper"].(float64)
+	s.cmd.LoadFilament(slot, int(cur), int(tar))
+	fmt.Fprintf(w, "sent: load slot %d", slot)
 }
 
 func (s *Server) camera(w http.ResponseWriter, r *http.Request) {

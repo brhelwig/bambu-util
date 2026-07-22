@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-22
+
+### Added
+
+- Camera stream auto-starts on page load; the show/hide toggle is gone.
+- Status is split into "Job status" and "Machine status" cards; the job card
+  shows a "No active print" placeholder when idle.
+- New status fields: job name, layer / total layers, time remaining, chamber
+  temperature, wifi signal, and per-fan speeds (cooling / aux / chamber).
+- AMS filament slots with colour swatch, material, and reported humidity.
+- HMS error banner, shown only when the printer reports errors, translated via
+  a small code lookup table.
+- Bed drying slider using Bambu's official P1S bed-drying presets (60–100 °C).
+- Nozzle cold-pull / cleaning slider (presets slightly above print temp) with
+  an Extrude button, blocked unless the nozzle is hot.
+- Filament unload, and per-slot load that heats to the nozzle temperature set
+  on the slider.
+- Chamber lamp toggle.
+- Heater safety auto-off (bed after 24 h, nozzle after 15 min) enforced
+  server-side, with a live countdown; adjusting a heater resets its timer.
+- Demo mode for previewing without a printer: `?demo` (idle, interactive) and
+  `?demo=print` (running job, controls locked).
+
+### Changed
+
+- Bed heating moved from a fixed 100 °C toggle to the drying slider, and the
+  nozzle from a fixed toggle to the cleaning slider.
+
 ## [0.3.0] - 2026-07-21
 
 ### Changed

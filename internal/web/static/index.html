@@ -36,56 +36,335 @@
   button.danger { background: #6e2222; }
   button.danger.armed { background: #b02a2a; }
   #log { min-height: 1.2em; color: #9aa0a6; font-size: 0.85rem; margin-top: 12px; }
-  #cam { width: 100%; border-radius: 12px; margin-top: 12px; display: none; }
+  #cam { width: 100%; border-radius: 12px; display: block; background: #0d0f12; min-height: 120px; }
+  .ams-slot { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.95rem; }
+  .ams-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid #333; }
+  .card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0a6; font-weight: 600; margin: 0 0 10px; }
+  input[type=range] { width: 100%; margin: 6px 0 2px; accent-color: #c98a2b; }
+  input[type=range]:disabled { opacity: 0.4; }
 </style>
 </head>
 <body>
-<h1>P1S bed control</h1>
+<h1 id="title">P1S bed control</h1>
+<div class="card" id="jobCard">
+  <h2>Job status</h2>
+  <div class="row" id="jobEmpty" style="color:#9aa0a6">No active print</div>
+  <div class="row" id="progressRow" style="display:none"><span>Progress</span><span id="progress"></span></div>
+  <div class="row" id="jobRow" style="display:none"><span>Job</span><span id="jobName"></span></div>
+  <div class="row" id="layerRow" style="display:none"><span>Layer</span><span id="layer"></span></div>
+  <div class="row" id="timeRow" style="display:none"><span>Time remaining</span><span id="timeRemaining"></span></div>
+</div>
 <div class="card">
+  <h2>Machine status</h2>
   <div class="row"><span>Connection</span><span id="conn">…</span></div>
   <div class="row"><span>State</span><span id="state">…</span></div>
   <div class="row"><span>Bed</span><span id="bed">…</span></div>
   <div class="row"><span>Nozzle</span><span id="nozzle">…</span></div>
-  <div class="row" id="progressRow" style="display:none"><span>Progress</span><span id="progress"></span></div>
+  <div class="row"><span>Chamber</span><span id="chamber">…</span></div>
+  <div class="row"><span>Wifi</span><span id="wifi">…</span></div>
+  <div class="row"><span>Fans (cool/aux/chamber)</span><span id="fans">…</span></div>
+</div>
+<div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
+<div class="card">
+  <img id="cam" alt="printer camera" src="/camera/stream">
+  <button id="lampBtn" style="width:100%; margin-top:12px" disabled>Lamp</button>
 </div>
 <div class="actions">
   <button data-action="lower-bed">Lower bed</button>
   <button data-action="home">Home</button>
-  <button data-action="bed-heat" class="warn" id="heatBtn">Bed 100°C</button>
 </div>
-<div id="log"></div>
-<div class="actions" id="printControls" style="margin-top:16px">
+<div class="card" id="dryCard" style="margin-top:16px">
+  <h2>Bed drying</h2>
+  <div class="row"><span>Bed target</span><span id="dryLabel">Off</span></div>
+  <input type="range" id="drySlider" min="0" max="6" step="1" value="0">
+  <div class="row" id="dryTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="dryTimer"></span></div>
+</div>
+<div class="card" id="nozzleCard">
+  <h2>Nozzle (cold pull / clean)</h2>
+  <div class="row"><span>Nozzle target</span><span id="nozzleLabel">Off</span></div>
+  <input type="range" id="nozzleSlider" min="0" max="4" step="1" value="0">
+  <div class="row" id="nozzleTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="nozzleTimer"></span></div>
+  <button data-action="extrude" id="extrudeBtn" style="width:100%; margin-top:10px">Extrude</button>
+  <button data-action="unload" id="unloadBtn" style="width:100%; margin-top:10px">Unload filament</button>
+</div>
+<div class="actions" id="printControls" style="margin-bottom:16px">
   <button data-print-action="pause" id="pauseBtn" disabled>Pause print</button>
   <button data-print-action="stop" class="danger" id="stopBtn" disabled>Stop print</button>
 </div>
-<div class="card" style="margin-top:16px">
-  <button id="camToggle" style="width:100%">Show camera</button>
-  <img id="cam" alt="printer camera">
+<div class="card" id="amsCard" style="display:none">
+  <h2>Filament (AMS)</h2>
+  <div id="amsSlots"></div>
 </div>
+<div id="log"></div>
 <script>
 const $ = id => document.getElementById(id);
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
 
+// Declared up here (not by the stop-button wiring below) because refresh() can
+// call disarmStop() on its very first, synchronous run — before that wiring
+// executes — which would otherwise hit the temporal dead zone.
+let stopTimer = null;
+
+// Countdown text: "23h 59m" while over an hour, "14:32" (m:ss) under it.
+function fmtCountdown(secs) {
+  if (secs >= 3600) {
+    return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  }
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+}
+
+function showTimer(rowId, valId, secs) {
+  const active = typeof secs === "number";
+  $(rowId).style.display = active ? "" : "none";
+  if (active) $(valId).textContent = fmtCountdown(secs);
+}
+
+// amsHumidityText reports whatever the unit sends without inventing units or a
+// good/bad scale we can't verify: a raw RH% (newer AMS) and/or a 1-5 level.
+function amsHumidityText(unit) {
+  const parts = [];
+  const raw = unit.humidity_raw;
+  if (typeof raw === "number" || (typeof raw === "string" && raw !== "")) parts.push(`${raw}%`);
+  const level = unit.humidity;
+  if (typeof level === "number" || (typeof level === "string" && level !== "")) parts.push(`level ${level}`);
+  return parts.join(" · ");
+}
+
+// amsTarget is the global tray index for ams_change_filament, computed from the
+// reported ids (ams_id*4 + tray_id) rather than DOM position, so a sparse or
+// reordered report still targets the right slot. null if ids aren't usable.
+function amsTarget(unit, slot) {
+  const u = parseInt(unit && unit.id, 10);
+  const t = parseInt(slot && slot.id, 10);
+  if (!Number.isInteger(u) || !Number.isInteger(t) || t < 0 || t > 3) return null;
+  return u * 4 + t;
+}
+
+function renderAms(ams) {
+  const card = $("amsCard");
+  const container = $("amsSlots");
+  const units = ams && Array.isArray(ams.ams) ? ams.ams : [];
+  const valid = units.filter(u => u && typeof u === "object" && Array.isArray(u.tray));
+  if (!valid.some(u => u.tray.length > 0)) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+  container.innerHTML = "";
+  valid.forEach(unit => {
+    const hum = amsHumidityText(unit);
+    if (hum) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("span");
+      label.textContent = "Humidity";
+      const val = document.createElement("span");
+      val.textContent = hum;
+      row.append(label, val);
+      container.appendChild(row);
+    }
+    unit.tray.forEach(slot => {
+      if (!slot || typeof slot !== "object") return;
+      const hasFilament = typeof slot.tray_type === "string" && slot.tray_type !== "";
+      const colorHex = typeof slot.tray_color === "string" ? slot.tray_color.slice(0, 6) : "666666";
+      const row = document.createElement("div");
+      row.className = "ams-slot";
+      const swatch = document.createElement("span");
+      swatch.className = "ams-swatch";
+      swatch.style.background = "#" + colorHex;
+      row.appendChild(swatch);
+      row.appendChild(document.createTextNode(hasFilament ? slot.tray_type : "empty"));
+      const target = hasFilament ? amsTarget(unit, slot) : null;
+      if (target != null) {
+        // Load feeds this tray at the nozzle temp set on the slider (server
+        // refuses if the nozzle is off).
+        const load = document.createElement("button");
+        load.textContent = "Load";
+        load.dataset.action = `load?slot=${target}`;
+        load.style.cssText = "margin-left:auto; padding:6px 14px; font-size:0.8rem; border-radius:8px";
+        load.addEventListener("click", () => post(load.dataset.action));
+        row.appendChild(load);
+      }
+      container.appendChild(row);
+    });
+  });
+}
+
+// Bed-drying presets from Bambu's official P1S bed-drying table
+// (wiki.bambulab.com/en/filament-acc/filament/dry-filament): PLA 60-70,
+// PLA-CF/silk 65-75, PETG 75-85, TPU 80-90, support-ABS 85-95,
+// ABS/ASA/PC/PVA/PA/PET-CF 90-100. PPA-CF/PPS-CF want 110-120, which the P1S
+// bed can't reach — those need a dedicated dryer.
+const DRY_STOPS = [
+  { t: 0,   label: "Off" },
+  { t: 60,  label: "60°C · PLA" },
+  { t: 70,  label: "70°C · PLA-CF/silk" },
+  { t: 80,  label: "80°C · PETG" },
+  { t: 85,  label: "85°C · TPU" },
+  { t: 90,  label: "90°C · ABS/ASA/PC" },
+  { t: 100, label: "100°C · PA/PVA/desiccant" },
+];
+let dryDragging = false;
+
+// Mirror the printer's reported bed target onto the slider by snapping to
+// the nearest preset.
+function setDrySliderFromTarget(target) {
+  const t = typeof target === "number" ? target : 0;
+  let best = 0, bestDiff = Infinity;
+  DRY_STOPS.forEach((stop, i) => {
+    const d = Math.abs(stop.t - t);
+    if (d < bestDiff) { bestDiff = d; best = i; }
+  });
+  $("drySlider").value = best;
+  $("dryLabel").textContent = DRY_STOPS[best].label;
+}
+
+$("drySlider").addEventListener("input", () => {
+  dryDragging = true;
+  $("dryLabel").textContent = DRY_STOPS[Number($("drySlider").value)].label;
+});
+$("drySlider").addEventListener("change", () => {
+  dryDragging = false;
+  post(`set-bed-temp?temp=${DRY_STOPS[Number($("drySlider").value)].t}`);
+});
+
+// Nozzle presets for cleaning / cold pulls. Bambu's cold-pull guide
+// (wiki.bambulab.com/en/p1/manual/p1s-cold-pull) sets the nozzle slightly
+// above the material's print temp before extruding, so these are print temp
+// + ~5°C: PLA 225, PETG 255, ABS/ASA/PC 275, PA/CF 295.
+const NOZZLE_STOPS = [
+  { t: 0,   label: "Off" },
+  { t: 225, label: "225°C · PLA" },
+  { t: 255, label: "255°C · PETG" },
+  { t: 275, label: "275°C · ABS/PC" },
+  { t: 295, label: "295°C · PA/CF" },
+];
+let nozzleDragging = false;
+
+function setNozzleSliderFromTarget(target) {
+  const t = typeof target === "number" ? target : 0;
+  let best = 0, bestDiff = Infinity;
+  NOZZLE_STOPS.forEach((stop, i) => {
+    const d = Math.abs(stop.t - t);
+    if (d < bestDiff) { bestDiff = d; best = i; }
+  });
+  $("nozzleSlider").value = best;
+  $("nozzleLabel").textContent = NOZZLE_STOPS[best].label;
+}
+
+$("nozzleSlider").addEventListener("input", () => {
+  nozzleDragging = true;
+  $("nozzleLabel").textContent = NOZZLE_STOPS[Number($("nozzleSlider").value)].label;
+});
+$("nozzleSlider").addEventListener("change", () => {
+  nozzleDragging = false;
+  post(`set-nozzle-temp?temp=${NOZZLE_STOPS[Number($("nozzleSlider").value)].t}`);
+});
+
+// Demo mode: preview the UI live without a printer. Default (?demo) is an idle
+// printer — the state where drying/cleaning/load actually apply — so every
+// control is genuinely usable. ?demo=print shows a running job instead, with
+// controls correctly locked exactly as real hardware locks them mid-print.
+const demoParams = new URLSearchParams(location.search);
+const DEMO = demoParams.has("demo");
+const DEMO_PRINT = demoParams.get("demo") === "print";
+let demoTick = 0;
+// Demo targets are mutable so the sliders actually do something: in the idle
+// demo the controls are enabled and their changes update these locally.
+let demoBedTarget = 60, demoNozzleTarget = 225;
+let demoBedSetTick = 0, demoNozzleSetTick = 0; // demoTick when each was last set
+let demoLampOn = true;
+function demoStatus() {
+  demoTick++;
+  const base = {
+    connected: true,
+    bedTemp: (demoBedTarget || 22) - 0.6 + Math.sin(demoTick) * 0.3, bedTarget: demoBedTarget,
+    nozzleTemp: (demoNozzleTarget || 24) - 1 + Math.sin(demoTick) * 1.2, nozzleTarget: demoNozzleTarget,
+    chamberTemp: 28.6, wifiSignal: "-46dBm", chamberLight: demoLampOn,
+    // Each demo refresh ≈ 2s, so convert elapsed ticks to seconds remaining.
+    bedOffIn: demoBedTarget > 0 ? Math.max(0, 86400 - (demoTick - demoBedSetTick) * 2) : null,
+    nozzleOffIn: demoNozzleTarget > 0 ? Math.max(0, 900 - (demoTick - demoNozzleSetTick) * 2) : null,
+    fans: { cooling: 15, aux: 0, chamber: 8 },
+    ams: { ams: [{ id: "0", humidity: "2", humidity_raw: "24", tray: [
+      { id: "0", tray_type: "PLA",  tray_color: "FF6B35FF" },
+      { id: "1", tray_type: "PETG", tray_color: "2E86ABFF" },
+      { id: "2", tray_type: "ABS",  tray_color: "111418FF" },
+      { id: "3", tray_type: "PLA",  tray_color: "F2F2F2FF" },
+    ] }] },
+    hms: [],
+  };
+  if (DEMO_PRINT) {
+    const total = 240, layer = Math.min(total, 20 + demoTick * 2);
+    return { ...base, gcodeState: "RUNNING", actionsAllowed: false,
+      progress: Math.min(99, Math.round((layer / total) * 100)),
+      jobName: "demo_benchy.3mf", layerNum: layer, totalLayerNum: total,
+      remainingMinutes: Math.max(1, Math.round((total - layer) * 0.6)),
+      printActions: { pause: true, resume: false, stop: true } };
+  }
+  return { ...base, gcodeState: "IDLE", actionsAllowed: true,
+    progress: null, jobName: null,
+    printActions: { pause: false, resume: false, stop: false } };
+}
+if (DEMO) $("title").textContent += DEMO_PRINT ? " · demo (printing)" : " · demo (idle)";
+
 async function refresh() {
   try {
-    const r = await fetch("/api/status");
-    const s = await r.json();
+    let s;
+    if (DEMO) {
+      s = demoStatus();
+    } else {
+      const r = await fetch("/api/status");
+      s = await r.json();
+    }
     $("conn").textContent = s.connected ? "connected" : "disconnected";
     $("conn").className = s.connected ? "ok" : "bad";
     $("state").textContent = s.gcodeState;
     $("bed").textContent = `${fmt(s.bedTemp)} / ${fmt(s.bedTarget)}°C`;
     $("nozzle").textContent = `${fmt(s.nozzleTemp)} / ${fmt(s.nozzleTarget)}°C`;
     const p = s.progress;
+    $("jobEmpty").style.display = (p != null || s.jobName) ? "none" : "";
     $("progressRow").style.display = p == null ? "none" : "";
     if (p != null) $("progress").textContent = `${p}%`;
-    // Heater button toggles between heating and turning the heater off,
-    // based on whether the bed currently has a target temperature.
-    const heating = (s.bedTarget ?? 0) > 0;
-    const heat = $("heatBtn");
-    heat.dataset.action = heating ? "heat-off" : "bed-heat";
-    heat.textContent = heating ? "Heater off" : "Bed 100°C";
-    heat.classList.toggle("warn", !heating);
+    $("jobRow").style.display = s.jobName ? "" : "none";
+    if (s.jobName) $("jobName").textContent = s.jobName;
+    const hasLayers = s.totalLayerNum != null && s.totalLayerNum > 0;
+    $("layerRow").style.display = hasLayers ? "" : "none";
+    if (hasLayers) $("layer").textContent = `${s.layerNum ?? "?"} / ${s.totalLayerNum}`;
+    $("timeRow").style.display = s.remainingMinutes != null ? "" : "none";
+    if (s.remainingMinutes != null) $("timeRemaining").textContent = `${s.remainingMinutes} min`;
+    $("chamber").textContent = fmt(s.chamberTemp) + "°C";
+    $("wifi").textContent = s.wifiSignal ?? "?";
+    const fans = s.fans || {};
+    $("fans").textContent = `${fans.cooling ?? "?"} / ${fans.aux ?? "?"} / ${fans.chamber ?? "?"}`;
+    renderAms(s.ams);
+    const hms = Array.isArray(s.hms) ? s.hms : [];
+    const banner = $("hmsBanner");
+    if (hms.length === 0) {
+      banner.style.display = "none";
+    } else {
+      banner.style.display = "";
+      banner.textContent = hms.map(e => `⚠️ ${e.message}`).join(" · ");
+    }
+    // Sliders mirror the printer's targets unless the user is dragging them.
+    if (!dryDragging) setDrySliderFromTarget(s.bedTarget);
+    $("drySlider").disabled = !s.actionsAllowed;
+    if (!nozzleDragging) setNozzleSliderFromTarget(s.nozzleTarget);
+    $("nozzleSlider").disabled = !s.actionsAllowed;
+    showTimer("dryTimerRow", "dryTimer", s.bedOffIn);
+    showTimer("nozzleTimerRow", "nozzleTimer", s.nozzleOffIn);
     document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
+    // Extrude also needs a hot nozzle (cold extrusion strips filament); the
+    // printer enforces this too, but disable the button to make it obvious.
+    $("extrudeBtn").disabled = !s.actionsAllowed || (s.nozzleTemp ?? 0) < 170;
+    // Lamp toggles in any state, so it's gated on connection only. chamberLight
+    // is null until the printer reports it — stay neutral and disabled until
+    // then rather than assert a state we haven't seen.
+    const lampKnown = typeof s.chamberLight === "boolean";
+    const lampOn = s.chamberLight === true;
+    const lamp = $("lampBtn");
+    lamp.dataset.lamp = lampOn ? "lamp-off" : "lamp-on";
+    lamp.textContent = lampKnown ? (lampOn ? "Lamp off" : "Lamp on") : "Lamp";
+    lamp.disabled = !s.connected || !lampKnown;
 
     // Pause button toggles to Resume while the print is paused.
     const pa = s.printActions || {};
@@ -100,12 +379,41 @@ async function refresh() {
     $("conn").textContent = "bridge unreachable";
     $("conn").className = "bad";
     document.querySelectorAll("[data-action], [data-print-action]").forEach(b => b.disabled = true);
+    $("drySlider").disabled = true;
+    $("nozzleSlider").disabled = true;
+    $("lampBtn").disabled = true;
+    // Don't leave a frozen countdown implying a timer we can no longer confirm.
+    $("dryTimerRow").style.display = "none";
+    $("nozzleTimerRow").style.display = "none";
   }
 }
 refresh();
 setInterval(refresh, 2000);
 
 async function post(action) {
+  // In demo there is no printer: apply slider changes locally, no-op the rest.
+  if (DEMO) {
+    if (action === "lamp-on" || action === "lamp-off") {
+      demoLampOn = action === "lamp-on";
+      $("log").textContent = `demo: lamp ${demoLampOn ? "on" : "off"}`;
+      return;
+    }
+    const lm = action.match(/^load\?slot=(\d+)/);
+    if (lm) {
+      $("log").textContent = `demo: load slot ${lm[1]}`;
+      return;
+    }
+    const m = action.match(/^set-(bed|nozzle)-temp\?temp=(\d+)/);
+    if (m) {
+      const t = Number(m[2]);
+      if (m[1] === "bed") { demoBedTarget = t; demoBedSetTick = demoTick; }
+      else { demoNozzleTarget = t; demoNozzleSetTick = demoTick; }
+      $("log").textContent = `demo: set ${m[1]} to ${t}°C`;
+    } else {
+      $("log").textContent = `demo: ${action} (no printer connected)`;
+    }
+    return;
+  }
   try {
     const r = await fetch(`/api/actions/${action}`, { method: "POST" });
     $("log").textContent = await r.text();
@@ -117,9 +425,10 @@ async function post(action) {
 document.querySelectorAll("[data-action]").forEach(b =>
   b.addEventListener("click", () => post(b.dataset.action)));
 
+$("lampBtn").addEventListener("click", () => post($("lampBtn").dataset.lamp));
+
 // Stop kills the print, so it takes two taps: the first arms the button for
 // 4 seconds, the second actually sends.
-let stopTimer = null;
 function disarmStop() {
   const b = $("stopBtn");
   b.classList.remove("armed");
@@ -139,20 +448,6 @@ document.querySelectorAll("[data-print-action]").forEach(b =>
       stopTimer = setTimeout(disarmStop, 4000);
     }
   }));
-
-$("camToggle").addEventListener("click", () => {
-  const img = $("cam");
-  const showing = img.style.display === "block";
-  if (showing) {
-    img.src = "";
-    img.style.display = "none";
-    $("camToggle").textContent = "Show camera";
-  } else {
-    img.src = "/camera/stream";
-    img.style.display = "block";
-    $("camToggle").textContent = "Hide camera";
-  }
-});
 </script>
 </body>
 </html>

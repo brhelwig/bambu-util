@@ -16,7 +16,6 @@ const (
 	// drift without homing (a blind Z250 once hit the bottom limit).
 	BedDropGcode = "G90\nG1 Z200 F900\n"
 	HomeGcode    = "G28\n"
-	BedDryTemp   = 100
 )
 
 // Client is the MQTT link to the printer: cached merged state plus
@@ -81,9 +80,59 @@ func (c *Client) SendGcode(gcode string) {
 	c.publish(string(b))
 }
 
-func (c *Client) LowerBed()        { c.SendGcode(BedDropGcode) }
-func (c *Client) Home()            { c.SendGcode(HomeGcode) }
-func (c *Client) SetBedTemp(t int) { c.SendGcode(fmt.Sprintf("M140 S%d\n", t)) }
+func (c *Client) LowerBed()           { c.SendGcode(BedDropGcode) }
+func (c *Client) Home()               { c.SendGcode(HomeGcode) }
+func (c *Client) SetBedTemp(t int)    { c.SendGcode(fmt.Sprintf("M140 S%d\n", t)) }
+func (c *Client) SetNozzleTemp(t int) { c.SendGcode(fmt.Sprintf("M104 S%d\n", t)) }
+
+// Extrude pushes a short length of filament for manual purging / cold pulls.
+// M83 = relative extrusion so the move is a fixed 20mm regardless of position;
+// F150 (2.5 mm/s) is slow enough not to skip. Requires a hot nozzle — the
+// caller guards on temperature.
+func (c *Client) Extrude() { c.SendGcode("M83\nG1 E20 F150\n") }
+
+// UnloadFilament ejects the currently loaded filament back to the AMS (or out
+// the top for an external spool). Payload verified against Doridian/
+// OpenBambuAPI mqtt.md; unverified against this specific printer.
+func (c *Client) UnloadFilament() { c.sendPrintCommand("unload_filament") }
+
+// LoadFilament feeds the given AMS tray (0-3) into the hotend, heating to
+// tarTemp. currTemp is the current nozzle temperature. "ams_change_filament"
+// payload verified against OpenBambuAPI mqtt.md; unverified against this
+// printer.
+func (c *Client) LoadFilament(slot, currTemp, tarTemp int) {
+	req := map[string]any{"print": map[string]any{
+		"sequence_id": strconv.FormatInt(c.seq.Add(1), 10),
+		"command":     "ams_change_filament",
+		"target":      slot,
+		"curr_temp":   currTemp,
+		"tar_temp":    tarTemp,
+	}}
+	b, _ := json.Marshal(req)
+	c.publish(string(b))
+}
+
+// SetChamberLight turns the chamber LED on or off. "ledctrl" is a system-level
+// command (not print); the timing fields only matter for flashing mode but are
+// included to match the documented payload. Verified against OpenBambuAPI.
+func (c *Client) SetChamberLight(on bool) {
+	mode := "off"
+	if on {
+		mode = "on"
+	}
+	req := map[string]any{"system": map[string]any{
+		"sequence_id":   strconv.FormatInt(c.seq.Add(1), 10),
+		"command":       "ledctrl",
+		"led_node":      "chamber_light",
+		"led_mode":      mode,
+		"led_on_time":   500,
+		"led_off_time":  500,
+		"loop_times":    1,
+		"interval_time": 1000,
+	}}
+	b, _ := json.Marshal(req)
+	c.publish(string(b))
+}
 
 // printCommandPayload builds a print-flow command (pause/resume/stop) —
 // payload shape verified against ha-bambulab's pybambu commands.

@@ -11,14 +11,39 @@ import (
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
-type fakeCommander struct{ calls []string }
+type fakeCommander struct {
+	calls       []string
+	bedTemps    []int
+	nozzleTemps []int
+	loads       [][3]int // {slot, currTemp, tarTemp}
+}
 
-func (f *fakeCommander) LowerBed()        { f.calls = append(f.calls, "lower-bed") }
-func (f *fakeCommander) Home()            { f.calls = append(f.calls, "home") }
-func (f *fakeCommander) SetBedTemp(t int) { f.calls = append(f.calls, "bed-temp") }
-func (f *fakeCommander) PausePrint()      { f.calls = append(f.calls, "pause") }
-func (f *fakeCommander) ResumePrint()     { f.calls = append(f.calls, "resume") }
-func (f *fakeCommander) StopPrint()       { f.calls = append(f.calls, "stop") }
+func (f *fakeCommander) LowerBed() { f.calls = append(f.calls, "lower-bed") }
+func (f *fakeCommander) Home()     { f.calls = append(f.calls, "home") }
+func (f *fakeCommander) SetBedTemp(t int) {
+	f.calls = append(f.calls, "bed-temp")
+	f.bedTemps = append(f.bedTemps, t)
+}
+func (f *fakeCommander) SetNozzleTemp(t int) {
+	f.calls = append(f.calls, "nozzle-temp")
+	f.nozzleTemps = append(f.nozzleTemps, t)
+}
+func (f *fakeCommander) Extrude()        { f.calls = append(f.calls, "extrude") }
+func (f *fakeCommander) UnloadFilament() { f.calls = append(f.calls, "unload") }
+func (f *fakeCommander) LoadFilament(slot, currTemp, tarTemp int) {
+	f.calls = append(f.calls, "load")
+	f.loads = append(f.loads, [3]int{slot, currTemp, tarTemp})
+}
+func (f *fakeCommander) SetChamberLight(on bool) {
+	if on {
+		f.calls = append(f.calls, "lamp-on")
+	} else {
+		f.calls = append(f.calls, "lamp-off")
+	}
+}
+func (f *fakeCommander) PausePrint()  { f.calls = append(f.calls, "pause") }
+func (f *fakeCommander) ResumePrint() { f.calls = append(f.calls, "resume") }
+func (f *fakeCommander) StopPrint()   { f.calls = append(f.calls, "stop") }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
 	cache := p1s.NewStateCache()
@@ -178,5 +203,271 @@ func TestStatusIncludesPrintActions(t *testing.T) {
 		if s.PrintActions[k] != v {
 			t.Fatalf("printActions[%s] = %v, want %v (all: %v)", k, s.PrintActions[k], v, s.PrintActions)
 		}
+	}
+}
+
+func TestSetNozzleTempValid(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-nozzle-temp?temp=200", "", nil)
+	if resp.StatusCode != 200 || len(cmd.nozzleTemps) != 1 || cmd.nozzleTemps[0] != 200 {
+		t.Fatalf("status %d nozzleTemps %v", resp.StatusCode, cmd.nozzleTemps)
+	}
+}
+
+func TestSetNozzleTempInvalid(t *testing.T) {
+	for _, temp := range []string{"abc", "999", "-5", ""} {
+		ts, cmd := newTestServer(true, "IDLE")
+		resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-nozzle-temp?temp="+temp, "", nil)
+		if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+			t.Fatalf("temp %q: status %d calls %v", temp, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestSetNozzleTempBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-nozzle-temp?temp=200", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestSetBedTempValid(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=55", "", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	if len(cmd.bedTemps) != 1 || cmd.bedTemps[0] != 55 {
+		t.Fatalf("bedTemps = %v, want [55]", cmd.bedTemps)
+	}
+}
+
+func TestSetBedTempOff(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=0", "", nil)
+	if resp.StatusCode != 200 || len(cmd.bedTemps) != 1 || cmd.bedTemps[0] != 0 {
+		t.Fatalf("status %d bedTemps %v", resp.StatusCode, cmd.bedTemps)
+	}
+}
+
+func TestSetBedTempInvalid(t *testing.T) {
+	for _, temp := range []string{"abc", "999", "-5", ""} {
+		ts, cmd := newTestServer(true, "IDLE")
+		resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp="+temp, "", nil)
+		if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+			t.Fatalf("temp %q: status %d calls %v, want 400 and no call", temp, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestSetBedTempBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=55", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeCommander) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(fields)
+	cmd := &fakeCommander{}
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
+	return httptest.NewServer(NewServer(cache, cmd, hub).Handler()), cmd
+}
+
+func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_temper": float64(220)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/extrude", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "extrude" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestExtrudeBlockedWhenCold(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_temper": float64(30)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/extrude", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestExtrudeBlockedWhenRunning(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "RUNNING", "nozzle_temper": float64(220)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/extrude", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestUnloadAllowedWhenIdle(t *testing.T) {
+	ts, cmd := newTestServer(true, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/unload", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "unload" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestUnloadBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/unload", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestLampTogglesInAnyState(t *testing.T) {
+	// The lamp is not idle-guarded: it works even mid-print.
+	ts, cmd := newTestServer(true, "RUNNING")
+	defer ts.Close()
+	if resp, _ := ts.Client().Post(ts.URL+"/api/actions/lamp-on", "", nil); resp.StatusCode != 200 {
+		t.Fatalf("lamp-on status %d, want 200", resp.StatusCode)
+	}
+	if resp, _ := ts.Client().Post(ts.URL+"/api/actions/lamp-off", "", nil); resp.StatusCode != 200 {
+		t.Fatalf("lamp-off status %d, want 200", resp.StatusCode)
+	}
+	if len(cmd.calls) != 2 || cmd.calls[0] != "lamp-on" || cmd.calls[1] != "lamp-off" {
+		t.Fatalf("calls %v", cmd.calls)
+	}
+}
+
+func TestLampBlockedWhenDisconnected(t *testing.T) {
+	ts, cmd := newTestServer(false, "IDLE")
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/lamp-on", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestLoadUsesNozzleTargetTemp(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{
+		"gcode_state":          "IDLE",
+		"nozzle_temper":        float64(212),
+		"nozzle_target_temper": float64(225),
+	})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot=2", "", nil)
+	if resp.StatusCode != 200 || len(cmd.loads) != 1 || cmd.loads[0] != [3]int{2, 212, 225} {
+		t.Fatalf("status %d loads %v", resp.StatusCode, cmd.loads)
+	}
+}
+
+func TestLoadBlockedWithoutNozzleTemp(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_target_temper": float64(0)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot=0", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestLoadInvalidSlot(t *testing.T) {
+	for _, slot := range []string{"16", "-1", "x", ""} {
+		ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_target_temper": float64(225)})
+		resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot="+slot, "", nil)
+		if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+			t.Fatalf("slot %q: status %d calls %v", slot, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestLoadBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "RUNNING", "nozzle_target_temper": float64(225)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/load?slot=0", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestStatusIncludesJobFields(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{
+		"gcode_state":       "RUNNING",
+		"subtask_name":      "benchy.gcode",
+		"layer_num":         float64(42),
+		"total_layer_num":   float64(120),
+		"mc_remaining_time": float64(37),
+		"chamber_temper":    float64(28.4),
+		"wifi_signal":       "-45dBm",
+		"cooling_fan_speed": float64(15),
+		"big_fan1_speed":    float64(0),
+		"big_fan2_speed":    float64(8),
+		"ams":               map[string]any{"ams": []any{}},
+	})
+	cmd := &fakeCommander{}
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
+	ts := httptest.NewServer(NewServer(cache, cmd, hub).Handler())
+	defer ts.Close()
+
+	resp, _ := ts.Client().Get(ts.URL + "/api/status")
+	var s map[string]any
+	json.NewDecoder(resp.Body).Decode(&s)
+
+	if s["jobName"] != "benchy.gcode" {
+		t.Errorf("jobName = %v", s["jobName"])
+	}
+	if s["layerNum"] != float64(42) || s["totalLayerNum"] != float64(120) {
+		t.Errorf("layerNum/totalLayerNum = %v/%v", s["layerNum"], s["totalLayerNum"])
+	}
+	if s["remainingMinutes"] != float64(37) {
+		t.Errorf("remainingMinutes = %v", s["remainingMinutes"])
+	}
+	if s["chamberTemp"] != 28.4 {
+		t.Errorf("chamberTemp = %v", s["chamberTemp"])
+	}
+	if s["wifiSignal"] != "-45dBm" {
+		t.Errorf("wifiSignal = %v", s["wifiSignal"])
+	}
+	fans, ok := s["fans"].(map[string]any)
+	if !ok || fans["cooling"] != float64(15) || fans["aux"] != float64(0) || fans["chamber"] != float64(8) {
+		t.Errorf("fans = %v", s["fans"])
+	}
+	if _, ok := s["ams"]; !ok {
+		t.Error("expected ams key present")
+	}
+	if _, ok := s["hms"]; !ok {
+		t.Error("expected hms key present")
+	}
+}
+
+func TestStatusHMSPopulated(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{
+		"gcode_state": "IDLE",
+		"hms": []any{
+			map[string]any{"attr": float64(0x03008000), "code": float64(0x00030002)},
+		},
+	})
+	cmd := &fakeCommander{}
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
+	ts := httptest.NewServer(NewServer(cache, cmd, hub).Handler())
+	defer ts.Close()
+
+	resp, _ := ts.Client().Get(ts.URL + "/api/status")
+	var s struct {
+		HMS []p1s.HMSEntry `json:"hms"`
+	}
+	json.NewDecoder(resp.Body).Decode(&s)
+	if len(s.HMS) != 1 || s.HMS[0].Code != "0300-8000-0003-0002" {
+		t.Fatalf("hms = %+v", s.HMS)
 	}
 }
