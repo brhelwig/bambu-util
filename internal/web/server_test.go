@@ -12,8 +12,9 @@ import (
 )
 
 type fakeCommander struct {
-	calls    []string
-	bedTemps []int
+	calls       []string
+	bedTemps    []int
+	nozzleTemps []int
 }
 
 func (f *fakeCommander) LowerBed() { f.calls = append(f.calls, "lower-bed") }
@@ -22,10 +23,13 @@ func (f *fakeCommander) SetBedTemp(t int) {
 	f.calls = append(f.calls, "bed-temp")
 	f.bedTemps = append(f.bedTemps, t)
 }
-func (f *fakeCommander) SetNozzleTemp(t int) { f.calls = append(f.calls, "nozzle-temp") }
-func (f *fakeCommander) PausePrint()         { f.calls = append(f.calls, "pause") }
-func (f *fakeCommander) ResumePrint()        { f.calls = append(f.calls, "resume") }
-func (f *fakeCommander) StopPrint()          { f.calls = append(f.calls, "stop") }
+func (f *fakeCommander) SetNozzleTemp(t int) {
+	f.calls = append(f.calls, "nozzle-temp")
+	f.nozzleTemps = append(f.nozzleTemps, t)
+}
+func (f *fakeCommander) PausePrint()  { f.calls = append(f.calls, "pause") }
+func (f *fakeCommander) ResumePrint() { f.calls = append(f.calls, "resume") }
+func (f *fakeCommander) StopPrint()   { f.calls = append(f.calls, "stop") }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
 	cache := p1s.NewStateCache()
@@ -188,21 +192,32 @@ func TestStatusIncludesPrintActions(t *testing.T) {
 	}
 }
 
-func TestNozzleHeatActionAllowedWhenIdle(t *testing.T) {
+func TestSetNozzleTempValid(t *testing.T) {
 	ts, cmd := newTestServer(true, "IDLE")
 	defer ts.Close()
-	resp, _ := ts.Client().Post(ts.URL+"/api/actions/nozzle-heat", "", nil)
-	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "nozzle-temp" {
-		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-nozzle-temp?temp=200", "", nil)
+	if resp.StatusCode != 200 || len(cmd.nozzleTemps) != 1 || cmd.nozzleTemps[0] != 200 {
+		t.Fatalf("status %d nozzleTemps %v", resp.StatusCode, cmd.nozzleTemps)
 	}
 }
 
-func TestNozzleHeatOffAllowedWhenIdle(t *testing.T) {
-	ts, cmd := newTestServer(true, "IDLE")
+func TestSetNozzleTempInvalid(t *testing.T) {
+	for _, temp := range []string{"abc", "999", "-5", ""} {
+		ts, cmd := newTestServer(true, "IDLE")
+		resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-nozzle-temp?temp="+temp, "", nil)
+		if resp.StatusCode != 400 || len(cmd.calls) != 0 {
+			t.Fatalf("temp %q: status %d calls %v", temp, resp.StatusCode, cmd.calls)
+		}
+		ts.Close()
+	}
+}
+
+func TestSetNozzleTempBlockedWhileRunning(t *testing.T) {
+	ts, cmd := newTestServer(true, "RUNNING")
 	defer ts.Close()
-	resp, _ := ts.Client().Post(ts.URL+"/api/actions/nozzle-heat-off", "", nil)
-	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "nozzle-temp" {
-		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-nozzle-temp?temp=200", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
 	}
 }
 

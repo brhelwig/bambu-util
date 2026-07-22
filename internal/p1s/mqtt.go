@@ -14,9 +14,8 @@ import (
 const (
 	// Z200 — 50mm above the bottom of the ~250mm travel; covers position
 	// drift without homing (a blind Z250 once hit the bottom limit).
-	BedDropGcode    = "G90\nG1 Z200 F900\n"
-	HomeGcode       = "G28\n"
-	NozzleCleanTemp = 200
+	BedDropGcode = "G90\nG1 Z200 F900\n"
+	HomeGcode    = "G28\n"
 )
 
 // Client is the MQTT link to the printer: cached merged state plus

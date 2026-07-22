@@ -90,23 +90,25 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 }
 
 var actions = map[string]func(Commander){
-	"lower-bed":       func(c Commander) { c.LowerBed() },
-	"home":            func(c Commander) { c.Home() },
-	"nozzle-heat":     func(c Commander) { c.SetNozzleTemp(p1s.NozzleCleanTemp) },
-	"nozzle-heat-off": func(c Commander) { c.SetNozzleTemp(0) },
+	"lower-bed": func(c Commander) { c.LowerBed() },
+	"home":      func(c Commander) { c.Home() },
 }
 
-// BedMaxTemp bounds the drying-slider target. The P1S bed tops out near
-// 100°C; the small headroom just guards the top preset against rounding.
-const BedMaxTemp = 110
+// Bounds for the parameterized temperature sliders. The P1S bed tops out
+// near 100°C and the nozzle near 300°C; the small headroom just guards the
+// top preset against rounding.
+const (
+	BedMaxTemp    = 110
+	NozzleMaxTemp = 300
+)
 
-func parseBedTemp(raw string) (int, error) {
+func parseTemp(raw string, max int) (int, error) {
 	t, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("invalid temp %q", raw)
 	}
-	if t < 0 || t > BedMaxTemp {
-		return 0, fmt.Errorf("temp %d out of range 0-%d", t, BedMaxTemp)
+	if t < 0 || t > max {
+		return 0, fmt.Errorf("temp %d out of range 0-%d", t, max)
 	}
 	return t, nil
 }
@@ -122,20 +124,14 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	fields, connected := s.cache.Snapshot()
 	gs := p1s.GcodeState(fields)
 
-	// The drying slider posts an arbitrary bed target, so it is handled
+	// The drying and nozzle sliders post an arbitrary target, handled
 	// separately from the fixed actions map.
-	if name == "set-bed-temp" {
-		temp, err := parseBedTemp(r.URL.Query().Get("temp"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
-			http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
-			return
-		}
-		s.cmd.SetBedTemp(temp)
-		fmt.Fprintf(w, "sent: set-bed-temp %d", temp)
+	switch name {
+	case "set-bed-temp":
+		s.setTemp(w, r, connected, gs, name, BedMaxTemp, s.cmd.SetBedTemp)
+		return
+	case "set-nozzle-temp":
+		s.setTemp(w, r, connected, gs, name, NozzleMaxTemp, s.cmd.SetNozzleTemp)
 		return
 	}
 
@@ -155,6 +151,22 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	}
 	act(s.cmd)
 	fmt.Fprintf(w, "sent: %s", name)
+}
+
+// setTemp handles the parameterized set-bed-temp / set-nozzle-temp endpoints:
+// parse and range-check the temp, apply the idle guard, then send it.
+func (s *Server) setTemp(w http.ResponseWriter, r *http.Request, connected bool, gs, name string, max int, set func(int)) {
+	temp, err := parseTemp(r.URL.Query().Get("temp"), max)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
+		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
+		return
+	}
+	set(temp)
+	fmt.Fprintf(w, "sent: %s %d", name, temp)
 }
 
 func (s *Server) camera(w http.ResponseWriter, r *http.Request) {
