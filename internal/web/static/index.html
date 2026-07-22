@@ -37,6 +37,8 @@
   button.danger.armed { background: #b02a2a; }
   #log { min-height: 1.2em; color: #9aa0a6; font-size: 0.85rem; margin-top: 12px; }
   #cam { width: 100%; border-radius: 12px; margin-top: 12px; display: none; }
+  .ams-slot { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.95rem; }
+  .ams-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid #333; }
 </style>
 </head>
 <body>
@@ -69,9 +71,38 @@
   <button id="camToggle" style="width:100%">Show camera</button>
   <img id="cam" alt="printer camera">
 </div>
+<div class="card" id="amsCard" style="display:none">
+  <div id="amsSlots"></div>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
+
+function renderAms(ams) {
+  const card = $("amsCard");
+  const container = $("amsSlots");
+  const units = ams && Array.isArray(ams.ams) ? ams.ams : [];
+  const slots = units.flatMap(u => Array.isArray(u.tray) ? u.tray : []);
+  if (slots.length === 0) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+  container.innerHTML = "";
+  slots.forEach(slot => {
+    if (!slot || typeof slot !== "object") return;
+    const type = typeof slot.tray_type === "string" ? slot.tray_type : "?";
+    const colorHex = typeof slot.tray_color === "string" ? slot.tray_color.slice(0, 6) : "666666";
+    const row = document.createElement("div");
+    row.className = "ams-slot";
+    const swatch = document.createElement("span");
+    swatch.className = "ams-swatch";
+    swatch.style.background = "#" + colorHex;
+    row.appendChild(swatch);
+    row.appendChild(document.createTextNode(type));
+    container.appendChild(row);
+  });
+}
 
 async function refresh() {
   try {
@@ -96,6 +127,7 @@ async function refresh() {
     $("wifi").textContent = s.wifiSignal ?? "?";
     const fans = s.fans || {};
     $("fans").textContent = `${fans.cooling ?? "?"} / ${fans.aux ?? "?"} / ${fans.chamber ?? "?"}`;
+    renderAms(s.ams);
     // Heater button toggles between heating and turning the heater off,
     // based on whether the bed currently has a target temperature.
     const heating = (s.bedTarget ?? 0) > 0;
