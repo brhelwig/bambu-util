@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/brhelwig/bambu-util/internal/p1s"
@@ -25,6 +26,7 @@ type Commander interface {
 	Extrude()
 	UnloadFilament()
 	LoadFilament(slot, currTemp, tarTemp int)
+	SetAmsFilament(amsID, trayID int, trayInfoIdx, color, trayType string, tempMin, tempMax int)
 	SetChamberLight(bool)
 	PausePrint()
 	ResumePrint()
@@ -173,6 +175,9 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	case "load":
 		s.load(w, r, connected, gs, fields)
 		return
+	case "set-filament":
+		s.setFilament(w, r, connected, gs)
+		return
 	case "lamp-on", "lamp-off":
 		// The chamber light is safe to toggle in any state, so it skips the
 		// idle guard; it only needs the printer reachable.
@@ -281,6 +286,89 @@ func (s *Server) load(w http.ResponseWriter, r *http.Request, connected bool, gs
 	cur, _ := fields["nozzle_temper"].(float64)
 	s.cmd.LoadFilament(slot, int(cur), int(tar))
 	fmt.Fprintf(w, "sent: load slot %d", slot)
+}
+
+// MaxAMSUnit is the highest AMS unit index accepted (Bambu supports up to 4
+// units, addressed 0-3).
+const MaxAMSUnit = 3
+
+// setFilament writes a tray's filament profile (ams_filament_setting). It's a
+// full-tray write, so the client resends the tray's existing type/temps/idx
+// alongside the field it changed — otherwise the printer would blank them.
+func (s *Server) setFilament(w http.ResponseWriter, r *http.Request, connected bool, gs string) {
+	q := r.URL.Query()
+	amsID, err := parseIndex(q.Get("ams_id"), MaxAMSUnit)
+	if err != nil {
+		http.Error(w, "invalid ams_id", http.StatusBadRequest)
+		return
+	}
+	trayID, err := parseIndex(q.Get("tray_id"), 3)
+	if err != nil {
+		http.Error(w, "invalid tray_id", http.StatusBadRequest)
+		return
+	}
+	color, err := normalizeColor(q.Get("tray_color"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	typ := q.Get("tray_type")
+	if typ == "" || len(typ) > 32 {
+		http.Error(w, "invalid tray_type", http.StatusBadRequest)
+		return
+	}
+	tmin, err := parseTemp(q.Get("nozzle_temp_min"), NozzleMaxTemp)
+	if err != nil {
+		http.Error(w, "invalid nozzle_temp_min", http.StatusBadRequest)
+		return
+	}
+	tmax, err := parseTemp(q.Get("nozzle_temp_max"), NozzleMaxTemp)
+	if err != nil {
+		http.Error(w, "invalid nozzle_temp_max", http.StatusBadRequest)
+		return
+	}
+	if tmin > tmax {
+		http.Error(w, "nozzle_temp_min above nozzle_temp_max", http.StatusBadRequest)
+		return
+	}
+	idx := q.Get("tray_info_idx")
+	if len(idx) > 32 {
+		http.Error(w, "invalid tray_info_idx", http.StatusBadRequest)
+		return
+	}
+	if !guardIdle(w, connected, gs) {
+		return
+	}
+	s.cmd.SetAmsFilament(amsID, trayID, idx, color, typ, tmin, tmax)
+	fmt.Fprintf(w, "sent: set-filament ams %d tray %d", amsID, trayID)
+}
+
+// parseIndex parses a small non-negative index bounded by max (inclusive).
+func parseIndex(raw string, max int) (int, error) {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 || n > max {
+		return 0, fmt.Errorf("index out of range")
+	}
+	return n, nil
+}
+
+// normalizeColor accepts a 6- or 8-hex-digit colour and returns it as uppercase
+// RRGGBBAA (alpha forced to FF when only RRGGBB is given), the form the AMS
+// reports and expects.
+func normalizeColor(raw string) (string, error) {
+	up := strings.ToUpper(raw)
+	if len(up) == 6 {
+		up += "FF"
+	}
+	if len(up) != 8 {
+		return "", fmt.Errorf("tray_color must be RRGGBB or RRGGBBAA hex")
+	}
+	for _, c := range up {
+		if !(c >= '0' && c <= '9' || c >= 'A' && c <= 'F') {
+			return "", fmt.Errorf("tray_color must be hex")
+		}
+	}
+	return up, nil
 }
 
 func (s *Server) camera(w http.ResponseWriter, r *http.Request) {

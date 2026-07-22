@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [0.5.0] - 2026-07-22
 
+### Added
+
+- Per-tray filament editor in the AMS card: an Edit button opens an inline form
+  to set a tray's colour, material type, and nozzle temperature range
+  (`ams_filament_setting`). It prefills from the tray's reported values and
+  resends the whole profile — including the printer's `tray_info_idx` unchanged
+  — so editing one field doesn't blank the others. Idle-only.
+
 ### Fixed
 
 - State cache now deep-merges partial MQTT reports. Nested fields like the AMS

@@ -49,6 +49,13 @@
   .iconbtn.on { color: #c98a2b; }
   .iconbtn.danger { background: #6e2222; }
   .iconbtn.danger.armed { background: #b02a2a; }
+  .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
+  .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
+  .ams-edit-row label { color: #9aa0a6; }
+  .ams-editor input[type=text], .ams-editor input[type=number] { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.85rem; }
+  .ams-editor input.temp { width: 60px; }
+  .ams-editor input[type=color] { width: 46px; height: 30px; background: none; border: 0; padding: 0; }
+  .ams-editor .ams-save { width: 100%; margin-top: 6px; padding: 10px; font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -88,7 +95,7 @@
   <button class="iconbtn" data-action="home" aria-label="Home axes">
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg></span><span class="cap">Home</span></button>
   <button class="iconbtn" data-action="extrude" id="extrudeBtn" aria-label="Extrude filament">
-    <span class="ico"><svg viewBox="0 0 32 32" fill="currentColor"><path d="M16 4c-2 0-3.4 1.5-3.4 3.3 0 .5.1.9.3 1.3C11 9 9.4 10.6 9.4 12.6c0 .5.1 1 .3 1.5C7.8 14.7 6.3 16.3 6.3 18.3c0 .8.2 1.5.7 2.1C5.1 21 3.7 22.5 3.7 24.4 3.7 26.9 5.9 29 8.6 29h14.8c2.7 0 4.9-2.1 4.9-4.6 0-1.9-1.4-3.4-3.3-4 .4-.6.7-1.3.7-2.1 0-2-1.5-3.6-3.4-4.2.2-.5.3-1 .3-1.5 0-2-1.6-3.6-3.5-4 .2-.4.3-.8.3-1.3C19.4 5.5 18 4 16 4z"/></svg></span><span class="cap">Extrude</span></button>
+    <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 4h14a1 1 0 0 1 .95 1.32l-2.4 6.9a1 1 0 0 1-.95.68H7.4a1 1 0 0 1-.95-.68l-2.4-6.9A1 1 0 0 1 5 4z"/><path d="M12 13.6c-1.5 2-2.2 3.4-2.2 4.5a2.2 2.2 0 0 0 4.4 0c0-1.1-.7-2.5-2.2-4.5z"/></svg></span><span class="cap">Extrude</span></button>
   <button class="iconbtn" data-action="unload" id="ejectBtn" aria-label="Eject loaded filament" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l7 9H5z"/><rect x="5" y="16" width="14" height="3" rx="1.5"/></svg></span><span class="cap">Eject</span></button>
 </div>
@@ -200,9 +207,14 @@ function loadedTray(ams) {
   return Number.isInteger(n) && n < 254 ? n : null;
 }
 
-function renderAms(ams) {
+let amsEditing = false;
+function renderAms(ams, canEdit) {
   const card = $("amsCard");
   const container = $("amsSlots");
+  // While an inline filament editor is open, leave the DOM alone — the 2s
+  // refresh would otherwise wipe the half-filled form (same idea as the slider
+  // drag guards).
+  if (amsEditing) return;
   const loadedIdx = loadedTray(ams);
   const units = ams && Array.isArray(ams.ams) ? ams.ams : [];
   const valid = units.filter(u => u && typeof u === "object" && Array.isArray(u.tray));
@@ -235,18 +247,101 @@ function renderAms(ams) {
       swatch.style.background = "#" + colorHex;
       row.appendChild(swatch);
       row.appendChild(document.createTextNode(hasFilament ? slot.tray_type : "empty"));
-      // The printer handles loading itself; the AMS card is informational.
+      const right = document.createElement("span");
+      right.style.cssText = "margin-left:auto; display:flex; align-items:center; gap:8px";
       // Mark whichever tray is currently fed to the nozzle so the Eject button
-      // has an obvious referent.
+      // (the only load/unload control) has an obvious referent.
       if (hasFilament && amsTarget(unit, slot) === loadedIdx) {
         const tag = document.createElement("span");
         tag.textContent = "loaded";
-        tag.style.cssText = "margin-left:auto; font-size:0.72rem; font-weight:600; color:#c98a2b";
-        row.appendChild(tag);
+        tag.style.cssText = "font-size:0.72rem; font-weight:600; color:#c98a2b";
+        right.appendChild(tag);
       }
+      // Edit opens an inline profile editor (colour/type/temps). Idle-only,
+      // matching the server guard on set-filament.
+      const edit = document.createElement("button");
+      edit.textContent = "Edit";
+      edit.style.cssText = "padding:5px 12px; font-size:0.78rem; border-radius:8px";
+      edit.disabled = !canEdit;
+      right.appendChild(edit);
+      row.appendChild(right);
       container.appendChild(row);
+
+      const editor = buildFilamentEditor(unit, slot);
+      editor.style.display = "none";
+      container.appendChild(editor);
+      edit.addEventListener("click", () => {
+        const open = editor.style.display === "none";
+        editor.style.display = open ? "" : "none";
+        amsEditing = open;
+      });
     });
   });
+}
+
+// buildFilamentEditor makes the inline per-tray profile form, prefilled from the
+// tray's current reported values. tray_info_idx (the printer's own profile id,
+// which the reference is unsure about) is carried through hidden and unchanged
+// so a colour/type edit doesn't clobber it.
+function buildFilamentEditor(unit, slot) {
+  const box = document.createElement("div");
+  box.className = "ams-editor";
+  const color6 = typeof slot.tray_color === "string" ? slot.tray_color.slice(0, 6) : "666666";
+  const type = typeof slot.tray_type === "string" ? slot.tray_type : "";
+  const tmin = slot.nozzle_temp_min ?? "";
+  const tmax = slot.nozzle_temp_max ?? "";
+  const idx = typeof slot.tray_info_idx === "string" ? slot.tray_info_idx : "";
+
+  const colorIn = mkInput("color", "#" + color6);
+  const typeIn = mkInput("text", type);
+  typeIn.maxLength = 20; typeIn.placeholder = "PLA";
+  const minIn = mkInput("number", tmin); minIn.min = 0; minIn.max = 300; minIn.className = "temp";
+  const maxIn = mkInput("number", tmax); maxIn.min = 0; maxIn.max = 300; maxIn.className = "temp";
+
+  box.append(
+    editRow("Color", colorIn),
+    editRow("Type", typeIn),
+    editRow("Temp °C", spanOf(minIn, document.createTextNode(" – "), maxIn)),
+  );
+  const save = document.createElement("button");
+  save.textContent = "Save";
+  save.className = "ams-save";
+  box.appendChild(save);
+
+  save.addEventListener("click", () => {
+    const type = typeIn.value.trim();
+    if (!type) { $("log").textContent = "type is required"; return; }
+    const q = new URLSearchParams({
+      ams_id: unit.id, tray_id: slot.id,
+      tray_color: colorIn.value.slice(1) + "FF", // #RRGGBB -> RRGGBBAA
+      tray_type: type,
+      nozzle_temp_min: minIn.value || "0",
+      nozzle_temp_max: maxIn.value || "0",
+      tray_info_idx: idx,
+    });
+    amsEditing = false; // let the next refresh redraw with the new values
+    post("set-filament?" + q.toString());
+  });
+  return box;
+}
+function mkInput(type, value) {
+  const el = document.createElement("input");
+  el.type = type;
+  if (value !== "" && value != null) el.value = value;
+  return el;
+}
+function editRow(label, control) {
+  const row = document.createElement("div");
+  row.className = "ams-edit-row";
+  const l = document.createElement("label");
+  l.textContent = label;
+  row.append(l, control);
+  return row;
+}
+function spanOf(...nodes) {
+  const s = document.createElement("span");
+  s.append(...nodes);
+  return s;
 }
 
 // Bed-drying presets from Bambu's official P1S bed-drying table
@@ -333,6 +428,13 @@ let demoTick = 0;
 let demoBedTarget = 60, demoNozzleTarget = 225;
 let demoBedSetTick = 0, demoNozzleSetTick = 0; // demoTick when each was last set
 let demoLampOn = true;
+// Mutable so the demo filament editor's saves visibly update the swatches.
+let demoTrays = [
+  { id: "0", tray_type: "PLA",  tray_color: "FF6B35FF", nozzle_temp_min: "190", nozzle_temp_max: "230", tray_info_idx: "GFA00" },
+  { id: "1", tray_type: "PETG", tray_color: "2E86ABFF", nozzle_temp_min: "220", nozzle_temp_max: "260", tray_info_idx: "GFG00" },
+  { id: "2", tray_type: "ABS",  tray_color: "111418FF", nozzle_temp_min: "240", nozzle_temp_max: "270", tray_info_idx: "GFB00" },
+  { id: "3", tray_type: "PLA",  tray_color: "F2F2F2FF", nozzle_temp_min: "190", nozzle_temp_max: "230", tray_info_idx: "GFA01" },
+];
 function demoStatus() {
   demoTick++;
   const base = {
@@ -344,12 +446,7 @@ function demoStatus() {
     bedOffIn: demoBedTarget > 0 ? Math.max(0, 86400 - (demoTick - demoBedSetTick) * 2) : null,
     nozzleOffIn: demoNozzleTarget > 0 ? Math.max(0, 900 - (demoTick - demoNozzleSetTick) * 2) : null,
     fans: { cooling: 15, aux: 0, chamber: 8 },
-    ams: { tray_now: "0", ams: [{ id: "0", humidity: "2", humidity_raw: "24", tray: [
-      { id: "0", tray_type: "PLA",  tray_color: "FF6B35FF" },
-      { id: "1", tray_type: "PETG", tray_color: "2E86ABFF" },
-      { id: "2", tray_type: "ABS",  tray_color: "111418FF" },
-      { id: "3", tray_type: "PLA",  tray_color: "F2F2F2FF" },
-    ] }] },
+    ams: { tray_now: "0", ams: [{ id: "0", humidity: "2", humidity_raw: "24", tray: demoTrays }] },
     hms: [],
   };
   if (DEMO_PRINT) {
@@ -395,7 +492,7 @@ async function refresh() {
     $("wifi").textContent = s.wifiSignal ?? "?";
     const fans = s.fans || {};
     $("fans").textContent = `${fans.cooling ?? "?"} / ${fans.aux ?? "?"} / ${fans.chamber ?? "?"}`;
-    renderAms(s.ams);
+    renderAms(s.ams, s.actionsAllowed);
     const hms = Array.isArray(s.hms) ? s.hms : [];
     const banner = $("hmsBanner");
     if (hms.length === 0) {
@@ -472,9 +569,17 @@ async function post(action) {
       $("log").textContent = `demo: lamp ${demoLampOn ? "on" : "off"}`;
       return;
     }
-    const lm = action.match(/^load\?slot=(\d+)/);
-    if (lm) {
-      $("log").textContent = `demo: load slot ${lm[1]}`;
+    const fm = action.match(/^set-filament\?(.*)/);
+    if (fm) {
+      const p = new URLSearchParams(fm[1]);
+      const tray = demoTrays.find(t => t.id === p.get("tray_id"));
+      if (tray) {
+        tray.tray_color = p.get("tray_color");
+        tray.tray_type = p.get("tray_type");
+        tray.nozzle_temp_min = p.get("nozzle_temp_min");
+        tray.nozzle_temp_max = p.get("nozzle_temp_max");
+      }
+      $("log").textContent = `demo: set filament tray ${p.get("tray_id")}`;
       return;
     }
     const m = action.match(/^set-(bed|nozzle)-temp\?temp=(\d+)/);
