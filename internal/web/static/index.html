@@ -82,7 +82,7 @@ function renderAms(ams) {
   const card = $("amsCard");
   const container = $("amsSlots");
   const units = ams && Array.isArray(ams.ams) ? ams.ams : [];
-  const slots = units.flatMap(u => Array.isArray(u.tray) ? u.tray : []);
+  const slots = units.flatMap(u => (u && typeof u === "object" && Array.isArray(u.tray)) ? u.tray : []);
   if (slots.length === 0) {
     card.style.display = "none";
     return;
