@@ -67,6 +67,7 @@
 <div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
 <div class="card">
   <img id="cam" alt="printer camera" src="/camera/stream">
+  <button id="lampBtn" style="width:100%; margin-top:12px" disabled>Lamp</button>
 </div>
 <div class="actions">
   <button data-action="lower-bed">Lower bed</button>
@@ -84,6 +85,7 @@
   <input type="range" id="nozzleSlider" min="0" max="4" step="1" value="0">
   <div class="row" id="nozzleTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="nozzleTimer"></span></div>
   <button data-action="extrude" id="extrudeBtn" style="width:100%; margin-top:10px">Extrude</button>
+  <button data-action="unload" id="unloadBtn" style="width:100%; margin-top:10px">Unload filament</button>
 </div>
 <div class="actions" id="printControls" style="margin-bottom:16px">
   <button data-print-action="pause" id="pauseBtn" disabled>Pause print</button>
@@ -241,6 +243,7 @@ let demoTick = 0;
 // controls are enabled and their changes update these locally (see post()).
 let demoBedTarget = 60, demoNozzleTarget = 225;
 let demoBedSetTick = 0, demoNozzleSetTick = 0; // demoTick when each was last set
+let demoLampOn = true;
 function demoStatus() {
   demoTick++;
   const total = 240;
@@ -253,7 +256,7 @@ function demoStatus() {
     progress, jobName: "demo_benchy.3mf",
     layerNum: layer, totalLayerNum: total,
     remainingMinutes: Math.max(1, Math.round((total - layer) * 0.6)),
-    chamberTemp: 28.6, wifiSignal: "-46dBm",
+    chamberTemp: 28.6, wifiSignal: "-46dBm", chamberLight: demoLampOn,
     // Each demo refresh ≈ 2s, so convert elapsed ticks to seconds remaining.
     bedOffIn: demoBedTarget > 0 ? Math.max(0, 86400 - (demoTick - demoBedSetTick) * 2) : null,
     nozzleOffIn: demoNozzleTarget > 0 ? Math.max(0, 900 - (demoTick - demoNozzleSetTick) * 2) : null,
@@ -318,6 +321,12 @@ async function refresh() {
     // Extrude also needs a hot nozzle (cold extrusion strips filament); the
     // printer enforces this too, but disable the button to make it obvious.
     $("extrudeBtn").disabled = !s.actionsAllowed || (s.nozzleTemp ?? 0) < 170;
+    // Lamp toggles in any state, so it's gated on connection only.
+    const lampOn = !!s.chamberLight;
+    const lamp = $("lampBtn");
+    lamp.dataset.lamp = lampOn ? "lamp-off" : "lamp-on";
+    lamp.textContent = lampOn ? "Lamp off" : "Lamp on";
+    lamp.disabled = !s.connected;
 
     // Pause button toggles to Resume while the print is paused.
     const pa = s.printActions || {};
@@ -334,6 +343,7 @@ async function refresh() {
     document.querySelectorAll("[data-action], [data-print-action]").forEach(b => b.disabled = true);
     $("drySlider").disabled = true;
     $("nozzleSlider").disabled = true;
+    $("lampBtn").disabled = true;
   }
 }
 refresh();
@@ -342,6 +352,11 @@ setInterval(refresh, 2000);
 async function post(action) {
   // In demo there is no printer: apply slider changes locally, no-op the rest.
   if (DEMO) {
+    if (action === "lamp-on" || action === "lamp-off") {
+      demoLampOn = action === "lamp-on";
+      $("log").textContent = `demo: lamp ${demoLampOn ? "on" : "off"}`;
+      return;
+    }
     const m = action.match(/^set-(bed|nozzle)-temp\?temp=(\d+)/);
     if (m) {
       const t = Number(m[2]);
@@ -363,6 +378,8 @@ async function post(action) {
 
 document.querySelectorAll("[data-action]").forEach(b =>
   b.addEventListener("click", () => post(b.dataset.action)));
+
+$("lampBtn").addEventListener("click", () => post($("lampBtn").dataset.lamp));
 
 // Stop kills the print, so it takes two taps: the first arms the button for
 // 4 seconds, the second actually sends.
