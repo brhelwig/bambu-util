@@ -85,6 +85,12 @@ func (c *Client) Home()               { c.SendGcode(HomeGcode) }
 func (c *Client) SetBedTemp(t int)    { c.SendGcode(fmt.Sprintf("M140 S%d\n", t)) }
 func (c *Client) SetNozzleTemp(t int) { c.SendGcode(fmt.Sprintf("M104 S%d\n", t)) }
 
+// Extrude pushes a short length of filament for manual purging / cold pulls.
+// M83 = relative extrusion so the move is a fixed 20mm regardless of position;
+// F150 (2.5 mm/s) is slow enough not to skip. Requires a hot nozzle — the
+// caller guards on temperature.
+func (c *Client) Extrude() { c.SendGcode("M83\nG1 E20 F150\n") }
+
 // printCommandPayload builds a print-flow command (pause/resume/stop) —
 // payload shape verified against ha-bambulab's pybambu commands.
 func printCommandPayload(seq int64, command string) string {

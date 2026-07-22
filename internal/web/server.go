@@ -22,6 +22,7 @@ type Commander interface {
 	Home()
 	SetBedTemp(int)
 	SetNozzleTemp(int)
+	Extrude()
 	PausePrint()
 	ResumePrint()
 	StopPrint()
@@ -161,6 +162,9 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	case "set-nozzle-temp":
 		s.setTemp(w, r, connected, gs, name, NozzleMaxTemp, s.cmd.SetNozzleTemp, s.autoOff.setNozzle)
 		return
+	case "extrude":
+		s.extrude(w, connected, gs, fields)
+		return
 	}
 
 	var guardErr error
@@ -205,6 +209,25 @@ func nilIfNeg(secs int) any {
 		return nil
 	}
 	return secs
+}
+
+// ExtrudeMinTemp guards manual extrusion: pushing filament through a cold
+// nozzle strips the filament and can jam the extruder. Bambu's firmware blocks
+// cold extrusion too; this matches it defensively.
+const ExtrudeMinTemp = 170
+
+func (s *Server) extrude(w http.ResponseWriter, connected bool, gs string, fields map[string]any) {
+	if guardErr := p1s.ActionAllowed(connected, gs); guardErr != nil {
+		http.Error(w, "blocked: "+guardErr.Error(), http.StatusConflict)
+		return
+	}
+	nt, ok := fields["nozzle_temper"].(float64)
+	if !ok || nt < ExtrudeMinTemp {
+		http.Error(w, fmt.Sprintf("blocked: nozzle below %d°C", ExtrudeMinTemp), http.StatusConflict)
+		return
+	}
+	s.cmd.Extrude()
+	fmt.Fprint(w, "sent: extrude")
 }
 
 func (s *Server) camera(w http.ResponseWriter, r *http.Request) {

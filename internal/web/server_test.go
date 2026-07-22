@@ -27,6 +27,7 @@ func (f *fakeCommander) SetNozzleTemp(t int) {
 	f.calls = append(f.calls, "nozzle-temp")
 	f.nozzleTemps = append(f.nozzleTemps, t)
 }
+func (f *fakeCommander) Extrude()     { f.calls = append(f.calls, "extrude") }
 func (f *fakeCommander) PausePrint()  { f.calls = append(f.calls, "pause") }
 func (f *fakeCommander) ResumePrint() { f.calls = append(f.calls, "resume") }
 func (f *fakeCommander) StopPrint()   { f.calls = append(f.calls, "stop") }
@@ -257,6 +258,42 @@ func TestSetBedTempBlockedWhileRunning(t *testing.T) {
 	ts, cmd := newTestServer(true, "RUNNING")
 	defer ts.Close()
 	resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=55", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeCommander) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(fields)
+	cmd := &fakeCommander{}
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
+	return httptest.NewServer(NewServer(cache, cmd, hub).Handler()), cmd
+}
+
+func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_temper": float64(220)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/extrude", "", nil)
+	if resp.StatusCode != 200 || len(cmd.calls) != 1 || cmd.calls[0] != "extrude" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestExtrudeBlockedWhenCold(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "IDLE", "nozzle_temper": float64(30)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/extrude", "", nil)
+	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
+		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
+	}
+}
+
+func TestExtrudeBlockedWhenRunning(t *testing.T) {
+	ts, cmd := newTestServerWithFields(map[string]any{"gcode_state": "RUNNING", "nozzle_temper": float64(220)})
+	defer ts.Close()
+	resp, _ := ts.Client().Post(ts.URL+"/api/actions/extrude", "", nil)
 	if resp.StatusCode != 409 || len(cmd.calls) != 0 {
 		t.Fatalf("status %d calls %v, want 409 and no call", resp.StatusCode, cmd.calls)
 	}
