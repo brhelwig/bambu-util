@@ -12,57 +12,105 @@ import (
 // until ctx is cancelled.
 type CameraSource func(ctx context.Context, yield func([]byte)) error
 
-// Hub fans camera frames out to viewers, holding a printer connection only
-// while at least one viewer is attached (so Bambu Studio can have the camera
-// the rest of the time).
-type Hub struct {
-	source  CameraSource
-	mu      sync.Mutex
-	viewers map[chan []byte]struct{}
-	cancel  context.CancelFunc
+// FrameSink is what the hub needs to persist a frame for history playback.
+type FrameSink interface {
+	InsertFrame(ts int64, jpeg []byte) error
 }
 
-func NewHub(source CameraSource) *Hub {
-	return &Hub{source: source, viewers: map[chan []byte]struct{}{}}
+// Default retry backoff bounds for Start. Overridable per-Hub (tests set
+// smaller values so backoff growth doesn't slow the suite down).
+const (
+	defaultMinRetryDelay = 1 * time.Second
+	defaultMaxRetryDelay = 30 * time.Second
+)
+
+// Hub connects to the printer camera once, at Start, and holds that
+// connection for the process's lifetime, fanning each frame out to live
+// viewers and into the history store. Earlier versions only held the camera
+// while at least one viewer was attached, so Bambu Studio could use it the
+// rest of the time — always-on recording means that's no longer true; the
+// printer's camera port serves one client, so Bambu Studio's live view will
+// not work while this app is running. Accepted tradeoff, see the design
+// spec.
+type Hub struct {
+	source                       CameraSource
+	store                        FrameSink
+	now                          func() time.Time
+	minRetryDelay, maxRetryDelay time.Duration
+	mu                           sync.Mutex
+	viewers                      map[chan []byte]struct{}
+}
+
+// NewHub creates a Hub. Call Start once to begin the camera connection.
+func NewHub(source CameraSource, store FrameSink) *Hub {
+	return &Hub{
+		source:        source,
+		store:         store,
+		now:           time.Now,
+		minRetryDelay: defaultMinRetryDelay,
+		maxRetryDelay: defaultMaxRetryDelay,
+		viewers:       map[chan []byte]struct{}{},
+	}
 }
 
 // Attach registers a viewer. The channel receives JPEG frames; call detach
-// when the viewer leaves.
+// when the viewer leaves. Does not affect the camera connection, which runs
+// independently once Start has been called.
 func (h *Hub) Attach() (frames <-chan []byte, detach func()) {
 	ch := make(chan []byte, 1)
 	h.mu.Lock()
 	h.viewers[ch] = struct{}{}
-	if h.cancel == nil {
-		ctx, cancel := context.WithCancel(context.Background())
-		h.cancel = cancel
-		go h.run(ctx)
-	}
 	h.mu.Unlock()
 	return ch, func() {
 		h.mu.Lock()
 		delete(h.viewers, ch)
-		if len(h.viewers) == 0 && h.cancel != nil {
-			h.cancel()
-			h.cancel = nil
-		}
 		h.mu.Unlock()
 	}
 }
 
-func (h *Hub) run(ctx context.Context) {
+// Start connects to the camera and keeps it connected — retrying on
+// failure with exponential backoff — until ctx is cancelled. Call once,
+// from main.
+func (h *Hub) Start(ctx context.Context) {
+	delay := h.minRetryDelay
 	for ctx.Err() == nil {
-		err := h.source(ctx, h.broadcast)
-		if ctx.Err() == nil {
-			log.Printf("camera stream ended, retrying: %v", err)
-			select {
-			case <-time.After(2 * time.Second):
-			case <-ctx.Done():
-			}
+		gotFrame := false
+		err := h.source(ctx, func(frame []byte) {
+			gotFrame = true
+			h.broadcast(frame)
+		})
+		if ctx.Err() != nil {
+			return
 		}
+		if gotFrame {
+			// The connection was live for a while before dropping — a
+			// transient blip, not a struggling printer/network. Don't
+			// carry a long backoff into the next attempt.
+			delay = h.minRetryDelay
+		}
+		log.Printf("camera stream ended, retrying in %s: %v", delay, err)
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return
+		}
+		delay = h.nextBackoff(delay)
 	}
 }
 
+// nextBackoff doubles prev, capped at maxRetryDelay.
+func (h *Hub) nextBackoff(prev time.Duration) time.Duration {
+	next := prev * 2
+	if next > h.maxRetryDelay || next <= 0 { // next<=0 guards against overflow
+		return h.maxRetryDelay
+	}
+	return next
+}
+
 func (h *Hub) broadcast(frame []byte) {
+	if err := h.store.InsertFrame(h.now().Unix(), frame); err != nil {
+		log.Printf("history: insert frame: %v", err)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for ch := range h.viewers {
