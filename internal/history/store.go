@@ -106,3 +106,52 @@ func (s *Store) Prune(cutoff int64) error {
 	_, err := s.db.Exec(`DELETE FROM jobs WHERE end_ts IS NOT NULL AND end_ts < ?`, cutoff)
 	return err
 }
+
+// Job is one print job's recorded time range. End is nil while the job is
+// still in progress.
+type Job struct {
+	ID    int64
+	Name  string
+	Start int64
+	End   *int64
+}
+
+// OpenJob records the start of a print job and returns its id.
+func (s *Store) OpenJob(name string, startTs int64) (int64, error) {
+	res, err := s.db.Exec(`INSERT INTO jobs (name, start_ts, end_ts) VALUES (?, ?, NULL)`, name, startTs)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// CloseJob records the end of a print job.
+func (s *Store) CloseJob(id, endTs int64) error {
+	_, err := s.db.Exec(`UPDATE jobs SET end_ts = ? WHERE id = ?`, endTs, id)
+	return err
+}
+
+// RecentJobs returns every job row currently stored, newest-started first.
+// Prune keeps this bounded to jobs whose frames could still exist.
+func (s *Store) RecentJobs() ([]Job, error) {
+	rows, err := s.db.Query(`SELECT id, name, start_ts, end_ts FROM jobs ORDER BY start_ts DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []Job
+	for rows.Next() {
+		var j Job
+		var end sql.NullInt64
+		if err := rows.Scan(&j.ID, &j.Name, &j.Start, &end); err != nil {
+			return nil, err
+		}
+		if end.Valid {
+			v := end.Int64
+			j.End = &v
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, rows.Err()
+}

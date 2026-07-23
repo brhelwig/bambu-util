@@ -95,3 +95,57 @@ func TestPruneDeletesOldFrames(t *testing.T) {
 		t.Fatalf("got %v..%v, want 500..500", oldest, newest)
 	}
 }
+
+func TestJobLifecycle(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+
+	id, err := s.OpenJob("benchy.3mf", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := s.RecentJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Name != "benchy.3mf" || jobs[0].Start != 100 || jobs[0].End != nil {
+		t.Fatalf("want 1 open job named benchy.3mf starting at 100, got %+v", jobs)
+	}
+
+	if err := s.CloseJob(id, 200); err != nil {
+		t.Fatal(err)
+	}
+	jobs, _ = s.RecentJobs()
+	if len(jobs) != 1 || jobs[0].End == nil || *jobs[0].End != 200 {
+		t.Fatalf("want closed job ending at 200, got %+v", jobs)
+	}
+}
+
+func TestPrunePreservesOngoingJobRegardlessOfStartAge(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	s.OpenJob("old-but-running.3mf", 0)
+
+	if err := s.Prune(1000); err != nil {
+		t.Fatal(err)
+	}
+	jobs, _ := s.RecentJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("ongoing job was pruned: %+v", jobs)
+	}
+}
+
+func TestPruneDeletesExpiredFinishedJobs(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	id, _ := s.OpenJob("old.3mf", 0)
+	s.CloseJob(id, 50)
+
+	if err := s.Prune(1000); err != nil {
+		t.Fatal(err)
+	}
+	jobs, _ := s.RecentJobs()
+	if len(jobs) != 0 {
+		t.Fatalf("expired finished job was not pruned: %+v", jobs)
+	}
+}
