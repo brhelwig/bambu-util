@@ -76,3 +76,33 @@ func (s *Store) FrameAtOrAfter(ts int64) (jpeg []byte, gotTs int64, err error) {
 	}
 	return jpeg, gotTs, nil
 }
+
+// Range returns the oldest and newest frame timestamps currently stored,
+// or nil, nil if the store is empty.
+func (s *Store) Range() (oldest, newest *int64, err error) {
+	var minTs, maxTs sql.NullInt64
+	row := s.db.QueryRow(`SELECT MIN(ts), MAX(ts) FROM frames`)
+	if err := row.Scan(&minTs, &maxTs); err != nil {
+		return nil, nil, err
+	}
+	if minTs.Valid {
+		v := minTs.Int64
+		oldest = &v
+	}
+	if maxTs.Valid {
+		v := maxTs.Int64
+		newest = &v
+	}
+	return oldest, newest, nil
+}
+
+// Prune deletes frames older than cutoff, and any job row that finished
+// before cutoff. A job with no end yet (still in progress) is never pruned,
+// regardless of how old its start is.
+func (s *Store) Prune(cutoff int64) error {
+	if _, err := s.db.Exec(`DELETE FROM frames WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM jobs WHERE end_ts IS NOT NULL AND end_ts < ?`, cutoff)
+	return err
+}

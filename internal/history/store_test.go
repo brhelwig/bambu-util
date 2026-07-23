@@ -51,3 +51,47 @@ func TestFrameAtOrAfterNoneFound(t *testing.T) {
 		t.Fatalf("got %v, want ErrNoFrame", err)
 	}
 }
+
+func TestRangeEmpty(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+
+	oldest, newest, err := s.Range()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldest != nil || newest != nil {
+		t.Fatalf("got %v..%v, want nil..nil", oldest, newest)
+	}
+}
+
+func TestRangeWithFrames(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	s.InsertFrame(100, []byte{1})
+	s.InsertFrame(300, []byte{2})
+	s.InsertFrame(200, []byte{3})
+
+	oldest, newest, err := s.Range()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldest == nil || newest == nil || *oldest != 100 || *newest != 300 {
+		t.Fatalf("got %v..%v, want 100..300", oldest, newest)
+	}
+}
+
+func TestPruneDeletesOldFrames(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	s.InsertFrame(100, []byte{1})
+	s.InsertFrame(500, []byte{2})
+
+	if err := s.Prune(300); err != nil {
+		t.Fatal(err)
+	}
+	oldest, newest, _ := s.Range()
+	if oldest == nil || *oldest != 500 || *newest != 500 {
+		t.Fatalf("got %v..%v, want 500..500", oldest, newest)
+	}
+}
