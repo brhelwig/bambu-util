@@ -1042,7 +1042,7 @@ func NewServer(cache *p1s.StateCache, cmd Commander, hub *Hub, store *history.St
 }
 ```
 
-In `internal/web/server_test.go`, add the import and replace `newTestServer` with a shared builder plus a thin wrapper, so all existing call sites (`newTestServer(connected, state)`) keep compiling unchanged:
+In `internal/web/server_test.go`, add the imports and replace `newTestServer` with a shared builder plus a thin wrapper, so all existing call sites (`newTestServer(connected, state)`) keep compiling unchanged. Note: this file also has a second helper, `newTestServerWithFields`, and two more inline `NewHub`/`NewServer` calls (in `TestStatusIncludesJobFields` and `TestStatusHMSPopulated`) that the excerpt below doesn't show — update all of them the same way (add a `store := openTestStore()`, thread it into both `NewHub` and `NewServer`). Add a small `openTestStore` helper so that repetition is one line, not three:
 
 ```go
 import (
@@ -1052,6 +1052,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
@@ -1059,6 +1060,14 @@ import (
 ```
 
 ```go
+func openTestStore() *history.Store {
+	store, err := history.Open(":memory:")
+	if err != nil {
+		panic(err)
+	}
+	return store
+}
+
 func buildTestServer(connected bool, state string) (*httptest.Server, *fakeCommander, *history.Store) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(connected)
@@ -1066,15 +1075,30 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 		cache.Merge(map[string]any{"gcode_state": state, "bed_temper": 20.5})
 	}
 	cmd := &fakeCommander{}
-	store, err := history.Open(":memory:")
-	if err != nil {
-		panic(err)
-	}
+	store := openTestStore()
+	// Yields continuously, like a real camera, rather than once — a viewer
+	// can Attach() at any point after Start (its connection lifecycle is no
+	// longer tied to Attach) and still needs to see a frame promptly. A
+	// single-shot fake source would race: whichever test happens to Attach
+	// after that one frame already went out would hang forever waiting for
+	// a second one that never comes.
 	hub := NewHub(func(ctx context.Context, yield func([]byte)) error {
-		yield([]byte{0xFF, 0xD8, 0xFF, 0xD9})
-		<-ctx.Done()
-		return ctx.Err()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				yield([]byte{0xFF, 0xD8, 0xFF, 0xD9})
+			}
+		}
 	}, store)
+	// Start is normally called once from main; tests need it running so
+	// Attach()ed viewers (e.g. /camera/stream) actually receive a frame.
+	// This goroutine exits when the test binary does; individual tests
+	// don't attach often enough for the leak to matter here.
+	go hub.Start(context.Background())
 	return httptest.NewServer(NewServer(cache, cmd, hub, store).Handler()), cmd, store
 }
 
@@ -1084,8 +1108,10 @@ func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommand
 }
 ```
 
-Run: `go build ./... && go test ./internal/web/... -v`
-Expected: build succeeds; every pre-existing test still PASSes (none of their behavior changed, only how the test server is constructed)
+For `newTestServerWithFields` and the two inline call sites (which don't exercise `/camera/stream`, so they don't need the continuous-yield source — a `<-ctx.Done()`-only stub is fine), just add `store := openTestStore()` and pass it to both `NewHub(...)` and `NewServer(...)`.
+
+Run: `go build ./internal/... && go test ./internal/web/... -v -timeout 30s`
+Expected: build succeeds; every pre-existing test still PASSes (none of their behavior changed, only how the test server is constructed). Use `-timeout` here — if a viewer-attaching test (like the camera stream one) races a single-shot fake source, it hangs instead of failing cleanly, and a bounded timeout turns that into a fast, readable stack dump instead of a silent hang.
 
 - [ ] **Step 2: Commit the compile fix on its own**
 
