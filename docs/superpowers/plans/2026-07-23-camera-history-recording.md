@@ -1567,15 +1567,22 @@ setInterval(refreshHistoryRange, 30000);
 setInterval(refreshHistoryJobs, 30000);
 ```
 
-- [ ] **Step 4: Manually verify in a browser**
+- [x] **Step 4: Verify against the running server**
 
-Run: `PRINTER_IP=192.0.2.10 PRINTER_SERIAL=00000000 PRINTER_ACCESS_CODE=x DATA_DIR=/tmp/bu-history-check go run ./cmd/bambu-util`
+No browser available in this environment, so this was adapted to a headless check: start the real server in the background against a fake printer IP, and curl the page and the three new endpoints.
 
-Open `http://localhost:8081/?demo` (the printer connection will fail since `192.0.2.10` isn't real, but the page and its `/camera/history/*` calls run against the real embedded server). Confirm:
-- The History card shows "No recordings yet" (no camera reachable, so nothing's been recorded).
-- No JS console errors.
+```bash
+DATA_DIR=/tmp/bu-history-check PRINTER_IP=192.0.2.10 PRINTER_SERIAL=00000000 PRINTER_ACCESS_CODE=x LISTEN_ADDR=:18081 go run ./cmd/bambu-util &
+sleep 2
+curl -s -o /dev/null -w "index.html: %{http_code}\n" http://localhost:18081/
+curl -s http://localhost:18081/camera/history/range
+curl -s http://localhost:18081/camera/history/jobs
+curl -s -o /dev/null -w "frame(404 expected): %{http_code}\n" "http://localhost:18081/camera/history/frame?ts=100"
+```
 
-Then stop the server and clean up: `rm -rf /tmp/bu-history-check`
+Expected: `index.html: 200`, `{"newest":null,"oldest":null}`, `[]`, `frame(404 expected): 404` — confirmed. Also ran the new JS through `node --check` (extracted from the `<script>` block) to catch syntax errors, since there's no in-browser check here. Stop the server and clean up `/tmp/bu-history-check` afterward.
+
+Also note: the actual `index.html` on this branch has moved on from the version the plan was written against (an icon-grid layout and a manual camera on/off toggle were added in the meantime, replacing the always-on `<img id="cam">`/`#lampBtn` card the plan's snippet assumed). The History card was inserted after the existing `#camCard` and before `#dryCard`, and the History JS appended at the end of the script block, gated behind `if (!DEMO)` to match how the rest of the page treats demo mode (matching the file's own convention, not literally specified in the plan).
 
 - [ ] **Step 5: Commit**
 
