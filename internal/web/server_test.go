@@ -1,14 +1,18 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
@@ -57,19 +61,48 @@ func (f *fakeCommander) PausePrint()  { f.calls = append(f.calls, "pause") }
 func (f *fakeCommander) ResumePrint() { f.calls = append(f.calls, "resume") }
 func (f *fakeCommander) StopPrint()   { f.calls = append(f.calls, "stop") }
 
-func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
+func openTestStore() *history.Store {
+	store, err := history.Open(":memory:")
+	if err != nil {
+		panic(err)
+	}
+	return store
+}
+
+func buildTestServer(connected bool, state string) (*httptest.Server, *fakeCommander, *history.Store) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(connected)
 	if state != "" {
 		cache.Merge(map[string]any{"gcode_state": state, "bed_temper": 20.5})
 	}
 	cmd := &fakeCommander{}
+	store := openTestStore()
+	// Yields continuously, like a real camera, rather than once — a viewer
+	// can Attach() at any point after Start (its connection lifecycle is no
+	// longer tied to Attach) and still needs to see a frame promptly.
 	hub := NewHub(func(ctx context.Context, yield func([]byte)) error {
-		yield([]byte{0xFF, 0xD8, 0xFF, 0xD9})
-		<-ctx.Done()
-		return ctx.Err()
-	})
-	return httptest.NewServer(NewServer(cache, cmd, hub).Handler()), cmd
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				yield([]byte{0xFF, 0xD8, 0xFF, 0xD9})
+			}
+		}
+	}, store)
+	// Start is normally called once from main; tests need it running so
+	// Attach()ed viewers (e.g. /camera/stream) actually receive a frame.
+	// This goroutine exits when ctx is cancelled by the test binary's exit;
+	// tests don't attach frequently enough for the leak to matter here.
+	go hub.Start(context.Background())
+	return httptest.NewServer(NewServer(cache, cmd, hub, store).Handler()), cmd, store
+}
+
+func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
+	ts, cmd, _ := buildTestServer(connected, state)
+	return ts, cmd
 }
 
 func TestStatusEndpoint(t *testing.T) {
@@ -293,8 +326,9 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.SetConnected(true)
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
-	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
-	return httptest.NewServer(NewServer(cache, cmd, hub).Handler()), cmd
+	store := openTestStore()
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() }, store)
+	return httptest.NewServer(NewServer(cache, cmd, hub, store).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -503,8 +537,9 @@ func TestStatusIncludesJobFields(t *testing.T) {
 		"ams":               map[string]any{"ams": []any{}},
 	})
 	cmd := &fakeCommander{}
-	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
-	ts := httptest.NewServer(NewServer(cache, cmd, hub).Handler())
+	store := openTestStore()
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() }, store)
+	ts := httptest.NewServer(NewServer(cache, cmd, hub, store).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -548,8 +583,9 @@ func TestStatusHMSPopulated(t *testing.T) {
 		},
 	})
 	cmd := &fakeCommander{}
-	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() })
-	ts := httptest.NewServer(NewServer(cache, cmd, hub).Handler())
+	store := openTestStore()
+	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() }, store)
+	ts := httptest.NewServer(NewServer(cache, cmd, hub, store).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -559,5 +595,78 @@ func TestStatusHMSPopulated(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&s)
 	if len(s.HMS) != 1 || s.HMS[0].Code != "0300-8000-0003-0002" {
 		t.Fatalf("hms = %+v", s.HMS)
+	}
+}
+
+func TestHistoryRangeEmpty(t *testing.T) {
+	ts, _, _ := buildTestServer(true, "IDLE")
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/camera/history/range")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r map[string]any
+	json.NewDecoder(resp.Body).Decode(&r)
+	if r["oldest"] != nil || r["newest"] != nil {
+		t.Fatalf("want null range on an empty store, got %v", r)
+	}
+}
+
+func TestHistoryRangeAndFrame(t *testing.T) {
+	ts, _, store := buildTestServer(true, "IDLE")
+	defer ts.Close()
+	store.InsertFrame(100, []byte{0xFF, 0xD8, 0xFF, 0xD9})
+	store.InsertFrame(200, []byte{0xFF, 0xD8, 0x01, 0xFF, 0xD9})
+
+	resp, _ := ts.Client().Get(ts.URL + "/camera/history/range")
+	var r map[string]any
+	json.NewDecoder(resp.Body).Decode(&r)
+	if r["oldest"] != float64(100) || r["newest"] != float64(200) {
+		t.Fatalf("bad range: %v", r)
+	}
+
+	resp2, _ := ts.Client().Get(ts.URL + "/camera/history/frame?ts=150")
+	body, _ := io.ReadAll(resp2.Body)
+	if resp2.StatusCode != 200 || !bytes.Equal(body, []byte{0xFF, 0xD8, 0x01, 0xFF, 0xD9}) {
+		t.Fatalf("frame at ts=150: status %d body %x, want the ts=200 frame", resp2.StatusCode, body)
+	}
+	if ct := resp2.Header.Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want image/jpeg", ct)
+	}
+}
+
+func TestHistoryFrameNotFound(t *testing.T) {
+	ts, _, _ := buildTestServer(true, "IDLE")
+	defer ts.Close()
+
+	resp, _ := ts.Client().Get(ts.URL + "/camera/history/frame?ts=999")
+	if resp.StatusCode != 404 {
+		t.Fatalf("status %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestHistoryFrameInvalidTs(t *testing.T) {
+	ts, _, _ := buildTestServer(true, "IDLE")
+	defer ts.Close()
+
+	resp, _ := ts.Client().Get(ts.URL + "/camera/history/frame?ts=notanumber")
+	if resp.StatusCode != 400 {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestHistoryJobs(t *testing.T) {
+	ts, _, store := buildTestServer(true, "IDLE")
+	defer ts.Close()
+	id, _ := store.OpenJob("benchy.3mf", 100)
+	store.CloseJob(id, 200)
+	store.OpenJob("ongoing.3mf", 300)
+
+	resp, _ := ts.Client().Get(ts.URL + "/camera/history/jobs")
+	var jobs []map[string]any
+	json.NewDecoder(resp.Body).Decode(&jobs)
+	if len(jobs) != 2 {
+		t.Fatalf("got %d jobs, want 2", len(jobs))
 	}
 }

@@ -56,6 +56,8 @@
   .ams-editor input.temp { width: 60px; }
   .ams-editor input[type=color] { width: 46px; height: 30px; background: none; border: 0; padding: 0; }
   .ams-editor .ams-save { width: 100%; margin-top: 6px; padding: 10px; font-size: 0.9rem; }
+  #historyImg { width: 100%; border-radius: 12px; display: block; background: #0d0f12; min-height: 120px; }
+  select { border: 0; border-radius: 8px; padding: 8px; font-size: 0.9rem; background: #2a313b; color: #e8eaed; }
 </style>
 </head>
 <body>
@@ -101,6 +103,27 @@
 </div>
 <div class="card" id="camCard" style="display:none; padding:8px">
   <img id="cam" alt="printer camera">
+</div>
+<div class="card" id="historyCard">
+  <h2>History</h2>
+  <div id="historyEmpty" style="color:#9aa0a6">No recordings yet</div>
+  <div id="historyControls" style="display:none">
+    <img id="historyImg" alt="recorded frame">
+    <input type="range" id="historySlider" min="0" max="1" step="1" value="0">
+    <div class="row"><span id="historyTime">…</span>
+      <span>
+        <button id="historyPlayBtn" style="padding:6px 14px; font-size:0.85rem">Play</button>
+        <select id="historySpeedSelect">
+          <option value="1">1x</option>
+          <option value="5">5x</option>
+          <option value="20" selected>20x</option>
+          <option value="60">60x</option>
+        </select>
+      </span>
+    </div>
+    <h2 style="margin-top:14px">Recent jobs</h2>
+    <div id="historyJobs"></div>
+  </div>
 </div>
 <div class="card" id="dryCard" style="margin-top:16px">
   <h2>Bed drying</h2>
@@ -627,6 +650,127 @@ document.querySelectorAll("[data-print-action]").forEach(b =>
       stopTimer = setTimeout(disarmStop, 4000);
     }
   }));
+
+// History: DVR-style scrub through the recorded buffer, and per-job
+// timelapse playback, both driven by repeatedly fetching the nearest stored
+// frame at a chosen timestamp — no video file, no streaming protocol.
+let historyRange = null; // {oldest, newest} in unix seconds, or nulls if empty
+let historyPos = 0;
+let historyPlaying = false;
+let historyTimer = null;
+let historyBoundEnd = null; // caps playback when watching a single job's clip
+
+function fmtHistoryTime(ts) {
+  return new Date(ts * 1000).toLocaleString([], {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+}
+
+function showHistoryFrame(ts) {
+  const img = new Image();
+  img.onload = () => { $("historyImg").src = img.src; };
+  img.src = `/camera/history/frame?ts=${Math.floor(ts)}`; // onerror: hold the last frame shown
+  $("historyTime").textContent = fmtHistoryTime(ts);
+}
+
+function stopHistoryPlayback() {
+  historyPlaying = false;
+  historyBoundEnd = null;
+  $("historyPlayBtn").textContent = "Play";
+  if (historyTimer) { clearInterval(historyTimer); historyTimer = null; }
+}
+
+function startHistoryPlayback() {
+  historyPlaying = true;
+  $("historyPlayBtn").textContent = "Pause";
+  const speed = Number($("historySpeedSelect").value);
+  historyTimer = setInterval(() => {
+    historyPos += speed;
+    const cap = historyBoundEnd ?? historyRange.newest;
+    if (historyPos >= cap) {
+      historyPos = cap;
+      showHistoryFrame(historyPos);
+      $("historySlider").value = historyPos;
+      stopHistoryPlayback();
+      return;
+    }
+    $("historySlider").value = historyPos;
+    showHistoryFrame(historyPos);
+  }, 1000);
+}
+
+$("historyPlayBtn").addEventListener("click", () => {
+  if (historyPlaying) stopHistoryPlayback();
+  else startHistoryPlayback();
+});
+
+$("historySlider").addEventListener("input", () => {
+  stopHistoryPlayback();
+  historyPos = Number($("historySlider").value);
+  showHistoryFrame(historyPos);
+});
+
+function playJob(job) {
+  stopHistoryPlayback();
+  historyPos = job.start;
+  historyBoundEnd = job.end || historyRange.newest;
+  $("historySlider").value = historyPos;
+  showHistoryFrame(historyPos);
+  startHistoryPlayback();
+}
+
+function renderHistoryJobs(jobs) {
+  const container = $("historyJobs");
+  container.innerHTML = "";
+  jobs.forEach(j => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const label = document.createElement("span");
+    label.textContent = j.name || "(unnamed job)";
+    const btn = document.createElement("button");
+    btn.textContent = j.end ? "Timelapse" : "Watch job so far";
+    btn.style.cssText = "padding:6px 14px; font-size:0.8rem; border-radius:8px";
+    btn.addEventListener("click", () => playJob(j));
+    row.append(label, btn);
+    container.appendChild(row);
+  });
+}
+
+async function refreshHistoryRange() {
+  try {
+    const r = await fetch("/camera/history/range");
+    historyRange = await r.json();
+  } catch {
+    return;
+  }
+  const has = historyRange.oldest != null && historyRange.newest != null;
+  $("historyEmpty").style.display = has ? "none" : "";
+  $("historyControls").style.display = has ? "" : "none";
+  if (!has) return;
+  $("historySlider").min = historyRange.oldest;
+  $("historySlider").max = historyRange.newest;
+  if (!historyPlaying) {
+    historyPos = historyRange.newest;
+    $("historySlider").value = historyPos;
+    showHistoryFrame(historyPos);
+  }
+}
+
+async function refreshHistoryJobs() {
+  try {
+    const r = await fetch("/camera/history/jobs");
+    renderHistoryJobs(await r.json());
+  } catch {
+    // leave the last-known job list in place
+  }
+}
+
+if (!DEMO) {
+  refreshHistoryRange();
+  refreshHistoryJobs();
+  setInterval(refreshHistoryRange, 30000);
+  setInterval(refreshHistoryJobs, 30000);
+}
 </script>
 </body>
 </html>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
@@ -37,11 +39,12 @@ type Server struct {
 	cache   *p1s.StateCache
 	cmd     Commander
 	hub     *Hub
+	store   *history.Store
 	autoOff *autoOff
 }
 
-func NewServer(cache *p1s.StateCache, cmd Commander, hub *Hub) *Server {
-	return &Server{cache: cache, cmd: cmd, hub: hub, autoOff: newAutoOff()}
+func NewServer(cache *p1s.StateCache, cmd Commander, hub *Hub, store *history.Store) *Server {
+	return &Server{cache: cache, cmd: cmd, hub: hub, store: store, autoOff: newAutoOff()}
 }
 
 // EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
@@ -79,6 +82,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("POST /api/actions/{name}", s.action)
 	mux.HandleFunc("GET /camera/stream", s.camera)
+	mux.HandleFunc("GET /camera/history/range", s.historyRange)
+	mux.HandleFunc("GET /camera/history/frame", s.historyFrame)
+	mux.HandleFunc("GET /camera/history/jobs", s.historyJobs)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -389,4 +395,47 @@ func (s *Server) camera(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (s *Server) historyRange(w http.ResponseWriter, _ *http.Request) {
+	oldest, newest, err := s.store.Range()
+	if err != nil {
+		http.Error(w, "range query failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"oldest": oldest, "newest": newest})
+}
+
+func (s *Server) historyFrame(w http.ResponseWriter, r *http.Request) {
+	ts, err := strconv.ParseInt(r.URL.Query().Get("ts"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid ts", http.StatusBadRequest)
+		return
+	}
+	jpeg, _, err := s.store.FrameAtOrAfter(ts)
+	if errors.Is(err, history.ErrNoFrame) {
+		http.Error(w, "no frame at or after ts", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "frame query failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Write(jpeg)
+}
+
+func (s *Server) historyJobs(w http.ResponseWriter, _ *http.Request) {
+	jobs, err := s.store.RecentJobs()
+	if err != nil {
+		http.Error(w, "jobs query failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]map[string]any, len(jobs))
+	for i, j := range jobs {
+		out[i] = map[string]any{"id": j.ID, "name": j.Name, "start": j.Start, "end": j.End}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
 }
