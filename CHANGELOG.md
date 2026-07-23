@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Always-on camera recording into a rolling history buffer (default 24h,
+  configurable via `RECORDING_RETENTION`), stored in SQLite under `DATA_DIR`.
+- History UI: scrub back through recent footage, or jump to a print job and
+  fast-forward through just that job's footage as a timelapse.
+
+### Changed
+
+- The camera connection is now held continuously so it can record, instead
+  of only while a viewer is on the page. Bambu Studio's own camera view will
+  not work while bambu-util is running.
+
 ## [0.5.0] - 2026-07-22
 
 ### Added

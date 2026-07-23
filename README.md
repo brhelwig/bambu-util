@@ -15,8 +15,14 @@ Features:
   **Heater off** — the bed-drying / cleaning actions
 - Live status: connection, printer state, bed/nozzle temperatures
   (actual/target), print progress
-- Chamber camera view (~1 fps), relayed as MJPEG; the bridge only connects to
-  the printer camera while someone is watching
+- Chamber camera view (~1 fps), relayed as MJPEG. The bridge holds the
+  camera connection continuously (not just while someone is watching) so it
+  can record — this means Bambu Studio's own camera view will not work
+  while bambu-util is running, since the printer only serves one camera
+  client at a time
+- Rolling history buffer of recorded frames (`RECORDING_RETENTION`, default
+  24h): scrub back through recent footage, or jump to any print job and
+  fast-forward through just that job's footage as a timelapse
 - Bed actions are refused server-side unless the printer is idle
   (IDLE/FINISH/FAILED) — nothing can move the bed or change temperatures
   mid-print
@@ -35,6 +41,8 @@ Environment variables only — no config files:
 | `PRINTER_SERIAL` | yes | Printer serial (Settings → Device) |
 | `PRINTER_ACCESS_CODE` | yes | LAN access code (Settings → WLAN) |
 | `LISTEN_ADDR` | no | Listen address, default `:8081` |
+| `DATA_DIR` | no | Directory for the recording database, default `./data`. Mount a volume here so the history buffer survives restarts. |
+| `RECORDING_RETENTION` | no | How long to keep recorded frames, as a Go duration (`12h`, `48h`, ...), default `24h` |
 
 ### Run
 
