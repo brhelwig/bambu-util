@@ -36,16 +36,18 @@
 **Files:**
 - Modify: `go.mod`, `go.sum`
 
-- [ ] **Step 1: Add the dependency**
+- [x] **Step 1: Add the dependency**
 
 Run: `go get modernc.org/sqlite`
 
-- [ ] **Step 2: Verify it cross-compiles the way the Dockerfile does (CGO_ENABLED=0, arm64)**
+Note: this bumped `golang.org/x/sync` transitively, which left `go.sum` missing an entry for `golang.org/x/sync/semaphore` (needed by `paho.mqtt.golang`). If the next step fails with a "missing go.sum entry" error, run `go get github.com/eclipse/paho.mqtt.golang@v1.5.1` to reconcile it (don't run `go mod tidy` here — nothing imports `modernc.org/sqlite` yet, so tidy would remove it again before Task 2 adds the import).
+
+- [x] **Step 2: Verify it cross-compiles the way the Dockerfile does (CGO_ENABLED=0, arm64)**
 
 Run: `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/bu-arm64-check ./cmd/bambu-util && rm /tmp/bu-arm64-check && echo OK`
 Expected: `OK` (this works today even before `internal/history` exists, since nothing imports the new dependency yet — if `go build` complains the import isn't used anywhere, that's fine, this step is just confirming the module resolves and cross-compiles; skip build verification if `go vet ./...` already passes)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add go.mod go.sum
