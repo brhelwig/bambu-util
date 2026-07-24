@@ -1,8 +1,12 @@
 package web
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
 func TestLampAutoForcesOnWhileActive(t *testing.T) {
@@ -86,5 +90,64 @@ func TestLampAutoCancelledByReactivation(t *testing.T) {
 	want := int(LampInactiveOffAfter.Seconds())
 	if r := l.remaining(); r != want {
 		t.Fatalf("remaining after re-arming = %d, want %d", r, want)
+	}
+}
+
+func TestPollLampForcesOnWhenJobRunning(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{"gcode_state": "RUNNING"})
+	cmd := &fakeCommander{}
+	store := openTestStore()
+	defer store.Close()
+	s := NewServer(cache, cmd, store)
+
+	s.pollLamp()
+
+	if len(cmd.calls) != 1 || cmd.calls[0] != "lamp-on" {
+		t.Fatalf("calls = %v, want [lamp-on]", cmd.calls)
+	}
+}
+
+func TestPollLampDoesNothingWhenDisconnected(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(false)
+	cmd := &fakeCommander{}
+	store := openTestStore()
+	defer store.Close()
+	s := NewServer(cache, cmd, store)
+
+	s.pollLamp()
+
+	if len(cmd.calls) != 0 {
+		t.Fatalf("calls = %v, want none", cmd.calls)
+	}
+}
+
+func TestStatusExposesLampOffCountdown(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{"gcode_state": "IDLE"})
+	cmd := &fakeCommander{}
+	store := openTestStore()
+	defer store.Close()
+	s := NewServer(cache, cmd, store)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	var status map[string]any
+	resp, _ := ts.Client().Get(ts.URL + "/api/status")
+	json.NewDecoder(resp.Body).Decode(&status)
+	if status["lampOffIn"] != nil {
+		t.Fatalf("lampOffIn = %v before any poll, want nil", status["lampOffIn"])
+	}
+
+	s.pollLamp() // idle server: lampAuto starts wasActive=true, so this arms the 8h countdown
+
+	resp2, _ := ts.Client().Get(ts.URL + "/api/status")
+	json.NewDecoder(resp2.Body).Decode(&status)
+	lampOff, ok := status["lampOffIn"].(float64)
+	if !ok || lampOff > LampInactiveOffAfter.Seconds() || lampOff < LampInactiveOffAfter.Seconds()-60 {
+		t.Fatalf("lampOffIn = %v, want ~%v", status["lampOffIn"], LampInactiveOffAfter.Seconds())
 	}
 }
