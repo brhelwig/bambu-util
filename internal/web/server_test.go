@@ -2,15 +2,11 @@ package web
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
@@ -77,27 +73,7 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 	}
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	// Yields continuously, like a real camera, rather than once — a viewer
-	// can Attach() at any point after Start (its connection lifecycle is no
-	// longer tied to Attach) and still needs to see a frame promptly.
-	hub := NewHub(func(ctx context.Context, yield func([]byte)) error {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-ticker.C:
-				yield([]byte{0xFF, 0xD8, 0xFF, 0xD9})
-			}
-		}
-	}, store)
-	// Start is normally called once from main; tests need it running so
-	// Attach()ed viewers (e.g. /camera/stream) actually receive a frame.
-	// This goroutine exits when ctx is cancelled by the test binary's exit;
-	// tests don't attach frequently enough for the leak to matter here.
-	go hub.Start(context.Background())
-	return httptest.NewServer(NewServer(cache, cmd, hub, store).Handler()), cmd, store
+	return httptest.NewServer(NewServer(cache, cmd, store).Handler()), cmd, store
 }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
@@ -167,27 +143,6 @@ func TestHealthz(t *testing.T) {
 	resp, _ := ts.Client().Get(ts.URL + "/healthz")
 	if resp.StatusCode != 200 {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
-	}
-}
-
-func TestCameraStreamContentType(t *testing.T) {
-	ts, _ := newTestServer(true, "IDLE")
-	defer ts.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/camera/stream", nil)
-	resp, err := ts.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "multipart/x-mixed-replace") {
-		t.Fatalf("content-type: %s", resp.Header.Get("Content-Type"))
-	}
-	buf := make([]byte, 64)
-	n, _ := resp.Body.Read(buf)
-	if !strings.Contains(string(buf[:n]), "image/jpeg") {
-		t.Fatalf("first part header missing: %q", buf[:n])
 	}
 }
 
@@ -327,8 +282,7 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() }, store)
-	return httptest.NewServer(NewServer(cache, cmd, hub, store).Handler()), cmd
+	return httptest.NewServer(NewServer(cache, cmd, store).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -538,8 +492,7 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() }, store)
-	ts := httptest.NewServer(NewServer(cache, cmd, hub, store).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -584,8 +537,7 @@ func TestStatusHMSPopulated(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	hub := NewHub(func(ctx context.Context, yield func([]byte)) error { <-ctx.Done(); return ctx.Err() }, store)
-	ts := httptest.NewServer(NewServer(cache, cmd, hub, store).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")

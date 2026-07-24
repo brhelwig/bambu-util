@@ -38,13 +38,12 @@ type Commander interface {
 type Server struct {
 	cache   *p1s.StateCache
 	cmd     Commander
-	hub     *Hub
 	store   *history.Store
 	autoOff *autoOff
 }
 
-func NewServer(cache *p1s.StateCache, cmd Commander, hub *Hub, store *history.Store) *Server {
-	return &Server{cache: cache, cmd: cmd, hub: hub, store: store, autoOff: newAutoOff()}
+func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store) *Server {
+	return &Server{cache: cache, cmd: cmd, store: store, autoOff: newAutoOff()}
 }
 
 // EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
@@ -81,7 +80,6 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("POST /api/actions/{name}", s.action)
-	mux.HandleFunc("GET /camera/stream", s.camera)
 	mux.HandleFunc("GET /camera/history/range", s.historyRange)
 	mux.HandleFunc("GET /camera/history/frame", s.historyFrame)
 	mux.HandleFunc("GET /camera/history/jobs", s.historyJobs)
@@ -375,26 +373,6 @@ func normalizeColor(raw string) (string, error) {
 		}
 	}
 	return up, nil
-}
-
-func (s *Server) camera(w http.ResponseWriter, r *http.Request) {
-	frames, detach := s.hub.Attach()
-	defer detach()
-	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-	rc := http.NewResponseController(w)
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case frame := <-frames:
-			fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame))
-			w.Write(frame)
-			fmt.Fprint(w, "\r\n")
-			if err := rc.Flush(); err != nil {
-				return
-			}
-		}
-	}
 }
 
 func (s *Server) historyRange(w http.ResponseWriter, _ *http.Request) {
