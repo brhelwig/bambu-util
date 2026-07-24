@@ -4,7 +4,6 @@ package web
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 )
 
@@ -25,20 +24,17 @@ const (
 )
 
 // Hub connects to the printer camera once, at Start, and holds that
-// connection for the process's lifetime, fanning each frame out to live
-// viewers and into the history store. Earlier versions only held the camera
-// while at least one viewer was attached, so Bambu Studio could use it the
-// rest of the time — always-on recording means that's no longer true; the
-// printer's camera port serves one client, so Bambu Studio's live view will
-// not work while this app is running. Accepted tradeoff, see the design
-// spec.
+// connection for the process's lifetime, writing every frame to the
+// history store. Every view (live-follow, scrub, per-job timelapse) is
+// served from that store via /camera/history/frame, so there's no separate
+// live stream here to fan out to — the printer's camera port is held
+// exclusively by this process the whole time it runs (Bambu Studio's own
+// camera view will not work while this app is running).
 type Hub struct {
 	source                       CameraSource
 	store                        FrameSink
 	now                          func() time.Time
 	minRetryDelay, maxRetryDelay time.Duration
-	mu                           sync.Mutex
-	viewers                      map[chan []byte]struct{}
 }
 
 // NewHub creates a Hub. Call Start once to begin the camera connection.
@@ -49,22 +45,6 @@ func NewHub(source CameraSource, store FrameSink) *Hub {
 		now:           time.Now,
 		minRetryDelay: defaultMinRetryDelay,
 		maxRetryDelay: defaultMaxRetryDelay,
-		viewers:       map[chan []byte]struct{}{},
-	}
-}
-
-// Attach registers a viewer. The channel receives JPEG frames; call detach
-// when the viewer leaves. Does not affect the camera connection, which runs
-// independently once Start has been called.
-func (h *Hub) Attach() (frames <-chan []byte, detach func()) {
-	ch := make(chan []byte, 1)
-	h.mu.Lock()
-	h.viewers[ch] = struct{}{}
-	h.mu.Unlock()
-	return ch, func() {
-		h.mu.Lock()
-		delete(h.viewers, ch)
-		h.mu.Unlock()
 	}
 }
 
@@ -77,7 +57,9 @@ func (h *Hub) Start(ctx context.Context) {
 		gotFrame := false
 		err := h.source(ctx, func(frame []byte) {
 			gotFrame = true
-			h.broadcast(frame)
+			if err := h.store.InsertFrame(h.now().Unix(), frame); err != nil {
+				log.Printf("history: insert frame: %v", err)
+			}
 		})
 		if ctx.Err() != nil {
 			return
@@ -105,18 +87,4 @@ func (h *Hub) nextBackoff(prev time.Duration) time.Duration {
 		return h.maxRetryDelay
 	}
 	return next
-}
-
-func (h *Hub) broadcast(frame []byte) {
-	if err := h.store.InsertFrame(h.now().Unix(), frame); err != nil {
-		log.Printf("history: insert frame: %v", err)
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for ch := range h.viewers {
-		select {
-		case ch <- frame:
-		default: // viewer still writing the previous frame — drop this one
-		}
-	}
 }

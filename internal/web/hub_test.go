@@ -38,26 +38,7 @@ func (f *fakeSink) count() int {
 	return len(f.frames)
 }
 
-func TestHubBroadcastsToAttachedViewers(t *testing.T) {
-	src := &fakeSource{}
-	h := NewHub(src.run, &fakeSink{})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.Start(ctx)
-
-	ch, detach := h.Attach()
-	defer detach()
-	select {
-	case f := <-ch:
-		if len(f) == 0 {
-			t.Fatal("empty frame delivered")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("no frame delivered to viewer")
-	}
-}
-
-func TestHubRecordsFramesWithNoViewerAttached(t *testing.T) {
+func TestHubRecordsFrames(t *testing.T) {
 	src := &fakeSource{}
 	sink := &fakeSink{}
 	h := NewHub(src.run, sink)
@@ -68,7 +49,7 @@ func TestHubRecordsFramesWithNoViewerAttached(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for sink.count() == 0 {
 		if time.Now().After(deadline) {
-			t.Fatal("no frame recorded despite no viewer ever attaching")
+			t.Fatal("no frame recorded")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

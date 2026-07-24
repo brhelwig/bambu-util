@@ -10,14 +10,19 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Always-on camera recording into a rolling history buffer (default 24h,
   configurable via `RECORDING_RETENTION`), stored in SQLite under `DATA_DIR`.
-- History UI: scrub back through recent footage, or jump to a print job and
-  fast-forward through just that job's footage as a timelapse.
+- One camera view: follows the live tail of the recording buffer by
+  default, with a scrub bar to drag back through recent footage, a
+  **Live** button to jump back to the tail, and a jobs list to fast-forward
+  through a specific print's footage as a timelapse.
 
 ### Changed
 
 - The camera connection is now held continuously so it can record, instead
   of only while a viewer is on the page. Bambu Studio's own camera view will
   not work while bambu-util is running.
+- Removed the raw MJPEG live-stream endpoint and the manual camera on/off
+  toggle — every view now sources frames from the recording buffer, so
+  there's no separate "live" connection to toggle.
 
 ## [0.5.0] - 2026-07-22
 

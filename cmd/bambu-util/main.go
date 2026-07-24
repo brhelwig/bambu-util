@@ -76,7 +76,7 @@ func main() {
 		return p1s.StreamFrames(ctx, net.JoinHostPort(ip, "6000"), "bblp", accessCode, yield)
 	}, store)
 
-	srv := web.NewServer(cache, client, hub, store)
+	srv := web.NewServer(cache, client, store)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Start(ctx)

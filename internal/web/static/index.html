@@ -36,13 +36,14 @@
   button.danger { background: #6e2222; }
   button.danger.armed { background: #b02a2a; }
   #log { min-height: 1.2em; color: #9aa0a6; font-size: 0.85rem; margin-top: 12px; }
-  #cam { width: 100%; border-radius: 12px; display: block; background: #0d0f12; min-height: 120px; }
+  #camImg { width: 100%; border-radius: 12px; display: block; background: #0d0f12; min-height: 120px; }
   .ams-slot { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.95rem; }
   .ams-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid #333; }
   .card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0a6; font-weight: 600; margin: 0 0 10px; }
   input[type=range] { width: 100%; margin: 6px 0 2px; accent-color: #c98a2b; }
   input[type=range]:disabled { opacity: 0.4; }
   .iconrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .iconrow.cols3 { grid-template-columns: repeat(3, 1fr); }
   .iconbtn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 13px 4px; }
   .iconbtn svg { width: 26px; height: 26px; display: block; }
   .iconbtn .cap { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.02em; }
@@ -56,7 +57,6 @@
   .ams-editor input.temp { width: 60px; }
   .ams-editor input[type=color] { width: 46px; height: 30px; background: none; border: 0; padding: 0; }
   .ams-editor .ams-save { width: 100%; margin-top: 6px; padding: 10px; font-size: 0.9rem; }
-  #historyImg { width: 100%; border-radius: 12px; display: block; background: #0d0f12; min-height: 120px; }
   select { border: 0; border-radius: 8px; padding: 8px; font-size: 0.9rem; background: #2a313b; color: #e8eaed; }
 </style>
 </head>
@@ -81,9 +81,7 @@
   <div class="row"><span>Fans (cool/aux/chamber)</span><span id="fans">…</span></div>
 </div>
 <div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
-<div class="iconrow" id="row1">
-  <button class="iconbtn" id="camBtn" aria-label="Turn camera on">
-    <span class="ico"></span><span class="cap">Camera</span></button>
+<div class="iconrow cols3" id="row1">
   <button class="iconbtn" id="lampBtn" aria-label="Chamber lamp" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 2a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.2v.3h6v-.3c0-.8.4-1.6 1-2.2A6 6 0 0 0 12 2z"/></svg></span><span class="cap">Lamp</span></button>
   <button class="iconbtn" id="pauseBtn" data-print-action="pause" aria-label="Pause print" disabled>
@@ -101,19 +99,16 @@
   <button class="iconbtn" data-action="unload" id="ejectBtn" aria-label="Eject loaded filament" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l7 9H5z"/><rect x="5" y="16" width="14" height="3" rx="1.5"/></svg></span><span class="cap">Eject</span></button>
 </div>
-<div class="card" id="camCard" style="display:none; padding:8px">
-  <img id="cam" alt="printer camera">
-</div>
-<div class="card" id="historyCard">
-  <h2>History</h2>
-  <div id="historyEmpty" style="color:#9aa0a6">No recordings yet</div>
-  <div id="historyControls" style="display:none">
-    <img id="historyImg" alt="recorded frame">
-    <input type="range" id="historySlider" min="0" max="1" step="1" value="0">
-    <div class="row"><span id="historyTime">…</span>
+<div class="card" id="camCard">
+  <div id="camEmpty" style="color:#9aa0a6">No recordings yet</div>
+  <div id="camControls" style="display:none">
+    <img id="camImg" alt="printer camera">
+    <input type="range" id="camSlider" min="0" max="1" step="1" value="0">
+    <div class="row"><span id="camTime">…</span>
       <span>
-        <button id="historyPlayBtn" style="padding:6px 14px; font-size:0.85rem">Play</button>
-        <select id="historySpeedSelect">
+        <button id="camLiveBtn" style="padding:6px 14px; font-size:0.85rem">Live</button>
+        <button id="camPlayBtn" style="padding:6px 14px; font-size:0.85rem">Play</button>
+        <select id="camSpeedSelect">
           <option value="1">1x</option>
           <option value="5">5x</option>
           <option value="20" selected>20x</option>
@@ -122,7 +117,7 @@
       </span>
     </div>
     <h2 style="margin-top:14px">Recent jobs</h2>
-    <div id="historyJobs"></div>
+    <div id="camJobs"></div>
   </div>
 </div>
 <div class="card" id="dryCard" style="margin-top:16px">
@@ -147,8 +142,6 @@ const $ = id => document.getElementById(id);
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
 
 // Icons that swap with state (the rest are inline in the markup).
-const SVG_CAM_ON  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M22 8l-5 4 5 4V8z"/></svg>`;
-const SVG_CAM_OFF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M22 8l-5 4 5 4V8z"/><line x1="3" y1="3" x2="21" y2="21"/></svg>`;
 const SVG_PLAY  = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg>`;
 const SVG_PAUSE = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`;
 
@@ -158,28 +151,6 @@ function setIco(btn, svg, cap) {
   if (svg != null) btn.querySelector(".ico").innerHTML = svg;
   if (cap != null) btn.querySelector(".cap").textContent = cap;
 }
-
-// Camera is a manual toggle whose last state persists across reloads, so it
-// only pulls the MJPEG feed (and holds the printer's camera connection open) if
-// the user left it on. Default off on a fresh browser.
-let camOn = localStorage.getItem("camOn") === "1";
-function applyCam() {
-  const btn = $("camBtn");
-  setIco(btn, camOn ? SVG_CAM_ON : SVG_CAM_OFF, camOn ? "Camera on" : "Camera off");
-  btn.classList.toggle("on", camOn);
-  btn.setAttribute("aria-label", camOn ? "Turn camera off" : "Turn camera on");
-  $("camCard").style.display = camOn ? "" : "none";
-  const cam = $("cam");
-  // Setting src starts the stream; clearing it drops the connection.
-  if (camOn) { if (cam.getAttribute("src") !== "/camera/stream") cam.src = "/camera/stream"; }
-  else { cam.removeAttribute("src"); }
-}
-$("camBtn").addEventListener("click", () => {
-  camOn = !camOn;
-  localStorage.setItem("camOn", camOn ? "1" : "0");
-  applyCam();
-});
-applyCam();
 
 // Declared up here (not by the stop-button wiring below) because refresh() can
 // call disarmStop() on its very first, synchronous run — before that wiring
@@ -651,76 +622,93 @@ document.querySelectorAll("[data-print-action]").forEach(b =>
     }
   }));
 
-// History: DVR-style scrub through the recorded buffer, and per-job
-// timelapse playback, both driven by repeatedly fetching the nearest stored
-// frame at a chosen timestamp — no video file, no streaming protocol.
-let historyRange = null; // {oldest, newest} in unix seconds, or nulls if empty
-let historyPos = 0;
-let historyPlaying = false;
-let historyTimer = null;
-let historyBoundEnd = null; // caps playback when watching a single job's clip
+// Camera: one window, always sourced from the recording buffer — there is
+// no separate live stream. "Live" just means following the tail of the
+// buffer, polled at roughly the camera's own capture rate; scrubbing the
+// slider or opening a job's timelapse drops out of following and shows a
+// specific historical frame instead, via the same "fetch nearest frame at
+// a timestamp" endpoint.
+let camRange = null; // {oldest, newest} in unix seconds, or nulls if empty
+let camPos = 0;
+let camFollowing = true; // true: keep showing the newest frame as it arrives
+let camPlaying = false; // true: auto-advancing through a job's timelapse
+let camPlayTimer = null;
+let camBoundEnd = null; // caps timelapse playback to one job's footage
 
-function fmtHistoryTime(ts) {
+function fmtCamTime(ts) {
   return new Date(ts * 1000).toLocaleString([], {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
 }
 
-function showHistoryFrame(ts) {
+function showCamFrame(ts) {
   const img = new Image();
-  img.onload = () => { $("historyImg").src = img.src; };
+  img.onload = () => { $("camImg").src = img.src; };
   img.src = `/camera/history/frame?ts=${Math.floor(ts)}`; // onerror: hold the last frame shown
-  $("historyTime").textContent = fmtHistoryTime(ts);
+  $("camTime").textContent = fmtCamTime(ts);
 }
 
-function stopHistoryPlayback() {
-  historyPlaying = false;
-  historyBoundEnd = null;
-  $("historyPlayBtn").textContent = "Play";
-  if (historyTimer) { clearInterval(historyTimer); historyTimer = null; }
+function stopCamPlayback() {
+  camPlaying = false;
+  camBoundEnd = null;
+  $("camPlayBtn").textContent = "Play";
+  if (camPlayTimer) { clearInterval(camPlayTimer); camPlayTimer = null; }
 }
 
-function startHistoryPlayback() {
-  historyPlaying = true;
-  $("historyPlayBtn").textContent = "Pause";
-  const speed = Number($("historySpeedSelect").value);
-  historyTimer = setInterval(() => {
-    historyPos += speed;
-    const cap = historyBoundEnd ?? historyRange.newest;
-    if (historyPos >= cap) {
-      historyPos = cap;
-      showHistoryFrame(historyPos);
-      $("historySlider").value = historyPos;
-      stopHistoryPlayback();
+function startCamPlayback() {
+  camFollowing = false;
+  camPlaying = true;
+  $("camPlayBtn").textContent = "Pause";
+  const speed = Number($("camSpeedSelect").value);
+  camPlayTimer = setInterval(() => {
+    camPos += speed;
+    const cap = camBoundEnd ?? camRange.newest;
+    if (camPos >= cap) {
+      camPos = cap;
+      $("camSlider").value = camPos;
+      showCamFrame(camPos);
+      stopCamPlayback();
       return;
     }
-    $("historySlider").value = historyPos;
-    showHistoryFrame(historyPos);
+    $("camSlider").value = camPos;
+    showCamFrame(camPos);
   }, 1000);
 }
 
-$("historyPlayBtn").addEventListener("click", () => {
-  if (historyPlaying) stopHistoryPlayback();
-  else startHistoryPlayback();
+$("camPlayBtn").addEventListener("click", () => {
+  if (camPlaying) stopCamPlayback();
+  else startCamPlayback();
 });
 
-$("historySlider").addEventListener("input", () => {
-  stopHistoryPlayback();
-  historyPos = Number($("historySlider").value);
-  showHistoryFrame(historyPos);
+$("camSlider").addEventListener("input", () => {
+  camFollowing = false;
+  stopCamPlayback();
+  camPos = Number($("camSlider").value);
+  showCamFrame(camPos);
+});
+
+$("camLiveBtn").addEventListener("click", () => {
+  stopCamPlayback();
+  camFollowing = true;
+  if (camRange && camRange.newest != null) {
+    camPos = camRange.newest;
+    $("camSlider").value = camPos;
+    showCamFrame(camPos);
+  }
 });
 
 function playJob(job) {
-  stopHistoryPlayback();
-  historyPos = job.start;
-  historyBoundEnd = job.end || historyRange.newest;
-  $("historySlider").value = historyPos;
-  showHistoryFrame(historyPos);
-  startHistoryPlayback();
+  stopCamPlayback();
+  camFollowing = false;
+  camPos = job.start;
+  camBoundEnd = job.end || (camRange && camRange.newest);
+  $("camSlider").value = camPos;
+  showCamFrame(camPos);
+  startCamPlayback();
 }
 
-function renderHistoryJobs(jobs) {
-  const container = $("historyJobs");
+function renderCamJobs(jobs) {
+  const container = $("camJobs");
   container.innerHTML = "";
   jobs.forEach(j => {
     const row = document.createElement("div");
@@ -736,40 +724,40 @@ function renderHistoryJobs(jobs) {
   });
 }
 
-async function refreshHistoryRange() {
+async function refreshCamRange() {
   try {
     const r = await fetch("/camera/history/range");
-    historyRange = await r.json();
+    camRange = await r.json();
   } catch {
     return;
   }
-  const has = historyRange.oldest != null && historyRange.newest != null;
-  $("historyEmpty").style.display = has ? "none" : "";
-  $("historyControls").style.display = has ? "" : "none";
+  const has = camRange.oldest != null && camRange.newest != null;
+  $("camEmpty").style.display = has ? "none" : "";
+  $("camControls").style.display = has ? "" : "none";
   if (!has) return;
-  $("historySlider").min = historyRange.oldest;
-  $("historySlider").max = historyRange.newest;
-  if (!historyPlaying) {
-    historyPos = historyRange.newest;
-    $("historySlider").value = historyPos;
-    showHistoryFrame(historyPos);
+  $("camSlider").min = camRange.oldest;
+  $("camSlider").max = camRange.newest;
+  if (camFollowing) {
+    camPos = camRange.newest;
+    $("camSlider").value = camPos;
+    showCamFrame(camPos);
   }
 }
 
-async function refreshHistoryJobs() {
+async function refreshCamJobs() {
   try {
     const r = await fetch("/camera/history/jobs");
-    renderHistoryJobs(await r.json());
+    renderCamJobs(await r.json());
   } catch {
     // leave the last-known job list in place
   }
 }
 
 if (!DEMO) {
-  refreshHistoryRange();
-  refreshHistoryJobs();
-  setInterval(refreshHistoryRange, 30000);
-  setInterval(refreshHistoryJobs, 30000);
+  refreshCamRange();
+  refreshCamJobs();
+  setInterval(refreshCamRange, 1000); // ~1fps, matches the camera's capture rate
+  setInterval(refreshCamJobs, 30000);
 }
 </script>
 </body>
