@@ -9,17 +9,51 @@ import (
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
-func TestLampAutoForcesOnWhileActive(t *testing.T) {
+func TestLampAutoFirstObservationForcesOnIfAlreadyActive(t *testing.T) {
+	// A process restart mid-print should force the lamp on immediately —
+	// not wait for the next inactive->active transition, which might be
+	// hours away.
 	now := time.Unix(1000, 0)
 	l := newLampAuto()
 	l.now = fixedClock(&now)
 
 	on, off := l.poll(true)
 	if !on || off {
-		t.Fatalf("poll(true) = (%v, %v), want (true, false)", on, off)
+		t.Fatalf("first observation while active = (%v, %v), want (true, false)", on, off)
 	}
 	if r := l.remaining(); r != -1 {
 		t.Fatalf("remaining = %d while active, want -1", r)
+	}
+}
+
+func TestLampAutoDoesNotRefightManualOffDuringSameActiveStretch(t *testing.T) {
+	now := time.Unix(1000, 0)
+	l := newLampAuto()
+	l.now = fixedClock(&now)
+
+	l.poll(true) // forces on once
+	// A manual toggle-off would happen here, out of band. A later tick
+	// while still in the same active stretch must not force it back on.
+	on, off := l.poll(true)
+	if on || off {
+		t.Fatalf("second active tick = (%v, %v), want (false, false)", on, off)
+	}
+}
+
+func TestLampAutoFirstObservationArmsOffCountdownIfAlreadyIdle(t *testing.T) {
+	// A process restart while the printer happens to be idle should arm
+	// the off-countdown immediately, not assume the lamp is already off.
+	now := time.Unix(1000, 0)
+	l := newLampAuto()
+	l.now = fixedClock(&now)
+
+	on, off := l.poll(false)
+	if on || off {
+		t.Fatalf("first observation while idle = (%v, %v), want (false, false)", on, off)
+	}
+	want := int(LampInactiveOffAfter.Seconds())
+	if r := l.remaining(); r != want {
+		t.Fatalf("remaining = %d, want %d", r, want)
 	}
 }
 

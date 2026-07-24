@@ -95,11 +95,14 @@ func (s *Server) pollLamp() {
 	nozzleTarget, _ := fields["nozzle_target_temper"].(float64)
 	active := jobActive || bedTarget > 0 || nozzleTarget > 0
 
+	// forceOn/forceOff each fire exactly once, on the relevant transition
+	// (see lampAuto), so there's no need to read the printer's reported
+	// lamp state first to dedup — nothing here polls or spams a command
+	// every tick, only on an actual transition.
 	forceOn, forceOff := s.lamp.poll(active)
-	current := p1s.ChamberLight(fields)
-	if forceOn && (current == nil || !*current) {
+	if forceOn {
 		s.cmd.SetChamberLight(true)
-	} else if forceOff && (current == nil || *current) {
+	} else if forceOff {
 		s.cmd.SetChamberLight(false)
 	}
 }

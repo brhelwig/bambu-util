@@ -12,32 +12,46 @@ const LampInactiveOffAfter = 8 * time.Hour
 
 // lampAuto decides the chamber lamp's automated state from whether the
 // printer is "active" (a job running, or the bed/nozzle commanded hot).
-// While active the lamp is forced on every tick (self-healing against a
-// manual toggle-off). The moment it goes inactive, an 8h countdown arms;
-// when it elapses, the lamp is forced off exactly once — same "fires once"
-// idiom as autoOff's heater safety shutoff — after which manual control is
-// unfought until the printer goes active again.
+// The moment it becomes active, the lamp is forced on once — a manual
+// toggle-off afterward, during the same active stretch, sticks; automation
+// won't fight it again until the next inactive->active transition. The
+// moment it becomes inactive, an 8h countdown arms; when it elapses, the
+// lamp is forced off exactly once — same "fires once" idiom as autoOff's
+// heater safety shutoff.
 type lampAuto struct {
-	mu        sync.Mutex
-	now       func() time.Time
-	wasActive bool      // starts true: an inactive printer at boot arms immediately
-	offAt     time.Time // zero = no pending forced-off
+	mu          sync.Mutex
+	now         func() time.Time
+	hasObserved bool      // false until the first poll — see poll's "first" handling
+	wasActive   bool
+	offAt       time.Time // zero = no pending forced-off
 }
 
-func newLampAuto() *lampAuto { return &lampAuto{now: time.Now, wasActive: true} }
+func newLampAuto() *lampAuto { return &lampAuto{now: time.Now} }
 
-// poll reports what the lamp should do this tick. forceOn is true on every
-// active tick. forceOff is true exactly once, the tick the 8h grace period
-// elapses.
+// poll reports what the lamp should do this tick. forceOn is true exactly
+// once, on the inactive->active transition. forceOff is true exactly once,
+// the tick the 8h grace period elapses.
+//
+// The very first call is always treated as a transition — whichever state
+// it observes, active or inactive — so a process restart mid-print forces
+// the lamp on immediately instead of waiting for the next real transition,
+// and a restart while idle arms the off-countdown immediately instead of
+// assuming the lamp is already correctly off.
 func (l *lampAuto) poll(active bool) (forceOn, forceOff bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	first := !l.hasObserved
+	l.hasObserved = true
+
 	if active {
 		l.offAt = time.Time{}
-		l.wasActive = true
-		return true, false
+		if first || !l.wasActive {
+			l.wasActive = true
+			return true, false
+		}
+		return false, false
 	}
-	if l.wasActive {
+	if first || l.wasActive {
 		l.offAt = l.now().Add(LampInactiveOffAfter)
 		l.wasActive = false
 	}
