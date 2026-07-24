@@ -14,6 +14,9 @@ follow [Semantic Versioning](https://semver.org/).
   default, with a scrub bar to drag back through recent footage, a
   **Live** button to jump back to the tail, and a jobs list to fast-forward
   through a specific print's footage as a timelapse.
+- Chamber lamp automation: on while a job is running or the bed/nozzle is
+  commanded hot, off automatically 8h after going idle. Shown as a
+  countdown in the status card, same as the bed/nozzle auto-off timers.
 
 ### Changed
 
