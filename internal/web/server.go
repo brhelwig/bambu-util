@@ -40,10 +40,11 @@ type Server struct {
 	cmd     Commander
 	store   *history.Store
 	autoOff *autoOff
+	lamp    *lampAuto
 }
 
 func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store) *Server {
-	return &Server{cache: cache, cmd: cmd, store: store, autoOff: newAutoOff()}
+	return &Server{cache: cache, cmd: cmd, store: store, autoOff: newAutoOff(), lamp: newLampAuto()}
 }
 
 // EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
@@ -65,6 +66,44 @@ func (s *Server) EnforceAutoOff(ctx context.Context) {
 				}
 			}
 		}
+	}
+}
+
+// EnforceLampAutomation runs the chamber-lamp automation loop until ctx is
+// cancelled. Call once (from main).
+func (s *Server) EnforceLampAutomation(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.pollLamp()
+		}
+	}
+}
+
+func (s *Server) pollLamp() {
+	fields, connected := s.cache.Snapshot()
+	if !connected {
+		return
+	}
+	gs := p1s.GcodeState(fields)
+	jobActive := gs == "RUNNING" || gs == "PAUSE"
+	bedTarget, _ := fields["bed_target_temper"].(float64)
+	nozzleTarget, _ := fields["nozzle_target_temper"].(float64)
+	active := jobActive || bedTarget > 0 || nozzleTarget > 0
+
+	// forceOn/forceOff each fire exactly once, on the relevant transition
+	// (see lampAuto), so there's no need to read the printer's reported
+	// lamp state first to dedup — nothing here polls or spams a command
+	// every tick, only on an actual transition.
+	forceOn, forceOff := s.lamp.poll(active)
+	if forceOn {
+		s.cmd.SetChamberLight(true)
+	} else if forceOff {
+		s.cmd.SetChamberLight(false)
 	}
 }
 
@@ -118,6 +157,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"hms":         p1s.HMSErrors(fields),
 		"bedOffIn":    nilIfNeg(bedOff),
 		"nozzleOffIn": nilIfNeg(nozzleOff),
+		"lampOffIn":   nilIfNeg(s.lamp.remaining()),
 		"printActions": map[string]bool{
 			"pause":  p1s.PrintActionAllowed(connected, gs, "pause") == nil,
 			"resume": p1s.PrintActionAllowed(connected, gs, "resume") == nil,

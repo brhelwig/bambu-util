@@ -30,6 +30,11 @@ Features:
 - Print controls: **Pause** (while printing), **Resume** (while paused), and
   **Stop** (either; needs a second confirming tap). Guarded server-side to the
   matching printer states
+- Chamber lamp automation: turns on automatically the moment a job starts
+  running or the bed/nozzle is commanded hot, and off automatically 8h
+  after it goes idle. The manual toggle always works and is never
+  overridden — automation only ever acts on the active/idle transitions
+  themselves
 - iOS "Add to Home Screen" gives an app-like full-screen page
 
 ### Configuration
