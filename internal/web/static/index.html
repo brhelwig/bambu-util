@@ -556,9 +556,12 @@ async function refresh() {
     // Extrude also needs a hot nozzle (cold extrusion strips filament); the
     // printer enforces this too, but disable the button to make it obvious.
     $("extrudeBtn").disabled = !s.actionsAllowed || (s.nozzleTemp ?? 0) < 170;
-    // Unload pushes out the currently-fed filament; grey it out when nothing is
-    // loaded (no tray_now) or the printer is busy.
-    $("unloadBtn").disabled = !s.actionsAllowed || loadedTray(s.ams) == null;
+    // Unload follows the same idle rule as the other actions. It used to also
+    // require the AMS to report a loaded tray, which left the button dead
+    // exactly when it was wanted: an external spool has no tray to report, and
+    // the reading does not survive the end of a print. Unloading with nothing
+    // loaded costs a wasted sequence; not being able to unload costs a
+    // disassembly.
     // Lamp toggles in any state, so it's gated on connection only. chamberLight
     // is null until the printer reports it — stay neutral and disabled until
     // then rather than assert a state we haven't seen.

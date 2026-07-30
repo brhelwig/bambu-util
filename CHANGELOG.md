@@ -88,6 +88,11 @@ follow [Semantic Versioning](https://semver.org/).
   within 15 minutes would cut the hotend mid-job. It now waits for the printer
   to be idle, and waits rather than discarding the shut-off, so the heaters
   still go off once the print is over.
+- **Unload** follows the same idle rule as the other actions. It also required
+  the AMS to report a loaded tray, which left the button dead exactly when it
+  was wanted: an external spool has no tray to report, and the reading does not
+  survive the end of a print, so a finished job could leave filament stuck with
+  no way to eject it.
 - The scrub bar's caption reports when the displayed frame was actually taken,
   not the time it was dragged to. The frame endpoint returns the first frame at
   or after the requested time, so with retention leaving gaps between kept
