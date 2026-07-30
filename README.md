@@ -56,6 +56,8 @@ Features:
 - An Events screen shows what was sent to the printer and whether the printer
   acknowledged it, what the printer reported back, and what notifications went
   out — each with its raw message, for working out why something did not happen
+- Light, dark, or follow-the-system theme, and the printer screen's sections
+  can be hidden and reordered from Settings
 - iOS "Add to Home Screen" gives an app-like full-screen page
 - Notifications to the phone, so the page does not have to be open: a print
   starting, finishing or ending without finishing; any error the printer

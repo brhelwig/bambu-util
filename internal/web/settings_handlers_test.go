@@ -265,3 +265,43 @@ func TestAnUnconfiguredAppStillServesItsPage(t *testing.T) {
 		}
 	}
 }
+
+func TestTheDashboardLayoutIsStoredAndServed(t *testing.T) {
+	ts, config := settingsTestServer(t)
+	layout := "machineCard,jobCard,camCard"
+	resp, err := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyDashboard+"?text="+layout, "", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d, want 204", resp.StatusCode)
+	}
+	if got := config.Values().Dashboard; got != layout {
+		t.Errorf("stored %q, want %q", got, layout)
+	}
+	if got := readSettings(t, ts)[settings.KeyDashboard]; got != layout {
+		t.Errorf("served %v, want %q", got, layout)
+	}
+}
+
+// The printer's details have their own endpoint, which also reconnects. Setting
+// them here would store a printer the app is not talking to — and the access
+// code is a credential that should have exactly one way in.
+func TestThePrinterDetailsCannotBeSetThroughTheSettingsEndpoint(t *testing.T) {
+	ts, config := settingsTestServer(t)
+	for _, name := range []string{
+		settings.KeyPrinterIP, settings.KeyPrinterSerial, settings.KeyPrinterAccessCode,
+	} {
+		resp, err := ts.Client().Post(ts.URL+"/api/settings/"+name+"?text=sneaky", "", nil)
+		if err != nil {
+			t.Fatalf("post %s: %v", name, err)
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", name, resp.StatusCode)
+		}
+	}
+	v := config.Values()
+	if v.PrinterIP != "" || v.PrinterSerial != "" || v.AccessCode != "" {
+		t.Errorf("the printer was changed through the settings endpoint: %+v", v)
+	}
+}

@@ -30,6 +30,10 @@ const (
 	KeyPrinterIP         = "printer-ip"
 	KeyPrinterSerial     = "printer-serial"
 	KeyPrinterAccessCode = "printer-access-code"
+
+	// KeyDashboard is the printer screen's sections, in order. Anything absent
+	// is hidden.
+	KeyDashboard = "dashboard"
 )
 
 // texts are the settings that hold words rather than numbers.
@@ -37,6 +41,7 @@ var texts = map[string]bool{
 	KeyPrinterIP:         true,
 	KeyPrinterSerial:     true,
 	KeyPrinterAccessCode: true,
+	KeyDashboard:         true,
 }
 
 // Text reports whether a setting holds words.
@@ -51,6 +56,7 @@ type Values struct {
 	PrinterIP     string
 	PrinterSerial string
 	AccessCode    string
+	Dashboard     string
 
 	Retention      time.Duration
 	KeptJobs       int
@@ -178,7 +184,7 @@ func (s *Store) SetText(name, value string) error {
 	if !texts[name] {
 		return fmt.Errorf("settings: %q does not hold text", name)
 	}
-	if len(value) > 128 {
+	if len(value) > 512 {
 		return fmt.Errorf("%s is too long", name)
 	}
 	if value == "" {
@@ -227,6 +233,7 @@ func (s *Store) reload() error {
 	v.PrinterIP = stored[KeyPrinterIP]
 	v.PrinterSerial = stored[KeyPrinterSerial]
 	v.AccessCode = stored[KeyPrinterAccessCode]
+	v.Dashboard = stored[KeyDashboard]
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

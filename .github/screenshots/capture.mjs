@@ -269,6 +269,28 @@ async function main() {
     await page.close();
   }
 
+  // Light theme, and a dashboard with sections hidden and reordered.
+  {
+    const page = await context.newPage();
+    await page.addInitScript(`try { localStorage.setItem("theme", "light"); } catch {}`);
+    await page.route("**/api/status", route => route.fulfill({ json: printing }));
+    await page.route("**/api/settings", route => route.fulfill({
+      json: { retention: 86400, "kept-jobs": 5, "bed-off-after": 86400,
+              "nozzle-off-after": 900, "lamp-off-after": 28800,
+              dashboard: "machineCard,jobCard,controlsCard" },
+    }));
+    await page.goto(BASE + "/", { waitUntil: "networkidle" });
+    await page.waitForTimeout(600);
+    const file = `${OUT}/12-light-rearranged.png`;
+    await page.screenshot({ path: file, fullPage: true });
+    shots.push({
+      name: "12-light-rearranged", title: "Light theme, rearranged", file,
+      note: "The light theme, with the dashboard reordered and the camera, drying, nozzle and filament sections hidden.",
+    });
+    console.log("captured Light theme");
+    await page.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(shots.map(s => ({ name: s.name, title: s.title, note: s.note })), null, 2));
 }
