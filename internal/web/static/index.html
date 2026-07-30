@@ -52,11 +52,14 @@
   .iconbtn.danger.armed { background: #b02a2a; }
   .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
   .notifywhat { color: #9aa0a6; font-size: 0.8rem; margin: 2px 0 10px; }
-  #settingsCard summary { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0a6; font-weight: 600; }
+  .topbar { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
+  .screentitle { font-size: 0.95rem; font-weight: 600; flex: 1; }
+  .topbar .screentitle:last-child { flex: 1; }
+  .topicon { background: none; padding: 6px; color: #9aa0a6; display: inline-flex; }
+  .topicon svg { width: 22px; height: 22px; display: block; }
   .setrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
   .setrow label { color: #9aa0a6; }
   .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 72px; text-align: right; }
-  #settingsCard[open] summary { margin-bottom: 8px; }
   .notifybtns { display: flex; gap: 10px; }
   .notifybtns button { flex: 1; }
   .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
@@ -87,6 +90,13 @@
 </style>
 </head>
 <body>
+<div id="mainScreen">
+<div class="topbar">
+  <span class="screentitle">P1S</span>
+  <button class="topicon" id="settingsBtn" aria-label="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 5 8.9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9.5a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9.5a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+</div>
 <div class="card" id="jobCard">
   <h2>Job status</h2>
   <div class="row" id="jobEmpty" style="color:#9aa0a6">No active print</div>
@@ -162,7 +172,16 @@
   <h2>Filament (AMS)</h2>
   <div id="amsSlots"></div>
 </div>
-<div class="card" id="notifyCard">
+</div>
+
+<div id="settingsScreen" style="display:none">
+<div class="topbar">
+  <button class="topicon" id="settingsBack" aria-label="Back">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  </button>
+  <span class="screentitle">Settings</span>
+</div>
+<div class="card">
   <h2>Notifications</h2>
   <div class="row"><span id="notifyState">…</span></div>
   <div class="notifywhat">When a print starts, finishes or stops, when the printer
@@ -173,8 +192,8 @@
   </div>
   <div id="notifyHint" style="display:none; color:#9aa0a6; font-size:0.8rem; margin-top:8px"></div>
 </div>
-<details class="card" id="settingsCard">
-  <summary>Settings</summary>
+<div class="card">
+  <h2>Timings</h2>
   <div class="setrow"><label for="setRetention">Camera history</label>
     <span><input type="number" id="setRetention" min="1" max="720" step="1"> hours</span></div>
   <div class="setrow"><label for="setBedOff">Bed auto-off</label>
@@ -185,7 +204,8 @@
     <span><input type="number" id="setLampOff" min="1" max="168" step="1"> hours</span></div>
   <div class="notifywhat">The camera history window is also how far back the scrub
     bar reaches. Auto-off countdowns already running keep the window they started with.</div>
-</details>
+</div>
+</div>
 <div id="log"></div>
 <script>
 const $ = id => document.getElementById(id);
@@ -1043,6 +1063,20 @@ $("notifyTestBtn").addEventListener("click", async () => {
 
 initNotifications();
 
+// --- Screens ----------------------------------------------------------------
+// Settings is its own screen rather than more cards under the status: nothing
+// on it is worth scrolling past to reach the printer controls.
+function showScreen(settings) {
+  $("mainScreen").style.display = settings ? "none" : "";
+  $("settingsScreen").style.display = settings ? "" : "none";
+  $("log").textContent = "";
+  window.scrollTo(0, 0);
+  if (settings) refreshSettings();
+}
+
+$("settingsBtn").addEventListener("click", () => showScreen(true));
+$("settingsBack").addEventListener("click", () => showScreen(false));
+
 // --- Settings ---------------------------------------------------------------
 // Each control edits one setting and saves as soon as it is changed. The server
 // is the only thing that decides whether a value is allowed, so a refusal is
@@ -1085,7 +1119,6 @@ for (const s of SETTINGS) {
   });
 }
 
-refreshSettings();
 </script>
 </body>
 </html>

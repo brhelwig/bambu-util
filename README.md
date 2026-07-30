@@ -48,9 +48,11 @@ Features:
   after it goes idle. The manual toggle always works and is never
   overridden — automation only ever acts on the active/idle transitions
   themselves
-- A Settings section holds the camera history window and the automatic-off
-  delays for the bed, nozzle and chamber lamp. They are stored in the database
-  and take effect as soon as they are saved
+- A Settings screen — the gear in the top corner — holds notifications, the
+  camera history window, and the automatic-off delays for the bed, nozzle and
+  chamber lamp. It is a separate screen, not more cards below the status, so
+  the printer controls stay at the top of the page. The values are stored in
+  the database and take effect as soon as they are saved
 - iOS "Add to Home Screen" gives an app-like full-screen page
 - Notifications to the phone, so the page does not have to be open: a print
   starting, finishing or ending without finishing; any error the printer

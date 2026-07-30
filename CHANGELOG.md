@@ -8,11 +8,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- A Settings section on the page for the camera history window and the three
-  automatic-off delays (bed, nozzle, chamber lamp). They are kept in the
-  database and read whenever they are consulted, so a change takes effect
-  without a restart. A countdown already running keeps the window it started
-  with. `RECORDING_RETENTION` is gone — the same setting now lives on the page.
+- A Settings screen, reached by the gear in the top corner, holding the camera
+  history window and the three automatic-off delays (bed, nozzle, chamber
+  lamp). It is a screen of its own rather than more cards under the printer
+  status, so nothing has to be scrolled past to reach the controls;
+  notifications moved onto it too. The values are kept in the database and read
+  whenever they are consulted, so a change takes effect without a restart. A
+  countdown already running keeps the window it started with.
+  `RECORDING_RETENTION` is gone — the same setting now lives on the page.
 
 - Notifications to the phone, so the page does not have to be open. Turn
   them on from the Notifications card; a test button proves the path before
