@@ -10,9 +10,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Notifications to the phone, so the page does not have to be open. Turn
   them on from the Notifications card; a test button proves the path before
-  anything is riding on it. Subscriptions live in their own database under
-  `DATA_DIR`, alongside the server identity browsers bind to — losing that
-  directory silently unsubscribes every phone, so it belongs on a volume.
+  anything is riding on it. Subscriptions are stored under `DATA_DIR`
+  alongside the server identity browsers bind to — losing that directory
+  silently unsubscribes every phone, so it belongs on a volume.
   Requires HTTPS, and on iPhone and iPad iOS 16.4 or later with the app
   added to the Home Screen. Only the test message exists so far; printer
   events follow.

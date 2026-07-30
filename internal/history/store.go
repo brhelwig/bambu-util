@@ -7,7 +7,7 @@ import (
 	"errors"
 	"math"
 
-	_ "modernc.org/sqlite"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -31,20 +31,24 @@ type Store struct {
 	db *sql.DB
 }
 
-// Open opens (creating if needed) the SQLite database at path. Use
-// ":memory:" for a throwaway in-process database, e.g. in tests.
+// Open makes a store over its own database at path. The app shares one
+// database between stores and calls New; this is for tests.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlitedb.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	// modernc.org/sqlite serializes writes at the connection level; capping
-	// the pool at one connection avoids "database is locked" errors under
-	// concurrent access and gives :memory: a single, consistent database
-	// instead of a fresh one per connection.
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	store, err := New(db)
+	if err != nil {
 		db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+// New returns a store over db, creating its tables if needed.
+func New(db *sql.DB) (*Store, error) {
+	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil

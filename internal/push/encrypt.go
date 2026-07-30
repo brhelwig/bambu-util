@@ -14,23 +14,14 @@ import (
 	"fmt"
 )
 
-// recordSize is the aes128gcm record size written into the message header.
-// Notifications here are a few hundred bytes, far under one record, so this
-// only ever has to exceed the payload.
 const recordSize = 4096
 
-// keyLength is the size of an uncompressed P-256 public key point, which is
-// what a browser hands over as its subscription key and what the header
-// carries back.
+// keyLength is an uncompressed P-256 point: what a browser hands over as its
+// subscription key, and what the message header carries back.
 const keyLength = 65
 
-// encrypt builds the body of one push message: the RFC 8188 header followed by
-// a single encrypted record.
-//
-// uaPublic and authSecret come from the browser's subscription. asKey is the
-// application server's key for this one message and salt is its 16 random
-// bytes — both are parameters rather than generated here so the RFC's worked
-// example can be reproduced exactly in a test.
+// encrypt builds one push message. asKey and salt are parameters rather than
+// generated here so a test can reproduce the RFC's worked example exactly.
 func encrypt(uaPublic, authSecret, plaintext []byte, asKey *ecdh.PrivateKey, salt []byte) ([]byte, error) {
 	uaKey, err := ecdh.P256().NewPublicKey(uaPublic)
 	if err != nil {
@@ -54,8 +45,7 @@ func encrypt(uaPublic, authSecret, plaintext []byte, asKey *ecdh.PrivateKey, sal
 	if err != nil {
 		return nil, err
 	}
-	// A record ends with a delimiter saying whether more follow; 0x02 marks
-	// this as the last one. Everything sent here fits in a single record.
+	// 0x02 marks the last record; everything sent here fits in one.
 	padded := append(append([]byte{}, plaintext...), 0x02)
 
 	header := make([]byte, 0, len(salt)+4+1+len(asPublic))
@@ -67,11 +57,8 @@ func encrypt(uaPublic, authSecret, plaintext []byte, asKey *ecdh.PrivateKey, sal
 	return gcm.Seal(header, nonce, padded, nil), nil
 }
 
-// deriveKeys turns the agreed secret into the content encryption key and nonce,
-// following RFC 8291 section 3.4. Both public keys are mixed in, so a message
-// can only be read by the subscription it was addressed to. Both sides run this
-// same derivation, which is why it takes the agreed secret rather than a key
-// pair.
+// deriveKeys follows RFC 8291 section 3.4. It takes the agreed secret rather
+// than a key pair because both sides run the identical derivation.
 func deriveKeys(shared, authSecret, uaPublic, asPublic, salt []byte) (cek, nonce []byte, err error) {
 	prkKey, err := hkdf.Extract(sha256.New, shared, authSecret)
 	if err != nil {
@@ -96,8 +83,8 @@ func deriveKeys(shared, authSecret, uaPublic, asPublic, salt []byte) (cek, nonce
 	return cek, nonce, nil
 }
 
-// encryptRandom is the production path: a fresh key pair and salt per message,
-// as required — reusing either across messages would leak the plaintext.
+// encryptRandom is the production path. Reusing a key pair or salt across
+// messages would leak the plaintext, so each gets its own.
 func encryptRandom(uaPublic, authSecret, plaintext []byte) ([]byte, error) {
 	asKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {

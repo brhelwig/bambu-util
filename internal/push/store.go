@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	_ "modernc.org/sqlite"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -32,28 +32,28 @@ type Subscription struct {
 }
 
 // Store holds subscriptions and this server's identity.
-//
-// It keeps its own database file rather than sharing the camera history's: that
-// one takes a frame every second and is pruned constantly, and its writes are
-// serialized on a single connection. Subscriptions are written a few times a
-// year and must not queue behind a prune.
 type Store struct {
 	db *sql.DB
 }
 
-// Open opens (creating if needed) the database at path. Use ":memory:" for a
-// throwaway in-process database, e.g. in tests.
+// Open makes a store over its own database at path. The app shares one
+// database between stores and calls New; this is for tests.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlitedb.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	// Same reasoning as the history store: this driver serializes writes per
-	// connection, and a single connection also gives ":memory:" one consistent
-	// database instead of a fresh one per connection.
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	store, err := New(db)
+	if err != nil {
 		db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+// New returns a store over db, creating its tables if needed.
+func New(db *sql.DB) (*Store, error) {
+	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil

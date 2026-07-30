@@ -884,9 +884,8 @@ if (!DEMO) {
 }
 
 // --- Notifications ----------------------------------------------------------
-// Push needs a service worker on a secure origin. On iPhone it additionally
-// needs the page installed to the Home Screen — nothing here can do that for
-// the user, so an unsupported browser is told why rather than left guessing.
+// On iPhone this needs the page installed to the Home Screen, which nothing
+// here can do for the user — so a browser that cannot subscribe is told why.
 const PUSH_READY = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 const INSTALLED = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
 
@@ -950,10 +949,9 @@ async function initNotifications() {
     swReg = await navigator.serviceWorker.register("/sw.js");
     pushSub = await swReg.pushManager.getSubscription();
     if (pushSub) {
-      // A subscription is bound to the server's identity, and the server may
-      // have forgotten it (or minted a new identity) since. Re-send it every
-      // load, and start over if it is bound to an identity that is gone —
-      // otherwise notifications stay silently dead with the button reading On.
+      // Re-send every load in case the server lost it, and start over if the
+      // identity it was bound to is gone — otherwise this reads On while
+      // nothing is delivered.
       const key = await serverKey();
       if (bytesToB64(pushSub.options.applicationServerKey) === key) {
         await sendSubscription(pushSub);
@@ -970,8 +968,7 @@ async function initNotifications() {
 }
 
 async function enableNotifications() {
-  // Must be the first thing after the tap: iOS only shows the prompt when the
-  // request comes straight out of a user action.
+  // First thing after the tap: iOS only prompts straight out of a user action.
   const permission = await Notification.requestPermission();
   if (permission !== "granted") {
     renderNotify();
