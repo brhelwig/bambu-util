@@ -7,9 +7,10 @@ import (
 
 // Heaters left on unattended waste power and are a mild fire risk, so the bed
 // and nozzle are shut off automatically some time after they were last set
-// through this app. Enforcement is server-side (see Server.EnforceAutoOff) so
-// it still fires when no browser is open. Adjusting a heater — including
-// turning it off — resets its timer.
+// through this app. Enforcement is server-side (see Server.pollAutoOff) so it
+// still fires when no browser is open, and it waits for the printer to be idle
+// so it can never cut the heat out from under a print. Adjusting a heater —
+// including turning it off — resets its timer.
 const (
 	BedOffAfter    = 24 * time.Hour
 	NozzleOffAfter = 15 * time.Minute

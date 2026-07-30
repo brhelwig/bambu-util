@@ -82,6 +82,12 @@ follow [Semantic Versioning](https://semver.org/).
   sent unacknowledged, so a dropped **Stop** was silent — the page reported it
   sent and the print carried on. Commands that are unsafe to repeat, such as
   extrude, deliberately stay unacknowledged.
+- The heater safety shut-off can no longer command the bed or nozzle cold in
+  the middle of a print. It ran on elapsed time alone and read no printer
+  state, so setting the nozzle hot for a cold pull and then starting a print
+  within 15 minutes would cut the hotend mid-job. It now waits for the printer
+  to be idle, and waits rather than discarding the shut-off, so the heaters
+  still go off once the print is over.
 - The scrub bar's caption reports when the displayed frame was actually taken,
   not the time it was dragged to. The frame endpoint returns the first frame at
   or after the requested time, so with retention leaving gaps between kept

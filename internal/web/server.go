@@ -68,15 +68,29 @@ func (s *Server) EnforceAutoOff(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if bed, nozzle := s.autoOff.due(); bed || nozzle {
-				if bed {
-					s.cmd.SetBedTemp(0)
-				}
-				if nozzle {
-					s.cmd.SetNozzleTemp(0)
-				}
-			}
+			s.pollAutoOff()
 		}
+	}
+}
+
+// pollAutoOff shuts a heater down once its deadline passes, but only while the
+// printer is idle: mid-print the printer owns its own temperatures, and cutting
+// them ruins the print.
+//
+// The state is checked before due(), never after. due() clears a deadline as it
+// reports it, so reaching it during a print and discarding the result would
+// consume the shut-off and leave the heater on for good.
+func (s *Server) pollAutoOff() {
+	fields, connected := s.cache.Snapshot()
+	if p1s.ActionAllowed(connected, p1s.GcodeState(fields)) != nil {
+		return
+	}
+	bed, nozzle := s.autoOff.due()
+	if bed {
+		s.cmd.SetBedTemp(0)
+	}
+	if nozzle {
+		s.cmd.SetNozzleTemp(0)
 	}
 }
 
