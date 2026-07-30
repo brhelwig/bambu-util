@@ -60,6 +60,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The printer is set up on the Settings screen instead of through
+  `PRINTER_IP`, `PRINTER_SERIAL` and `PRINTER_ACCESS_CODE`, which are gone. The
+  app starts with no printer and serves the page anyway — that is where one is
+  entered — and saving a different printer reconnects in place rather than
+  needing a restart. The access code is stored under `DATA_DIR` and is never
+  sent back to the page, which reports only whether one is set; leaving the
+  field blank keeps the stored one. Only `DATA_DIR` and `LISTEN_ADDR` remain as
+  environment variables, since the app needs them before it can read anything.
 - The app is called **Bambu Util**, in the page heading, the browser tab, the
   notifications it sends, and the web manifest. A Home Screen icon added before
   this keeps its old label until it is removed and re-added — iOS reads the

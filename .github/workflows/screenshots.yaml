@@ -44,9 +44,7 @@ jobs:
           mkdir -p /tmp/shot-data
           # No printer here. The app serves the page regardless, and the status
           # endpoint is answered by the browser, so nothing depends on one.
-          PRINTER_IP=127.0.0.1 PRINTER_SERIAL=CI PRINTER_ACCESS_CODE=CI \
-          LISTEN_ADDR=127.0.0.1:8081 DATA_DIR=/tmp/shot-data \
-            /tmp/bambu-util &
+          LISTEN_ADDR=127.0.0.1:8081 DATA_DIR=/tmp/shot-data /tmp/bambu-util &
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8081/healthz >/dev/null && break
             sleep 1

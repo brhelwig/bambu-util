@@ -2,8 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +21,7 @@ func settingsTestServer(t *testing.T) (*httptest.Server, *settings.Store) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config)
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, testPrinter())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, config
@@ -131,7 +133,7 @@ func TestBadSettingWritesAreRefused(t *testing.T) {
 func TestAServerWithNoWritableSettingsSaysSo(t *testing.T) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, testSettings, nil)
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter())
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -140,5 +142,125 @@ func TestAServerWithNoWritableSettingsSaysSo(t *testing.T) {
 	}
 	if got := readSettings(t, ts)[settings.KeyRetention]; got != float64(int(settings.Defaults.Retention.Seconds())) {
 		t.Errorf("reading settings = %v, want the defaults to still be served", got)
+	}
+}
+
+func printerTestServer(t *testing.T) (*httptest.Server, *settings.Store, *fakePrinter) {
+	t.Helper()
+	config := openTestSettings(t)
+	printer := &fakePrinter{}
+	cache := p1s.NewStateCache()
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, printer)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts, config, printer
+}
+
+func postPrinter(t *testing.T, ts *httptest.Server, body string) *http.Response {
+	t.Helper()
+	resp, err := ts.Client().Post(ts.URL+"/api/printer", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func TestSettingUpAPrinterConnectsToIt(t *testing.T) {
+	ts, config, printer := printerTestServer(t)
+	resp := postPrinter(t, ts, `{"ip":"192.0.2.10","serial":"01P00A","accessCode":"hunter2"}`)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d, want 204", resp.StatusCode)
+	}
+	if printer.calls != 1 {
+		t.Errorf("the link was reconfigured %d times, want once", printer.calls)
+	}
+	want := p1s.Config{IP: "192.0.2.10", Serial: "01P00A", AccessCode: "hunter2"}
+	if printer.conf != want {
+		t.Errorf("pointed at %+v, want %+v", printer.conf, want)
+	}
+	// And it survives a restart, which is the whole point of storing it.
+	v := config.Values()
+	if v.PrinterIP != want.IP || v.PrinterSerial != want.Serial || v.AccessCode != want.AccessCode {
+		t.Errorf("stored %q/%q/(code set: %v), want it all kept", v.PrinterIP, v.PrinterSerial, v.AccessCode != "")
+	}
+}
+
+// The page has no authentication, so a credential it is never served cannot be
+// read off it.
+func TestTheAccessCodeIsNeverSentToTheBrowser(t *testing.T) {
+	ts, _, _ := printerTestServer(t)
+	postPrinter(t, ts, `{"ip":"192.0.2.10","serial":"01P00A","accessCode":"hunter2"}`)
+
+	for _, path := range []string{"/api/printer", "/api/settings", "/api/status"} {
+		resp, err := ts.Client().Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if strings.Contains(string(body), "hunter2") {
+			t.Errorf("%s served the access code: %s", path, body)
+		}
+	}
+
+	resp, err := ts.Client().Get(ts.URL + "/api/printer")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	var got map[string]any
+	json.NewDecoder(resp.Body).Decode(&got)
+	if got["accessCodeSet"] != true {
+		t.Errorf("accessCodeSet = %v, want the page told that one is set", got["accessCodeSet"])
+	}
+}
+
+// The form never receives the code, so it cannot send it back. Leaving it out
+// must not wipe it.
+func TestSavingWithNoAccessCodeKeepsTheStoredOne(t *testing.T) {
+	ts, config, printer := printerTestServer(t)
+	postPrinter(t, ts, `{"ip":"192.0.2.10","serial":"01P00A","accessCode":"hunter2"}`)
+	postPrinter(t, ts, `{"ip":"192.0.2.99","serial":"01P00A","accessCode":""}`)
+
+	if got := config.Values().AccessCode; got != "hunter2" {
+		t.Errorf("access code = %q, want the stored one kept", got)
+	}
+	if printer.conf.IP != "192.0.2.99" {
+		t.Errorf("address = %q, want the new one", printer.conf.IP)
+	}
+}
+
+func TestAnIncompletePrinterIsRefused(t *testing.T) {
+	ts, _, printer := printerTestServer(t)
+	for name, body := range map[string]string{
+		"no address": `{"ip":"","serial":"01P00A","accessCode":"hunter2"}`,
+		"no serial":  `{"ip":"192.0.2.10","serial":"","accessCode":"hunter2"}`,
+		"no code":    `{"ip":"192.0.2.10","serial":"01P00A","accessCode":""}`,
+		"nothing":    `{}`,
+		"not json":   `{`,
+	} {
+		if resp := postPrinter(t, ts, body); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", name, resp.StatusCode)
+		}
+	}
+	if printer.calls != 0 {
+		t.Errorf("the link was reconfigured %d times on refused input, want none", printer.calls)
+	}
+}
+
+// With nothing set up the app still has to serve the page — that is where a
+// printer is entered.
+func TestAnUnconfiguredAppStillServesItsPage(t *testing.T) {
+	ts, _, _ := printerTestServer(t)
+	for _, path := range []string{"/", "/api/printer", "/api/status", "/healthz"} {
+		resp, err := ts.Client().Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: status %d with no printer configured, want 200", path, resp.StatusCode)
+		}
 	}
 }

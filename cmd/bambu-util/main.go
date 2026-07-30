@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,14 +21,6 @@ import (
 	"github.com/brhelwig/bambu-util/internal/web"
 )
 
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("missing required env var %s", key)
-	}
-	return v
-}
-
 func jobNameString(fields map[string]any) string {
 	if v, ok := p1s.JobName(fields).(string); ok {
 		return v
@@ -38,9 +29,6 @@ func jobNameString(fields map[string]any) string {
 }
 
 func main() {
-	ip := mustEnv("PRINTER_IP")
-	serial := mustEnv("PRINTER_SERIAL")
-	accessCode := mustEnv("PRINTER_ACCESS_CODE")
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
 		addr = ":8081"
@@ -54,9 +42,8 @@ func main() {
 	}
 
 	cache := p1s.NewStateCache()
-	client := p1s.NewClient(ip, serial, accessCode, cache)
-	client.Start()
-	defer client.Stop()
+	link := p1s.NewLink(cache)
+	defer link.Stop()
 
 	db, err := sqlitedb.Open(filepath.Join(dataDir, "bambu-util.db"))
 	if err != nil {
@@ -69,9 +56,7 @@ func main() {
 		log.Fatalf("open history store: %v", err)
 	}
 
-	hub := web.NewHub(func(ctx context.Context, yield func([]byte)) error {
-		return p1s.StreamFrames(ctx, net.JoinHostPort(ip, "6000"), "bblp", accessCode, yield)
-	}, store)
+	hub := web.NewHub(link.Stream, store)
 
 	notifyStore, err := push.New(db)
 	if err != nil {
@@ -91,10 +76,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("open settings: %v", err)
 	}
+	// Whatever printer was set up last time. With none, the app still serves the
+	// page — that is where one is entered.
+	v := config.Values()
+	link.Configure(p1s.Config{IP: v.PrinterIP, Serial: v.PrinterSerial, AccessCode: v.AccessCode})
 
 	// The scrub bar reaches back exactly as far as frames are kept, so raising
 	// retention doesn't record footage that can't be scrubbed to.
-	srv := web.NewServer(cache, client, store, notifier, timers, config.Values, config)
+	srv := web.NewServer(cache, link, store, notifier, timers, config.Values, config, link)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Start(ctx)
@@ -110,6 +99,6 @@ func main() {
 		return p1s.GcodeState(fields), jobNameString(fields)
 	})
 
-	log.Printf("bambu-util listening on %s (printer %s)", addr, ip)
+	log.Printf("bambu-util listening on %s (%s)", addr, link.Describe())
 	log.Fatal(http.ListenAndServe(addr, srv.Handler()))
 }

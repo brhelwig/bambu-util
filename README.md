@@ -68,22 +68,25 @@ Features:
 
 ### Configuration
 
-Environment variables only — no config files:
+Two environment variables, because the app cannot read from a database it has
+not been told how to find, or serve a page before it knows where to listen.
+Everything else — including the printer — is set on the Settings screen and
+kept in the database.
 
 | Variable | Required | Description |
 |---|---|---|
-| `PRINTER_IP` | yes | Printer LAN IP (printer screen → Settings → WLAN) |
-| `PRINTER_SERIAL` | yes | Printer serial (Settings → Device) |
-| `PRINTER_ACCESS_CODE` | yes | LAN access code (Settings → WLAN) |
 | `LISTEN_ADDR` | no | Listen address, default `:8081` |
 | `DATA_DIR` | no | Directory for the database, default `./data`. It also holds the pending heater and lamp countdowns, so they survive a restart. Mount a volume here so the history buffer survives restarts — and so notification subscriptions do, since losing the server's identity silently unsubscribes every phone. Write-ahead logging means the directory also holds `-wal` and `-shm` files; a backup taken while the app runs needs all three, not just the `.db`. |
 
 ### Run
 
 ```sh
-PRINTER_IP=192.0.2.10 PRINTER_SERIAL=01P00XXXXXXXXXX PRINTER_ACCESS_CODE=xxxxxxxx \
-  go run ./cmd/bambu-util
+go run ./cmd/bambu-util
 ```
+
+Then open the page, go to Settings, and enter the printer's address, serial and
+access code — from the printer screen, Settings → WLAN for the address and
+access code, Settings → Device for the serial.
 
 Or the container image: `ghcr.io/brhelwig/bambu-util` (linux/arm64), tagged
 three ways:
@@ -116,5 +119,8 @@ either way; the four actions need Developer Mode.
 ### Security
 
 The page has no authentication — run it only on a trusted network (LAN or
-tailnet). Real printer credentials never live in this repo; they are injected
-as environment variables at deploy time.
+tailnet). The printer's access code is stored in the database under `DATA_DIR`,
+so that directory is as sensitive as the credential itself and belongs on a
+volume you would not share. The page is never sent the code back, only whether
+one is set, so it cannot be read off a screen — but anyone who can reach the
+page can replace it.

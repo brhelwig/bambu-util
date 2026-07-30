@@ -39,6 +39,16 @@ func deepMerge(dst, src map[string]any) {
 	}
 }
 
+// Reset forgets everything the printer said. Used when the app is pointed at a
+// different printer, so the previous one's temperatures and job are not still
+// on screen a moment later.
+func (s *StateCache) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fields = map[string]any{}
+	s.connected = false
+}
+
 func (s *StateCache) SetConnected(v bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

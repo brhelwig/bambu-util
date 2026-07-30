@@ -67,6 +67,8 @@
   .kindrow label { color: #e8eaed; }
   .kindrow input { width: 20px; height: 20px; accent-color: #c98a2b; }
   .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 100%; text-align: right; }
+  .setrow input[type=text], .setrow input[type=password] { grid-column: 2 / -1; }
+  #printerSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; background: #7a4a12; }
   #settingsSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; }
   #settingsSave:not(:disabled) { background: #7a4a12; }
   .notifybtns { display: flex; gap: 10px; }
@@ -212,6 +214,20 @@
     <button id="notifyTestBtn" style="display:none">Send a test</button>
   </div>
   <div id="notifyHint" style="display:none; color:#9aa0a6; font-size:0.8rem; margin-top:8px"></div>
+</div>
+<div class="card">
+  <h2>Printer</h2>
+  <div class="setrow"><label for="setPrinterIP">Address</label>
+    <input type="text" id="setPrinterIP" placeholder="192.0.2.10" inputmode="decimal"><span class="unit"></span></div>
+  <div class="setrow"><label for="setPrinterSerial">Serial</label>
+    <input type="text" id="setPrinterSerial" placeholder="01P00A000000000"><span class="unit"></span></div>
+  <div class="setrow"><label for="setPrinterCode">Access code</label>
+    <input type="password" id="setPrinterCode" placeholder="unchanged" autocomplete="off"><span class="unit"></span></div>
+  <div class="notifywhat">From the printer screen: Settings → WLAN for the address and
+    access code, Settings → Device for the serial. The access code is never sent back to
+    this page, so leaving it blank keeps the one already stored.</div>
+  <button id="printerSave">Save printer</button>
+  <div id="printerMsg" class="notifywhat" style="margin:8px 0 0"></div>
 </div>
 <div class="card">
   <h2>Timings</h2>
@@ -1163,11 +1179,58 @@ function showScreen(settings) {
   $("settingsScreen").style.display = settings ? "" : "none";
   $("log").textContent = "";
   window.scrollTo(0, 0);
-  if (settings) refreshSettings();
+  if (settings) { refreshSettings(); refreshPrinter(); }
 }
 
 $("settingsBtn").addEventListener("click", () => showScreen(true));
 $("settingsBack").addEventListener("click", () => showScreen(false));
+
+// --- Printer ----------------------------------------------------------------
+// The access code is never served back, so the field starts blank and blank
+// means unchanged. Nothing here can read the stored credential.
+async function refreshPrinter() {
+  if (DEMO) return;
+  try {
+    const r = await fetch("/api/printer");
+    if (!r.ok) return;
+    const p = await r.json();
+    $("setPrinterIP").value = p.ip || "";
+    $("setPrinterSerial").value = p.serial || "";
+    $("setPrinterCode").value = "";
+    $("setPrinterCode").placeholder = p.accessCodeSet ? "unchanged" : "required";
+    $("printerMsg").textContent = p.configured ? "" : "No printer set up yet.";
+  } catch {
+    // leave whatever is on screen
+  }
+}
+
+$("printerSave").addEventListener("click", async () => {
+  $("printerSave").disabled = true;
+  $("printerMsg").textContent = "Saving…";
+  try {
+    const r = await fetch("/api/printer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ip: $("setPrinterIP").value.trim(),
+        serial: $("setPrinterSerial").value.trim(),
+        accessCode: $("setPrinterCode").value,
+      }),
+    });
+    if (!r.ok) {
+      $("printerMsg").textContent = (await r.text()).trim();
+    } else {
+      // Saved is not the same as reached — the connection row on the printer
+      // screen is what says whether it answered.
+      $("printerMsg").textContent = "Saved. Connecting…";
+      await refreshPrinter();
+      $("printerMsg").textContent = "Saved. See the connection row for whether it answered.";
+    }
+  } catch (e) {
+    $("printerMsg").textContent = `could not save: ${e.message || e}`;
+  }
+  $("printerSave").disabled = false;
+});
 
 // --- Settings ---------------------------------------------------------------
 // Each control edits one setting and saves as soon as it is changed. The server

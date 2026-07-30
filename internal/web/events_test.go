@@ -237,7 +237,7 @@ func TestAFinishedPrintReachesASubscribedPhone(t *testing.T) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	notifier := openTestNotifier()
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil)
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil, testPrinter())
 
 	key, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
