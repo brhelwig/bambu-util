@@ -79,6 +79,7 @@
   <div class="row"><span>Chamber</span><span id="chamber">…</span></div>
   <div class="row"><span>Wifi</span><span id="wifi">…</span></div>
   <div class="row"><span>Fans (cool/aux/chamber)</span><span id="fans">…</span></div>
+  <div class="row" id="lampTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Lamp auto-off</span><span id="lampTimer"></span></div>
 </div>
 <div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
 <div class="iconrow cols3" id="row1">
@@ -508,6 +509,7 @@ async function refresh() {
     $("nozzleSlider").disabled = !s.actionsAllowed;
     showTimer("dryTimerRow", "dryTimer", s.bedOffIn);
     showTimer("nozzleTimerRow", "nozzleTimer", s.nozzleOffIn);
+    showTimer("lampTimerRow", "lampTimer", s.lampOffIn);
     document.querySelectorAll("[data-action]").forEach(b => b.disabled = !s.actionsAllowed);
     // Extrude also needs a hot nozzle (cold extrusion strips filament); the
     // printer enforces this too, but disable the button to make it obvious.
@@ -550,6 +552,7 @@ async function refresh() {
     // Don't leave a frozen countdown implying a timer we can no longer confirm.
     $("dryTimerRow").style.display = "none";
     $("nozzleTimerRow").style.display = "none";
+    $("lampTimerRow").style.display = "none";
   }
 }
 refresh();
