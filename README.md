@@ -20,13 +20,13 @@ Features:
 - Filament (AMS): per-tray colour, material, and nozzle temperature range,
   plus the unit's desiccant dryness as Bambu Studio's A-E grade
 - Chamber camera (~1 fps), recorded continuously into a rolling buffer
-  (`RECORDING_RETENTION`, default 24h) — the bridge holds the camera
+  (24h by default, set in Settings) — the bridge holds the camera
   connection the whole time it runs, not just while someone is watching,
   so Bambu Studio's own camera view will not work while bambu-util is
   running (the printer only serves one camera client at a time). One view
   shows it all: it follows the live tail of the buffer by default, and a
   scrub bar drags back through earlier footage. While the printer is idle
-  the bar reaches back exactly as far as `RECORDING_RETENTION` keeps frames,
+  the bar reaches back exactly as far as the history window keeps frames,
   so nothing is recorded that can't be scrubbed to; during a print it starts
   five minutes before the print did, so the whole job is one drag and nothing
   earlier is in the way. A `● LIVE` badge on the image shows whether the view
@@ -48,11 +48,18 @@ Features:
   after it goes idle. The manual toggle always works and is never
   overridden — automation only ever acts on the active/idle transitions
   themselves
+- A Settings screen — the gear in the top corner — holds notifications, the
+  camera history window, and the automatic-off delays for the bed, nozzle and
+  chamber lamp. It is a separate screen, not more cards below the status, so
+  the printer controls stay at the top of the page. The values are stored in
+  the database and take effect as soon as they are saved
 - iOS "Add to Home Screen" gives an app-like full-screen page
 - Notifications to the phone, so the page does not have to be open: a print
   starting, finishing or ending without finishing; any error the printer
-  raises, which is how filament runout arrives; and a reminder at 1, 8, 16 and
-  24 hours of how long the bed has been on with no print running. Turn them on from
+  raises, which is how filament runout arrives; and a repeating reminder of how
+  long the bed has been on with no print running. Each subscribed device picks
+  which of those it wants and how often to be reminded, so a phone and a tablet
+  can differ. Turn them on from
   the Notifications card; a test button confirms the whole path before waiting
   on the printer. Requires the app to be served over HTTPS.
   On iPhone and iPad it additionally requires iOS 16.4 or later **and the app
@@ -70,7 +77,6 @@ Environment variables only — no config files:
 | `PRINTER_ACCESS_CODE` | yes | LAN access code (Settings → WLAN) |
 | `LISTEN_ADDR` | no | Listen address, default `:8081` |
 | `DATA_DIR` | no | Directory for the database, default `./data`. It also holds the pending heater and lamp countdowns, so they survive a restart. Mount a volume here so the history buffer survives restarts — and so notification subscriptions do, since losing the server's identity silently unsubscribes every phone. Write-ahead logging means the directory also holds `-wal` and `-shm` files; a backup taken while the app runs needs all three, not just the `.db`. |
-| `RECORDING_RETENTION` | no | How long to keep recorded frames, as a Go duration (`12h`, `48h`, ...), default `24h`. Also how far back the scrub bar reaches when no print is running |
 
 ### Run
 

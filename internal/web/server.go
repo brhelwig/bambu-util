@@ -37,29 +37,28 @@ type Commander interface {
 }
 
 type Server struct {
-	cache      *p1s.StateCache
-	cmd        Commander
-	store      *history.Store
-	notify     *push.Sender
-	events     *printEvents
-	autoOff    *autoOff
-	lamp       *lampAuto
-	seekWindow time.Duration
-	now        func() time.Time
+	cache         *p1s.StateCache
+	cmd           Commander
+	store         *history.Store
+	notify        *push.Sender
+	events        *printEvents
+	autoOff       *autoOff
+	lamp          *lampAuto
+	settings      current
+	writeSettings settingsWriter
+	now           func() time.Time
 }
 
-// NewServer builds the HTTP layer. seekWindow is how far back the camera scrub
-// bar reaches while the printer is idle: pass the recording retention, so the bar
-// spans exactly the footage the rolling buffer still holds and none is recorded
-// that cannot be scrubbed to.
-// timers persists the countdowns across a restart; pass nil to keep them in
-// memory only.
-func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, seekWindow time.Duration) *Server {
+// NewServer builds the HTTP layer. cur answers what the settings are at the
+// moment they are consulted, so an edit takes effect without a restart. timers
+// persists the countdowns across a restart; pass nil to keep them in memory
+// only.
+func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, cur current, write settingsWriter) *Server {
 	return &Server{
 		cache: cache, cmd: cmd, store: store, notify: notify,
 		events:  newPrintEvents(timers),
-		autoOff: newAutoOff(timers), lamp: newLampAuto(timers),
-		seekWindow: seekWindow, now: time.Now,
+		autoOff: newAutoOff(timers, cur), lamp: newLampAuto(timers, cur),
+		settings: cur, writeSettings: write, now: time.Now,
 	}
 }
 
@@ -97,6 +96,7 @@ func (s *Server) pollAutoOff() {
 			Title: "Bed turned off",
 			Body:  "It had been on since it was last set here.",
 			Tag:   tagBed,
+			Kind:  push.KindHeaterOff,
 		})
 	}
 	if nozzle {
@@ -105,6 +105,7 @@ func (s *Server) pollAutoOff() {
 			Title: "Nozzle turned off",
 			Body:  "It had been on since it was last set here.",
 			Tag:   tagBed,
+			Kind:  push.KindHeaterOff,
 		})
 	}
 }
@@ -130,6 +131,16 @@ func (s *Server) pollEvents() {
 	jobName, _ := p1s.JobName(fields).(string)
 	for _, n := range s.events.poll(connected, p1s.GcodeState(fields), jobName, bedTarget, p1s.HMSErrors(fields)) {
 		s.send(n)
+	}
+
+	// Each device asked for its own reminder interval, so the schedule cannot
+	// live with the events above — it belongs beside the subscriptions.
+	if since := s.events.bedOnSince(); since.IsZero() {
+		if err := s.notify.ForgetBedReminders(); err != nil {
+			log.Printf("notify: clearing bed reminders: %v", err)
+		}
+	} else if err := s.notify.RemindBedOn(context.Background(), since, bedTarget); err != nil {
+		log.Printf("notify: bed reminders: %v", err)
 	}
 }
 
@@ -194,10 +205,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /camera/history/range", s.historyRange)
 	mux.HandleFunc("GET /camera/history/frame", s.historyFrame)
 	mux.HandleFunc("GET /camera/history/jobs", s.historyJobs)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("POST /api/settings/{name}", s.setSetting)
 	mux.HandleFunc("GET /api/push/key", s.pushKey)
 	mux.HandleFunc("POST /api/push/subscribe", s.pushSubscribe)
 	mux.HandleFunc("POST /api/push/unsubscribe", s.pushUnsubscribe)
 	mux.HandleFunc("POST /api/push/test", s.pushTest)
+	mux.HandleFunc("GET /api/push/preferences", s.pushPreferences)
+	mux.HandleFunc("POST /api/push/preferences", s.setPushPreferences)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -495,7 +510,7 @@ func (s *Server) seekStart() int64 {
 			return job.Start - int64(JobLeadIn.Seconds())
 		}
 	}
-	return s.now().Add(-s.seekWindow).Unix()
+	return s.now().Add(-s.settings().Retention).Unix()
 }
 
 // FrameTimestampHeader carries the unix second a served frame was actually

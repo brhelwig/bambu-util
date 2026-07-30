@@ -126,7 +126,7 @@ func TestWritesFromBothStoresInterleave(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 50 {
-			if err := frames.Prune(50); err != nil {
+			if err := frames.Prune(50, history.DefaultKeptJobs); err != nil {
 				errs <- err
 			}
 		}

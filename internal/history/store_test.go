@@ -88,7 +88,7 @@ func TestPruneDeletesOldFrames(t *testing.T) {
 	s.InsertFrame(100, []byte{1})
 	s.InsertFrame(500, []byte{2})
 
-	if err := s.Prune(300); err != nil {
+	if err := s.Prune(300, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	oldest, newest, _ := s.Range()
@@ -127,7 +127,7 @@ func TestPrunePreservesOngoingJobRegardlessOfStartAge(t *testing.T) {
 	defer s.Close()
 	s.OpenJob("old-but-running.3mf", 0)
 
-	if err := s.Prune(1000); err != nil {
+	if err := s.Prune(1000, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	jobs, _ := s.RecentJobs()
@@ -139,23 +139,23 @@ func TestPrunePreservesOngoingJobRegardlessOfStartAge(t *testing.T) {
 func TestPruneKeepsTheNewestFinishedJobsAndDropsTheRest(t *testing.T) {
 	s, _ := Open(":memory:")
 	defer s.Close()
-	// KeptJobs+1 finished jobs, all long expired. Only the oldest should go.
-	for i := 0; i <= KeptJobs; i++ {
+	// DefaultKeptJobs+1 finished jobs, all long expired. Only the oldest should go.
+	for i := 0; i <= DefaultKeptJobs; i++ {
 		start := int64(100 + i*10)
 		id, _ := s.OpenJob(fmt.Sprintf("job%d.3mf", i), start)
 		s.CloseJob(id, start+5)
 	}
 
-	if err := s.Prune(100000); err != nil {
+	if err := s.Prune(100000, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	jobs, _ := s.RecentJobs()
-	if len(jobs) != KeptJobs {
-		t.Fatalf("want %d jobs kept, got %d: %+v", KeptJobs, len(jobs), jobs)
+	if len(jobs) != DefaultKeptJobs {
+		t.Fatalf("want %d jobs kept, got %d: %+v", DefaultKeptJobs, len(jobs), jobs)
 	}
 	for _, j := range jobs {
 		if j.Name == "job0.3mf" {
-			t.Fatalf("oldest job survived beyond the newest %d: %+v", KeptJobs, jobs)
+			t.Fatalf("oldest job survived beyond the newest %d: %+v", DefaultKeptJobs, jobs)
 		}
 	}
 }
@@ -170,7 +170,7 @@ func TestPruneKeepsAndThinsFootageOfKeptJobs(t *testing.T) {
 		s.InsertFrame(ts, []byte{1})
 	}
 
-	if err := s.Prune(5000); err != nil {
+	if err := s.Prune(5000, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -198,7 +198,7 @@ func TestPruneDeletesFramesOutsideEveryKeptJob(t *testing.T) {
 	s.InsertFrame(500, []byte{2})  // idle footage, expired
 	s.InsertFrame(2000, []byte{3}) // idle footage, expired
 
-	if err := s.Prune(5000); err != nil {
+	if err := s.Prune(5000, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	if got := frameTimestamps(t, s); len(got) != 1 || got[0] != 1000 {
@@ -215,7 +215,7 @@ func TestPruneLeavesFramesNewerThanCutoffAtFullRate(t *testing.T) {
 		s.InsertFrame(ts, []byte{1})
 	}
 
-	if err := s.Prune(900); err != nil {
+	if err := s.Prune(900, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	if got := frameTimestamps(t, s); len(got) != 100 {
@@ -232,7 +232,7 @@ func TestPruneThinsOnlyTheExpiredPartOfARunningJob(t *testing.T) {
 	}
 
 	// Cutoff mid-job: 1000..1049 is expired and thins, 1050..1099 stays whole.
-	if err := s.Prune(1050); err != nil {
+	if err := s.Prune(1050, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	got := frameTimestamps(t, s)
@@ -303,7 +303,7 @@ func TestPruneBoundsHowFarBackAnOpenJobProtectsFootage(t *testing.T) {
 		s.InsertFrame(now-d*day, []byte{1})
 	}
 
-	if err := s.Prune(now - day); err != nil {
+	if err := s.Prune(now-day, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -332,7 +332,7 @@ func TestPruneKeepsAWholeLongRunningPrint(t *testing.T) {
 		s.InsertFrame(now-h*hour, []byte{1})
 	}
 
-	if err := s.Prune(now - 24*hour); err != nil {
+	if err := s.Prune(now-24*hour, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	got := frameTimestamps(t, s)
@@ -421,7 +421,7 @@ func TestPruneIgnoresAllButTheNewestOpenRow(t *testing.T) {
 	s.InsertFrame(500, []byte{1})  // inside the stranded row, expired
 	s.InsertFrame(9500, []byte{2}) // inside the running print
 
-	if err := s.Prune(5000); err != nil {
+	if err := s.Prune(5000, DefaultKeptJobs); err != nil {
 		t.Fatal(err)
 	}
 	if got := frameTimestamps(t, s); len(got) != 1 || got[0] != 9500 {

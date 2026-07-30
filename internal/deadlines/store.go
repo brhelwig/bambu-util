@@ -25,7 +25,6 @@ const (
 	NozzleOff  = "nozzle-off"
 	LampOff    = "lamp-off"
 	BedOnSince = "bed-on-since"
-	BedOnNext  = "bed-on-next"
 )
 
 // Store holds the pending timers.

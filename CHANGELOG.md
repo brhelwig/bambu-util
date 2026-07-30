@@ -8,6 +8,26 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A Settings screen, reached by the gear in the top corner, holding the camera
+  history window and the three automatic-off delays (bed, nozzle, chamber
+  lamp). It is a screen of its own rather than more cards under the printer
+  status, so nothing has to be scrolled past to reach the controls;
+  notifications moved onto it too. The values are kept in the database and read
+  whenever they are consulted, so a change takes effect without a restart. A
+  countdown already running keeps the window it started with. How many finished
+  prints keep their footage is a setting too, having been fixed at five. Changes
+  are applied by a Save button rather than as you type, so a half-typed number
+  never becomes the shut-off window.
+  `RECORDING_RETENTION` is gone — the same setting now lives on the page.
+
+- Each subscribed device chooses which notifications it receives — print
+  started, finished, ended without finishing, printer errors, heaters turned
+  off automatically — and how often to be reminded the bed is on, from never
+  to every 24 hours. The choices are stored against that device's own
+  subscription, so a phone and a tablet can want different things, and each
+  keeps its own place in its own reminder schedule. A device that has never
+  chosen is told about everything. The bed reminder replaces the fixed ladder
+  of 1, 8, 16 and 24 hours with a repeating interval.
 - Notifications to the phone, so the page does not have to be open. Turn
   them on from the Notifications card; a test button proves the path before
   anything is riding on it. Subscriptions are stored under `DATA_DIR`
@@ -23,8 +43,8 @@ follow [Semantic Versioning](https://semver.org/).
   sitting in a finished state does not keep announcing it, and the first look
   after a restart is silent rather than reporting a print that ended hours
   ago.
-- Always-on camera recording into a rolling history buffer (default 24h,
-  configurable via `RECORDING_RETENTION`), stored in SQLite under `DATA_DIR`.
+- Always-on camera recording into a rolling history buffer (24h by default,
+  set in Settings), stored in SQLite under `DATA_DIR`.
 - One camera view: follows the live tail of the recording buffer by
   default, with a scrub bar to drag back through recent footage, a
   **Live** button to jump back to the tail, and a jobs list to fast-forward
@@ -40,6 +60,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The app is called **Bambu Util**, in the page heading, the browser tab, the
+  notifications it sends, and the web manifest. A Home Screen icon added before
+  this keeps its old label until it is removed and re-added — iOS reads the
+  manifest at install time. "P1S" now only ever refers to the printer.
 - Notification subscriptions moved into the existing database, having briefly
   had a `push.db` of their own. An installation tracking `main` that already
   turned notifications on will mint a fresh identity on the next start, and
@@ -54,7 +78,7 @@ follow [Semantic Versioning](https://semver.org/).
   toggle — every view now sources frames from the recording buffer, so
   there's no separate "live" connection to toggle.
 - The scrub bar is bounded rather than spanning the whole stored buffer: it
-  reaches back one `RECORDING_RETENTION` window (24h by default) while the
+  reaches back one camera-history window (24h by default) while the
   printer is idle, and starts 5 minutes before the print began while one is
   running, so a job is one drag of the bar. Older footage — the kept prints'
   thinned timelapses — is still reachable by picking a job from the list.
@@ -62,7 +86,7 @@ follow [Semantic Versioning](https://semver.org/).
   second instead of 1 — the old 1x-20x speeds were slower than the recording
   rate they were replaying.
 - The five most recently finished prints keep their footage regardless of
-  `RECORDING_RETENTION`, thinned to one frame every 10 seconds once past the
+  the history window, thinned to one frame every 10 seconds once past the
   cutoff. Whole prints at the full recording rate would add gigabytes. The
   in-progress print is protected too, so a print longer than the retention
   window still yields a whole timelapse — but only back 48h, so a job row left

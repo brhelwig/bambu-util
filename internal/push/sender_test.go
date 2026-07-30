@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -318,5 +319,170 @@ func TestSenderReusesTheStoredIdentityAcrossRestarts(t *testing.T) {
 	// it, notifications would stop with nothing to show for it.
 	if b.PublicKey() != firstKey {
 		t.Errorf("identity changed across a restart:\n got %s\nwant %s", b.PublicKey(), firstKey)
+	}
+}
+
+func subWithKinds(t *testing.T, store *Store, endpoint string, kinds []string, interval time.Duration) *browser {
+	t.Helper()
+	phone := newBrowser(t)
+	if err := store.Save(phone.subscription(endpoint), testNow.Unix()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := store.SetPreferences(endpoint, kinds, interval); err != nil {
+		t.Fatalf("preferences: %v", err)
+	}
+	return phone
+}
+
+// Two devices should be able to want different things.
+func TestOnlyTheDevicesThatAskedAreTold(t *testing.T) {
+	store := openTestStore(t)
+	svc := newPushService(t)
+	subWithKinds(t, store, svc.server.URL+"/wants", []string{KindPrintFinished}, 0)
+	subWithKinds(t, store, svc.server.URL+"/does-not", []string{KindPrinterError}, 0)
+
+	sender, err := NewSender(store)
+	if err != nil {
+		t.Fatalf("NewSender: %v", err)
+	}
+	delivered, err := sender.Send(context.Background(), Notification{Title: "Print finished", Kind: KindPrintFinished})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if delivered != 1 {
+		t.Errorf("delivered to %d devices, want only the one that asked", delivered)
+	}
+}
+
+// Turning notifications on and never opening the settings should mean being
+// told about everything, not nothing.
+func TestADeviceThatHasChosenNothingIsToldEverything(t *testing.T) {
+	store := openTestStore(t)
+	svc := newPushService(t)
+	phone := newBrowser(t)
+	if err := store.Save(phone.subscription(svc.endpoint()), testNow.Unix()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	sender, err := NewSender(store)
+	if err != nil {
+		t.Fatalf("NewSender: %v", err)
+	}
+	for _, kind := range Kinds {
+		delivered, err := sender.Send(context.Background(), Notification{Title: "x", Kind: kind})
+		if err != nil {
+			t.Fatalf("Send %s: %v", kind, err)
+		}
+		if delivered != 1 {
+			t.Errorf("%s reached %d devices, want 1", kind, delivered)
+		}
+	}
+}
+
+// Re-subscribing happens on every page load. It must not undo what was chosen.
+func TestResubscribingKeepsThePreferences(t *testing.T) {
+	store := openTestStore(t)
+	const endpoint = "https://push.example.net/a"
+	phone := subWithKinds(t, store, endpoint, []string{KindPrinterError}, 4*time.Hour)
+
+	if err := store.Save(phone.subscription(endpoint), testNow.Unix()+60); err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	sub, ok, err := store.Find(endpoint)
+	if err != nil || !ok {
+		t.Fatalf("Find: %v (found %v)", err, ok)
+	}
+	if len(sub.Kinds) != 1 || sub.Kinds[0] != KindPrinterError {
+		t.Errorf("kinds = %v, want the chosen one kept", sub.Kinds)
+	}
+	if sub.BedInterval != 4*time.Hour {
+		t.Errorf("interval = %s, want 4h kept", sub.BedInterval)
+	}
+}
+
+func TestPreferencesRefuseAnUnknownKind(t *testing.T) {
+	store := openTestStore(t)
+	const endpoint = "https://push.example.net/a"
+	subWithKinds(t, store, endpoint, []string{KindPrintFinished}, 0)
+	if err := store.SetPreferences(endpoint, []string{"chamber-on-fire"}, 0); err == nil {
+		t.Error("an unknown notification was accepted")
+	}
+	if err := store.SetPreferences("https://push.example.net/nobody", []string{KindPrintFinished}, 0); err == nil {
+		t.Error("preferences were accepted for a device that is not subscribed")
+	}
+}
+
+// Each device keeps its own place in its own schedule.
+func TestBedRemindersFollowEachDevicesOwnInterval(t *testing.T) {
+	store := openTestStore(t)
+	svc := newPushService(t)
+	subWithKinds(t, store, svc.server.URL+"/hourly", nil, time.Hour)
+	subWithKinds(t, store, svc.server.URL+"/daily", nil, 24*time.Hour)
+	subWithKinds(t, store, svc.server.URL+"/never", nil, 0)
+
+	sender, err := NewSender(store)
+	if err != nil {
+		t.Fatalf("NewSender: %v", err)
+	}
+	now := testNow
+	sender.now = func() time.Time { return now }
+	since := now
+
+	// Nothing is due the moment the bed comes on.
+	if err := sender.RemindBedOn(context.Background(), since, 60); err != nil {
+		t.Fatalf("RemindBedOn: %v", err)
+	}
+	if bodies, _ := svc.received(); len(bodies) != 0 {
+		t.Fatalf("reminded %d devices immediately, want none", len(bodies))
+	}
+
+	// An hour on, only the device that asked hourly hears.
+	now = now.Add(time.Hour + time.Minute)
+	if err := sender.RemindBedOn(context.Background(), since, 60); err != nil {
+		t.Fatalf("RemindBedOn: %v", err)
+	}
+	bodies, _ := svc.received()
+	if len(bodies) != 1 {
+		t.Fatalf("reminded %d devices after an hour, want 1", len(bodies))
+	}
+
+	// And not again until its next hour is up.
+	now = now.Add(30 * time.Minute)
+	sender.RemindBedOn(context.Background(), since, 60)
+	if bodies, _ := svc.received(); len(bodies) != 1 {
+		t.Errorf("reminded again after 30 minutes: %d messages", len(bodies))
+	}
+
+	// A day on, both the hourly and the daily device hear.
+	now = now.Add(24 * time.Hour)
+	sender.RemindBedOn(context.Background(), since, 60)
+	if bodies, _ := svc.received(); len(bodies) != 3 {
+		t.Errorf("after a day there are %d messages, want 3 — the device asking never must stay silent", len(bodies))
+	}
+}
+
+// The bed going off starts every device's schedule over.
+func TestForgettingRemindersStartsTheScheduleAgain(t *testing.T) {
+	store := openTestStore(t)
+	svc := newPushService(t)
+	subWithKinds(t, store, svc.endpoint(), nil, time.Hour)
+	sender, err := NewSender(store)
+	if err != nil {
+		t.Fatalf("NewSender: %v", err)
+	}
+	now := testNow
+	sender.now = func() time.Time { return now }
+
+	now = now.Add(2 * time.Hour)
+	sender.RemindBedOn(context.Background(), testNow, 60)
+	if bodies, _ := svc.received(); len(bodies) != 1 {
+		t.Fatalf("got %d reminders, want 1", len(bodies))
+	}
+
+	if err := sender.ForgetBedReminders(); err != nil {
+		t.Fatalf("ForgetBedReminders: %v", err)
+	}
+	sub, _, _ := store.Find(svc.endpoint())
+	if !sub.BedRemindedAt.IsZero() {
+		t.Errorf("a device still remembers being reminded: %v", sub.BedRemindedAt)
 	}
 }

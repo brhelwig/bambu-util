@@ -12,6 +12,7 @@ import (
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
+	"github.com/brhelwig/bambu-util/internal/settings"
 )
 
 type fakeCommander struct {
@@ -62,6 +63,20 @@ func openTestStore() *history.Store {
 	return store
 }
 
+// testSettings is the settings under test: the defaults unless a test says
+// otherwise.
+func testSettings() settings.Values { return settings.Defaults }
+
+func openTestSettings(t *testing.T) *settings.Store {
+	t.Helper()
+	store, err := settings.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open settings: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
 func openTestNotifier() *push.Sender {
 	store, err := push.Open(":memory:")
 	if err != nil {
@@ -82,7 +97,7 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 	}
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow).Handler()), cmd, store
+	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler()), cmd, store
 }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
@@ -291,7 +306,7 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow).Handler()), cmd
+	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -459,7 +474,7 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -504,7 +519,7 @@ func TestStatusHMSPopulated(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -532,11 +547,8 @@ func TestHistoryRangeEmpty(t *testing.T) {
 	}
 }
 
-// testSeekWindow is the scrub-bar reach for tests that don't exercise it.
-const testSeekWindow = 24 * time.Hour
-
-// seekWindowUnderTest is deliberately not 24h, so a server that ignored its
-// configured window and fell back to the old hardcoded value would fail.
+// seekWindowUnderTest is deliberately not the default, so a server that ignored
+// its configured window and fell back to a fixed value would fail.
 const seekWindowUnderTest = 6 * time.Hour
 
 // seekTestServer builds a server whose clock is pinned to now (unix seconds) and
@@ -546,7 +558,12 @@ func seekTestServer(state string, now int64) (*httptest.Server, *history.Store) 
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": state})
 	store := openTestStore()
-	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, seekWindowUnderTest)
+	cur := func() settings.Values {
+		v := settings.Defaults
+		v.Retention = seekWindowUnderTest
+		return v
+	}
+	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, cur, nil)
 	srv.now = func() time.Time { return time.Unix(now, 0) }
 	return httptest.NewServer(srv.Handler()), store
 }

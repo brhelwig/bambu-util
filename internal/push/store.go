@@ -4,17 +4,23 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
 CREATE TABLE IF NOT EXISTS subscriptions (
-  id         INTEGER PRIMARY KEY,
-  endpoint   TEXT NOT NULL UNIQUE,
-  p256dh     BLOB NOT NULL,
-  auth       BLOB NOT NULL,
-  created_ts INTEGER NOT NULL
+  id              INTEGER PRIMARY KEY,
+  endpoint        TEXT NOT NULL UNIQUE,
+  p256dh          BLOB NOT NULL,
+  auth            BLOB NOT NULL,
+  created_ts      INTEGER NOT NULL,
+  kinds           TEXT NOT NULL DEFAULT '',
+  bed_interval    INTEGER NOT NULL DEFAULT 0,
+  bed_reminded_ts INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS server_key (
@@ -24,11 +30,33 @@ CREATE TABLE IF NOT EXISTS server_key (
 `
 
 // Subscription is one browser's address for push messages, as handed over when
-// the user turns notifications on.
+// the user turns notifications on, plus what that device asked to be told
+// about. Preferences live here rather than in the settings because two devices
+// should be able to want different things.
 type Subscription struct {
 	Endpoint string
 	P256dh   []byte // the browser's public key
 	Auth     []byte // the shared secret mixed into the encryption
+
+	// Kinds this device wants. Empty means every kind, which is what a device
+	// that has never chosen gets.
+	Kinds []string
+	// BedInterval is how often to repeat the bed reminder while the bed is on
+	// with no print running. Zero means never.
+	BedInterval time.Duration
+	// BedRemindedAt is when this device was last reminded, so each device keeps
+	// its own place in its own schedule.
+	BedRemindedAt time.Time
+}
+
+// Wants reports whether this device asked to be told about a kind. A device
+// that has chosen nothing is told about everything, which is what turning
+// notifications on and never opening the settings should mean.
+func (s Subscription) Wants(kind string) bool {
+	if len(s.Kinds) == 0 {
+		return true
+	}
+	return slices.Contains(s.Kinds, kind)
 }
 
 // Store holds subscriptions and this server's identity.
@@ -115,6 +143,9 @@ func (s *Store) Save(sub Subscription, ts int64) error {
 	if len(sub.Auth) == 0 {
 		return fmt.Errorf("push: subscription has no auth secret")
 	}
+	// Re-subscribing refreshes the keys and leaves the preferences alone: the
+	// page re-sends its subscription on every load, and that must not undo what
+	// the user chose.
 	_, err := s.db.Exec(`
 		INSERT INTO subscriptions (endpoint, p256dh, auth, created_ts) VALUES (?, ?, ?, ?)
 		ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth`,
@@ -132,7 +163,9 @@ func (s *Store) Delete(endpoint string) error {
 
 // All returns every subscription.
 func (s *Store) All() ([]Subscription, error) {
-	rows, err := s.db.Query(`SELECT endpoint, p256dh, auth FROM subscriptions ORDER BY id`)
+	rows, err := s.db.Query(`
+		SELECT endpoint, p256dh, auth, kinds, bed_interval, bed_reminded_ts
+		FROM subscriptions ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -140,12 +173,71 @@ func (s *Store) All() ([]Subscription, error) {
 	var out []Subscription
 	for rows.Next() {
 		var sub Subscription
-		if err := rows.Scan(&sub.Endpoint, &sub.P256dh, &sub.Auth); err != nil {
+		var kinds string
+		var interval, reminded int64
+		if err := rows.Scan(&sub.Endpoint, &sub.P256dh, &sub.Auth, &kinds, &interval, &reminded); err != nil {
 			return nil, err
+		}
+		if kinds != "" {
+			sub.Kinds = strings.Split(kinds, ",")
+		}
+		sub.BedInterval = time.Duration(interval) * time.Second
+		if reminded > 0 {
+			sub.BedRemindedAt = time.Unix(reminded, 0)
 		}
 		out = append(out, sub)
 	}
 	return out, rows.Err()
+}
+
+// Find returns one subscription, or false if it is not stored.
+func (s *Store) Find(endpoint string) (Subscription, bool, error) {
+	all, err := s.All()
+	if err != nil {
+		return Subscription{}, false, err
+	}
+	for _, sub := range all {
+		if sub.Endpoint == endpoint {
+			return sub, true, nil
+		}
+	}
+	return Subscription{}, false, nil
+}
+
+// SetPreferences records what one device wants to be told about.
+func (s *Store) SetPreferences(endpoint string, kinds []string, bedInterval time.Duration) error {
+	for _, kind := range kinds {
+		if !slices.Contains(Kinds, kind) {
+			return fmt.Errorf("push: unknown notification %q", kind)
+		}
+	}
+	if bedInterval < 0 {
+		return fmt.Errorf("push: reminder interval cannot be negative")
+	}
+	res, err := s.db.Exec(`UPDATE subscriptions SET kinds = ?, bed_interval = ? WHERE endpoint = ?`,
+		strings.Join(kinds, ","), int64(bedInterval.Seconds()), endpoint)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("push: no such subscription")
+	}
+	return nil
+}
+
+// MarkBedReminded records when a device was last reminded, so its schedule is
+// its own.
+func (s *Store) MarkBedReminded(endpoint string, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE subscriptions SET bed_reminded_ts = ? WHERE endpoint = ?`,
+		at.Unix(), endpoint)
+	return err
+}
+
+// ClearBedReminders forgets where every device had got to, for when the bed
+// goes off and the next stretch should start counting again.
+func (s *Store) ClearBedReminders() error {
+	_, err := s.db.Exec(`UPDATE subscriptions SET bed_reminded_ts = 0 WHERE bed_reminded_ts != 0`)
+	return err
 }
 
 // Count reports how many subscriptions are stored.

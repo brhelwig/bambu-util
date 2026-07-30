@@ -11,7 +11,7 @@ self.addEventListener("push", event => {
   } catch {
     // Something that isn't ours should still surface, not vanish.
   }
-  const title = data.title || "P1S";
+  const title = data.title || "Bambu Util";
   const tag = data.tag || undefined;
   event.waitUntil(self.registration.showNotification(title, {
     body: data.body || "",

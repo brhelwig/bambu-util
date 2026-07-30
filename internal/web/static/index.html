@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#111418">
 <link rel="manifest" href="/manifest.webmanifest">
-<title>P1S Bridge</title>
+<title>Bambu Util</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -52,6 +52,23 @@
   .iconbtn.danger.armed { background: #b02a2a; }
   .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
   .notifywhat { color: #9aa0a6; font-size: 0.8rem; margin: 2px 0 10px; }
+  .topbar { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
+  .screentitle { font-size: 0.95rem; font-weight: 600; flex: 1; }
+  .topbar .screentitle:last-child { flex: 1; }
+  .topicon { background: none; padding: 6px; color: #9aa0a6; display: inline-flex; }
+  .topicon svg { width: 22px; height: 22px; display: block; }
+  /* One grid, so every box lands in the same column whatever the unit beside
+     it is called. */
+  .setrow { display: grid; grid-template-columns: 1fr 72px 4.5em; align-items: center; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
+  .setrow label { color: #9aa0a6; }
+  .setrow .unit { color: #9aa0a6; }
+  .setrow select { grid-column: 2 / -1; width: 100%; }
+  .kindrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
+  .kindrow label { color: #e8eaed; }
+  .kindrow input { width: 20px; height: 20px; accent-color: #c98a2b; }
+  .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 100%; text-align: right; }
+  #settingsSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; }
+  #settingsSave:not(:disabled) { background: #7a4a12; }
   .notifybtns { display: flex; gap: 10px; }
   .notifybtns button { flex: 1; }
   .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
@@ -82,6 +99,13 @@
 </style>
 </head>
 <body>
+<div id="mainScreen">
+<div class="topbar">
+  <span class="screentitle">Bambu Util</span>
+  <button class="topicon" id="settingsBtn" aria-label="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 5 8.9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9.5a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9.5a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+</div>
 <div class="card" id="jobCard">
   <h2>Job status</h2>
   <div class="row" id="jobEmpty" style="color:#9aa0a6">No active print</div>
@@ -157,16 +181,56 @@
   <h2>Filament (AMS)</h2>
   <div id="amsSlots"></div>
 </div>
-<div class="card" id="notifyCard">
+</div>
+
+<div id="settingsScreen" style="display:none">
+<div class="topbar">
+  <button class="topicon" id="settingsBack" aria-label="Back">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  </button>
+  <span class="screentitle">Settings</span>
+</div>
+<div class="card">
   <h2>Notifications</h2>
   <div class="row"><span id="notifyState">…</span></div>
-  <div class="notifywhat">When a print starts, finishes or stops, when the printer
-    raises an error, and how long the bed has been on with no print running.</div>
+  <div class="notifywhat">Chosen per device, so this phone and anything else you
+    use can want different things.</div>
+  <div id="notifyPrefs" style="display:none">
+    <div id="notifyKinds"></div>
+    <div class="setrow"><label for="notifyBedInterval">Bed on reminder</label>
+      <select id="notifyBedInterval">
+        <option value="0">Never</option>
+        <option value="3600">Every hour</option>
+        <option value="14400">Every 4 hours</option>
+        <option value="28800">Every 8 hours</option>
+        <option value="43200">Every 12 hours</option>
+        <option value="86400">Every 24 hours</option>
+      </select></div>
+  </div>
   <div class="notifybtns">
     <button id="notifyBtn" style="display:none">Turn on</button>
     <button id="notifyTestBtn" style="display:none">Send a test</button>
   </div>
   <div id="notifyHint" style="display:none; color:#9aa0a6; font-size:0.8rem; margin-top:8px"></div>
+</div>
+<div class="card">
+  <h2>Timings</h2>
+  <div class="setrow"><label for="setRetention">Camera history</label>
+    <input type="number" id="setRetention" min="1" max="720" step="1"><span class="unit">hours</span></div>
+  <div class="setrow"><label for="setKeptJobs">Prints kept</label>
+    <input type="number" id="setKeptJobs" min="0" max="50" step="1"><span class="unit">jobs</span></div>
+  <div class="setrow"><label for="setBedOff">Bed auto-off</label>
+    <input type="number" id="setBedOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
+  <div class="setrow"><label for="setNozzleOff">Nozzle auto-off</label>
+    <input type="number" id="setNozzleOff" min="1" max="10080" step="1"><span class="unit">minutes</span></div>
+  <div class="setrow"><label for="setLampOff">Lamp off after idle</label>
+    <input type="number" id="setLampOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
+  <div class="notifywhat">The camera history window is also how far back the scrub
+    bar reaches. Prints kept hold their footage past that window, thinned to one frame
+    every 10 seconds. Auto-off countdowns already running keep the window they started with.</div>
+  <button id="settingsSave" disabled>Save</button>
+  <div id="settingsMsg" class="notifywhat" style="margin:8px 0 0"></div>
+</div>
 </div>
 <div id="log"></div>
 <script>
@@ -908,6 +972,71 @@ function bytesToB64(buf) {
   return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// What each kind is called on screen. The names on the wire outlive any
+// release, so they are mapped here rather than shown raw.
+const KIND_LABELS = {
+  "print-started": "Print started",
+  "print-finished": "Print finished",
+  "print-ended": "Print ended without finishing",
+  "printer-error": "Printer error",
+  "heater-off": "Heater turned off automatically",
+};
+
+// Saved as soon as they are changed: each is one choice on its own, unlike the
+// timings where a half-typed number would be a bad setting.
+async function savePrefs() {
+  if (!pushSub) return;
+  const kinds = [...document.querySelectorAll("#notifyKinds input:checked")].map(i => i.value);
+  try {
+    const r = await fetch("/api/push/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: pushSub.endpoint,
+        kinds,
+        bedInterval: Number($("notifyBedInterval").value),
+      }),
+    });
+    $("settingsMsg").textContent = r.ok ? "Saved." : (await r.text()).trim();
+  } catch (e) {
+    $("settingsMsg").textContent = `could not save: ${e.message || e}`;
+  }
+}
+
+async function loadPrefs() {
+  $("notifyPrefs").style.display = pushSub ? "" : "none";
+  if (!pushSub) return;
+  let prefs;
+  try {
+    const r = await fetch(`/api/push/preferences?endpoint=${encodeURIComponent(pushSub.endpoint)}`);
+    if (!r.ok) return;
+    prefs = await r.json();
+  } catch {
+    return;
+  }
+  const rows = document.createElement("div");
+  for (const kind of prefs.available) {
+    const row = document.createElement("div");
+    row.className = "kindrow";
+    const label = document.createElement("label");
+    label.textContent = KIND_LABELS[kind] || kind;
+    label.htmlFor = `kind-${kind}`;
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = `kind-${kind}`;
+    box.value = kind;
+    box.checked = prefs.kinds.includes(kind);
+    box.addEventListener("change", savePrefs);
+    row.append(label, box);
+    rows.appendChild(row);
+  }
+  $("notifyKinds").innerHTML = "";
+  $("notifyKinds").appendChild(rows);
+  $("notifyBedInterval").value = String(prefs.bedInterval);
+}
+
+$("notifyBedInterval").addEventListener("change", savePrefs);
+
 function renderNotify() {
   const on = Boolean(pushSub);
   const blocked = Notification.permission === "denied";
@@ -918,6 +1047,7 @@ function renderNotify() {
   $("notifyTestBtn").style.display = on ? "" : "none";
   $("notifyHint").style.display = blocked ? "" : "none";
   if (blocked) $("notifyHint").textContent = "Allow notifications for this site in your browser settings, then reload.";
+  loadPrefs();
 }
 
 function unsupportedNotify() {
@@ -1024,6 +1154,81 @@ $("notifyTestBtn").addEventListener("click", async () => {
 });
 
 initNotifications();
+
+// --- Screens ----------------------------------------------------------------
+// Settings is its own screen rather than more cards under the status: nothing
+// on it is worth scrolling past to reach the printer controls.
+function showScreen(settings) {
+  $("mainScreen").style.display = settings ? "none" : "";
+  $("settingsScreen").style.display = settings ? "" : "none";
+  $("log").textContent = "";
+  window.scrollTo(0, 0);
+  if (settings) refreshSettings();
+}
+
+$("settingsBtn").addEventListener("click", () => showScreen(true));
+$("settingsBack").addEventListener("click", () => showScreen(false));
+
+// --- Settings ---------------------------------------------------------------
+// Each control edits one setting and saves as soon as it is changed. The server
+// is the only thing that decides whether a value is allowed, so a refusal is
+// shown and the field put back to what is actually stored.
+const SETTINGS = [
+  { id: "setRetention", name: "retention", perUnit: 3600 },
+  { id: "setKeptJobs", name: "kept-jobs", perUnit: 1 },
+  { id: "setBedOff", name: "bed-off-after", perUnit: 3600 },
+  { id: "setNozzleOff", name: "nozzle-off-after", perUnit: 60 },
+  { id: "setLampOff", name: "lamp-off-after", perUnit: 3600 },
+];
+
+// What the server last told us, so Save knows what actually changed and a
+// refusal can put the field back to what is really stored.
+let savedSettings = {};
+
+function settingsDirty() {
+  return SETTINGS.some(s => Number($(s.id).value) * s.perUnit !== savedSettings[s.name]);
+}
+
+function markSettingsDirty() {
+  $("settingsSave").disabled = !settingsDirty();
+}
+
+async function refreshSettings() {
+  if (DEMO) return;
+  try {
+    const r = await fetch("/api/settings");
+    if (!r.ok) return;
+    savedSettings = await r.json();
+  } catch {
+    return; // leave whatever is on screen
+  }
+  for (const s of SETTINGS) $(s.id).value = Math.round(savedSettings[s.name] / s.perUnit);
+  $("settingsMsg").textContent = "";
+  markSettingsDirty();
+}
+
+for (const s of SETTINGS) $(s.id).addEventListener("input", markSettingsDirty);
+
+$("settingsSave").addEventListener("click", async () => {
+  $("settingsSave").disabled = true;
+  $("settingsMsg").textContent = "Saving…";
+  const failures = [];
+  for (const s of SETTINGS) {
+    const value = Math.round(Number($(s.id).value) * s.perUnit);
+    if (value === savedSettings[s.name]) continue;
+    try {
+      const r = await fetch(`/api/settings/${s.name}?value=${value}`, { method: "POST" });
+      if (!r.ok) failures.push((await r.text()).trim());
+    } catch (e) {
+      failures.push(e.message || String(e));
+    }
+  }
+  // Read back rather than assume: whatever the server kept is the truth, and a
+  // field the server refused goes back to the value actually in force.
+  await refreshSettings();
+  $("settingsMsg").textContent = failures.length ? failures.join(" · ") : "Saved.";
+});
+
 </script>
 </body>
 </html>

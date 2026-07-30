@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/brhelwig/bambu-util/internal/p1s"
+	"github.com/brhelwig/bambu-util/internal/settings"
 )
 
 func TestLampAutoFirstObservationForcesOnIfAlreadyActive(t *testing.T) {
@@ -14,7 +15,7 @@ func TestLampAutoFirstObservationForcesOnIfAlreadyActive(t *testing.T) {
 	// not wait for the next inactive->active transition, which might be
 	// hours away.
 	now := time.Unix(1000, 0)
-	l := newLampAuto(nil)
+	l := newLampAuto(nil, testSettings)
 	l.now = fixedClock(&now)
 
 	on, off := l.poll(true)
@@ -28,7 +29,7 @@ func TestLampAutoFirstObservationForcesOnIfAlreadyActive(t *testing.T) {
 
 func TestLampAutoDoesNotRefightManualOffDuringSameActiveStretch(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto(nil)
+	l := newLampAuto(nil, testSettings)
 	l.now = fixedClock(&now)
 
 	l.poll(true) // forces on once
@@ -44,14 +45,14 @@ func TestLampAutoFirstObservationArmsOffCountdownIfAlreadyIdle(t *testing.T) {
 	// A process restart while the printer happens to be idle should arm
 	// the off-countdown immediately, not assume the lamp is already off.
 	now := time.Unix(1000, 0)
-	l := newLampAuto(nil)
+	l := newLampAuto(nil, testSettings)
 	l.now = fixedClock(&now)
 
 	on, off := l.poll(false)
 	if on || off {
 		t.Fatalf("first observation while idle = (%v, %v), want (false, false)", on, off)
 	}
-	want := int(LampInactiveOffAfter.Seconds())
+	want := int(settings.Defaults.LampOffAfter.Seconds())
 	if r := l.remaining(); r != want {
 		t.Fatalf("remaining = %d, want %d", r, want)
 	}
@@ -59,7 +60,7 @@ func TestLampAutoFirstObservationArmsOffCountdownIfAlreadyIdle(t *testing.T) {
 
 func TestLampAutoArmsOnTransitionToInactive(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto(nil)
+	l := newLampAuto(nil, testSettings)
 	l.now = fixedClock(&now)
 
 	l.poll(true)
@@ -67,7 +68,7 @@ func TestLampAutoArmsOnTransitionToInactive(t *testing.T) {
 	if on || off {
 		t.Fatalf("poll(false) right after going inactive = (%v, %v), want (false, false)", on, off)
 	}
-	want := int(LampInactiveOffAfter.Seconds())
+	want := int(settings.Defaults.LampOffAfter.Seconds())
 	if r := l.remaining(); r != want {
 		t.Fatalf("remaining = %d, want %d", r, want)
 	}
@@ -84,12 +85,12 @@ func TestLampAutoArmsOnTransitionToInactive(t *testing.T) {
 
 func TestLampAutoFiresOnceAfterGracePeriod(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto(nil)
+	l := newLampAuto(nil, testSettings)
 	l.now = fixedClock(&now)
 
 	l.poll(true)
 	l.poll(false)
-	now = now.Add(LampInactiveOffAfter + time.Second)
+	now = now.Add(settings.Defaults.LampOffAfter + time.Second)
 
 	on, off := l.poll(false)
 	if on || !off {
@@ -106,7 +107,7 @@ func TestLampAutoFiresOnceAfterGracePeriod(t *testing.T) {
 
 func TestLampAutoCancelledByReactivation(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto(nil)
+	l := newLampAuto(nil, testSettings)
 	l.now = fixedClock(&now)
 
 	l.poll(true)
@@ -121,7 +122,7 @@ func TestLampAutoCancelledByReactivation(t *testing.T) {
 	// Going inactive again arms a fresh window from *this* point, not the
 	// original one.
 	l.poll(false)
-	want := int(LampInactiveOffAfter.Seconds())
+	want := int(settings.Defaults.LampOffAfter.Seconds())
 	if r := l.remaining(); r != want {
 		t.Fatalf("remaining after re-arming = %d, want %d", r, want)
 	}
@@ -134,7 +135,7 @@ func TestPollLampForcesOnWhenJobRunning(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow)
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil)
 
 	s.pollLamp()
 
@@ -149,7 +150,7 @@ func TestPollLampDoesNothingWhenDisconnected(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow)
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil)
 
 	s.pollLamp()
 
@@ -165,7 +166,7 @@ func TestStatusExposesLampOffCountdown(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow)
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
@@ -181,7 +182,7 @@ func TestStatusExposesLampOffCountdown(t *testing.T) {
 	resp2, _ := ts.Client().Get(ts.URL + "/api/status")
 	json.NewDecoder(resp2.Body).Decode(&status)
 	lampOff, ok := status["lampOffIn"].(float64)
-	if !ok || lampOff > LampInactiveOffAfter.Seconds() || lampOff < LampInactiveOffAfter.Seconds()-60 {
-		t.Fatalf("lampOffIn = %v, want ~%v", status["lampOffIn"], LampInactiveOffAfter.Seconds())
+	if !ok || lampOff > settings.Defaults.LampOffAfter.Seconds() || lampOff < settings.Defaults.LampOffAfter.Seconds()-60 {
+		t.Fatalf("lampOffIn = %v, want ~%v", status["lampOffIn"], settings.Defaults.LampOffAfter.Seconds())
 	}
 }
