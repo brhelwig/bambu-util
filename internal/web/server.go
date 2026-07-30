@@ -41,10 +41,11 @@ type Server struct {
 	store   *history.Store
 	autoOff *autoOff
 	lamp    *lampAuto
+	now     func() time.Time
 }
 
 func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store) *Server {
-	return &Server{cache: cache, cmd: cmd, store: store, autoOff: newAutoOff(), lamp: newLampAuto()}
+	return &Server{cache: cache, cmd: cmd, store: store, autoOff: newAutoOff(), lamp: newLampAuto(), now: time.Now}
 }
 
 // EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
@@ -90,7 +91,7 @@ func (s *Server) pollLamp() {
 		return
 	}
 	gs := p1s.GcodeState(fields)
-	jobActive := gs == "RUNNING" || gs == "PAUSE"
+	jobActive := p1s.JobActive(gs)
 	bedTarget, _ := fields["bed_target_temper"].(float64)
 	nozzleTarget, _ := fields["nozzle_target_temper"].(float64)
 	active := jobActive || bedTarget > 0 || nozzleTarget > 0
@@ -145,7 +146,6 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"layerNum":         fields["layer_num"],
 		"totalLayerNum":    fields["total_layer_num"],
 		"remainingMinutes": fields["mc_remaining_time"],
-		"chamberTemp":      fields["chamber_temper"],
 		"chamberLight":     p1s.ChamberLight(fields),
 		"wifiSignal":       fields["wifi_signal"],
 		"fans": map[string]any{
@@ -415,14 +415,45 @@ func normalizeColor(raw string) (string, error) {
 	return up, nil
 }
 
+// How far back the camera scrub bar reaches. Idle it is a flat window into the
+// rolling buffer; during a print it starts just before the print did, so the
+// whole job is one drag of the bar and nothing that came before is in the way.
+// Footage older than this is still reachable, but only by picking a job from the
+// recent-jobs list.
+const (
+	SeekWindow = 24 * time.Hour
+	JobLeadIn  = 5 * time.Minute
+)
+
 func (s *Server) historyRange(w http.ResponseWriter, _ *http.Request) {
 	oldest, newest, err := s.store.Range()
 	if err != nil {
 		http.Error(w, "range query failed", http.StatusInternalServerError)
 		return
 	}
+	if oldest != nil && newest != nil {
+		if start := s.seekStart(); start > *oldest {
+			// A print that started after the last recorded frame (camera down
+			// when it began) would otherwise put the bar's start past its end.
+			if start > *newest {
+				start = *newest
+			}
+			oldest = &start
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"oldest": oldest, "newest": newest})
+}
+
+// seekStart is the earliest timestamp the scrub bar should reach.
+func (s *Server) seekStart() int64 {
+	fields, _ := s.cache.Snapshot()
+	if p1s.JobActive(p1s.GcodeState(fields)) {
+		if job, err := s.store.ActiveJob(); err == nil && job != nil {
+			return job.Start - int64(JobLeadIn.Seconds())
+		}
+	}
+	return s.now().Add(-SeekWindow).Unix()
 }
 
 func (s *Server) historyFrame(w http.ResponseWriter, r *http.Request) {

@@ -11,19 +11,30 @@ same network, holds those connections, and serves a plain mobile web page.
 
 Features:
 
-- **Lower bed** (absolute move to Z200), **Home** (`G28`), **Bed 100°C**,
-  **Heater off** — the bed-drying / cleaning actions
+- **Bed down** (absolute move to Z200), **Home** (`G28`), **Extrude**, and
+  **Unload** — the manual bed and filament actions
+- Bed-drying and nozzle-cleaning temperature sliders, each with material
+  presets and a safety auto-off
 - Live status: connection, printer state, bed/nozzle temperatures
-  (actual/target), print progress
+  (actual/target), print progress, job name, layer, and time remaining
+- Filament (AMS): per-tray colour, material, and nozzle temperature range,
+  plus the unit's desiccant dryness as Bambu Studio's A-E grade
 - Chamber camera (~1 fps), recorded continuously into a rolling buffer
   (`RECORDING_RETENTION`, default 24h) — the bridge holds the camera
   connection the whole time it runs, not just while someone is watching,
   so Bambu Studio's own camera view will not work while bambu-util is
   running (the printer only serves one camera client at a time). One view
-  shows it all: it follows the live tail of the buffer by default, a scrub
-  bar lets you drag back through recent footage, and a **Live** button
-  jumps back to the tail. Recent print jobs are listed underneath — pick
-  one to jump to its footage and fast-forward through it as a timelapse
+  shows it all: it follows the live tail of the buffer by default, and a
+  scrub bar drags back through earlier footage. While the printer is idle
+  the bar reaches back 24 hours; during a print it starts five minutes
+  before the print did, so the whole job is one drag and nothing earlier is
+  in the way. An icon button jumps back to the tail
+- Recent print jobs are listed under the camera, each with its start time so
+  two runs of the same file can be told apart. Pick one to play its
+  footage as a timelapse at 60x, 300x, or 600x. The five most recently
+  finished prints keep their footage regardless of the retention window,
+  thinned to one frame every 10 seconds once it ages out — enough for a
+  timelapse without holding whole prints at the full recording rate
 - Bed actions are refused server-side unless the printer is idle
   (IDLE/FINISH/FAILED) — nothing can move the bed or change temperatures
   mid-print

@@ -28,6 +28,39 @@ follow [Semantic Versioning](https://semver.org/).
 - Removed the raw MJPEG live-stream endpoint and the manual camera on/off
   toggle — every view now sources frames from the recording buffer, so
   there's no separate "live" connection to toggle.
+- The scrub bar is bounded rather than spanning the whole stored buffer: it
+  reaches back 24h while the printer is idle, and starts 5 minutes before the
+  print began while one is running, so a job is one drag of the bar. Older
+  footage is still reachable by picking a job from the list.
+- Timelapse speeds are 60x, 300x, and 600x, and play back at 4 frames per
+  second instead of 1 — the old 1x-20x speeds were slower than the recording
+  rate they were replaying.
+- The five most recently finished prints keep their footage regardless of
+  `RECORDING_RETENTION`, thinned to one frame every 10 seconds once past the
+  cutoff. Whole prints at the full recording rate would add gigabytes.
+- Recent jobs show each print's start time, so two runs of the same file can
+  be told apart.
+- **Live** and **Play** are icon buttons; Live also lights up while the view
+  is following the tail.
+- **Eject** is now called **Unload**, matching what it does.
+- Time remaining reads as hours and minutes (`2h 15m`) once over an hour.
+- AMS desiccant dryness is shown as Bambu Studio's letter grade (A driest)
+  instead of a bare `level 5`.
+
+### Fixed
+
+- A print no longer appears in the recent-jobs list more than once. Pausing
+  closed the job and resuming opened a second one, and a restart mid-print
+  opened another while leaving the first open forever; a paused print now
+  counts as the same job, and a restart adopts the row already open. Printer
+  states that mean neither running nor finished — `PREPARE`, or `unknown`
+  before the first status report — no longer end a job that is still going.
+
+### Removed
+
+- Chamber temperature. The P1S reports a value that does not track the
+  chamber (5°C mid-print, with the bed at 55°C), and there is no way to make
+  it meaningful. The chamber *fan* speed is unaffected.
 
 ## [0.5.0] - 2026-07-22
 

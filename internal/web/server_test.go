@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
@@ -508,8 +509,8 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	if s["remainingMinutes"] != float64(37) {
 		t.Errorf("remainingMinutes = %v", s["remainingMinutes"])
 	}
-	if s["chamberTemp"] != 28.4 {
-		t.Errorf("chamberTemp = %v", s["chamberTemp"])
+	if _, ok := s["chamberTemp"]; ok {
+		t.Errorf("chamberTemp is still reported: %v", s["chamberTemp"])
 	}
 	if s["wifiSignal"] != "-45dBm" {
 		t.Errorf("wifiSignal = %v", s["wifiSignal"])
@@ -565,15 +566,100 @@ func TestHistoryRangeEmpty(t *testing.T) {
 	}
 }
 
+// seekTestServer builds a server whose clock is pinned to now (unix seconds), so
+// the scrub-bar window is deterministic.
+func seekTestServer(state string, now int64) (*httptest.Server, *history.Store) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{"gcode_state": state})
+	store := openTestStore()
+	srv := NewServer(cache, &fakeCommander{}, store)
+	srv.now = func() time.Time { return time.Unix(now, 0) }
+	return httptest.NewServer(srv.Handler()), store
+}
+
+func seekRange(t *testing.T, ts *httptest.Server) map[string]any {
+	t.Helper()
+	resp, err := ts.Client().Get(ts.URL + "/camera/history/range")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestHistoryRangeClampsToSeekWindowWhenIdle(t *testing.T) {
+	const now = 10_000_000
+	ts, store := seekTestServer("IDLE", now)
+	defer ts.Close()
+	store.InsertFrame(now-48*3600, []byte{1}) // retained job footage, two days old
+	store.InsertFrame(now-3600, []byte{2})
+
+	r := seekRange(t, ts)
+	if want := float64(now - int64(SeekWindow.Seconds())); r["oldest"] != want {
+		t.Fatalf("oldest = %v, want %v (clamped to the seek window)", r["oldest"], want)
+	}
+	if r["newest"] != float64(now-3600) {
+		t.Fatalf("newest = %v, want %v", r["newest"], now-3600)
+	}
+}
+
+func TestHistoryRangeStartsShortlyBeforeTheRunningJob(t *testing.T) {
+	const now = 10_000_000
+	const jobStart = now - 2*3600
+	ts, store := seekTestServer("RUNNING", now)
+	defer ts.Close()
+	store.OpenJob("running.3mf", jobStart)
+	store.InsertFrame(now-20*3600, []byte{1}) // footage from before this print
+	store.InsertFrame(now-60, []byte{2})
+
+	r := seekRange(t, ts)
+	if want := float64(jobStart - int64(JobLeadIn.Seconds())); r["oldest"] != want {
+		t.Fatalf("oldest = %v, want %v (job start minus the lead-in)", r["oldest"], want)
+	}
+}
+
+func TestHistoryRangeUsesSeekWindowWhenAnOpenRowIsStale(t *testing.T) {
+	const now = 10_000_000
+	ts, store := seekTestServer("IDLE", now)
+	defer ts.Close()
+	store.OpenJob("never-closed.3mf", now-96*3600)
+	store.InsertFrame(now-48*3600, []byte{1})
+	store.InsertFrame(now-60, []byte{2})
+
+	r := seekRange(t, ts)
+	if want := float64(now - int64(SeekWindow.Seconds())); r["oldest"] != want {
+		t.Fatalf("oldest = %v, want %v — an open row must not widen the window while idle", r["oldest"], want)
+	}
+}
+
+func TestHistoryRangeNeverStartsAfterTheNewestFrame(t *testing.T) {
+	const now = 10_000_000
+	ts, store := seekTestServer("RUNNING", now)
+	defer ts.Close()
+	// Print started well after recording stopped, so the window's start would
+	// otherwise land past the last frame and invert the scrub bar.
+	store.OpenJob("running.3mf", now-60)
+	store.InsertFrame(now-7200, []byte{1})
+
+	r := seekRange(t, ts)
+	if r["oldest"] != float64(now-7200) || r["newest"] != float64(now-7200) {
+		t.Fatalf("got %v, want oldest and newest both pinned to the only frame", r)
+	}
+}
+
 func TestHistoryRangeAndFrame(t *testing.T) {
-	ts, _, store := buildTestServer(true, "IDLE")
+	// Clock pinned just after the frames, so the seek window reaches past them
+	// and the raw store range comes through unclamped.
+	ts, store := seekTestServer("IDLE", 200)
 	defer ts.Close()
 	store.InsertFrame(100, []byte{0xFF, 0xD8, 0xFF, 0xD9})
 	store.InsertFrame(200, []byte{0xFF, 0xD8, 0x01, 0xFF, 0xD9})
 
-	resp, _ := ts.Client().Get(ts.URL + "/camera/history/range")
-	var r map[string]any
-	json.NewDecoder(resp.Body).Decode(&r)
+	r := seekRange(t, ts)
 	if r["oldest"] != float64(100) || r["newest"] != float64(200) {
 		t.Fatalf("bad range: %v", r)
 	}

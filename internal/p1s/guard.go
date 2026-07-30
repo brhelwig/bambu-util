@@ -14,6 +14,20 @@ func GcodeState(fields map[string]any) string {
 	return "unknown"
 }
 
+// JobActive reports whether a print is under way. A paused print is still the
+// same job, so PAUSE counts.
+func JobActive(gcodeState string) bool {
+	return gcodeState == "RUNNING" || gcodeState == "PAUSE"
+}
+
+// JobEnded reports whether the printer is in a state that means no print is
+// under way. Deliberately not the negation of JobActive: "unknown" (before the
+// printer's first report) and PREPARE are neither, and a caller that acts on a
+// job ending must not act on the absence of information.
+func JobEnded(gcodeState string) bool {
+	return idleStates[gcodeState]
+}
+
 func ActionAllowed(connected bool, gcodeState string) error {
 	if !connected {
 		return fmt.Errorf("not connected to printer")

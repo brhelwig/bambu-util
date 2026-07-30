@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"time"
+
+	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
 // JobWatcher opens and closes job rows in a Store based on gcode_state
@@ -15,18 +17,38 @@ type JobWatcher struct {
 	inJob  bool
 }
 
-// NewJobWatcher creates a watcher writing job rows to store.
+// NewJobWatcher creates a watcher writing job rows to store. It adopts a row
+// left open by an earlier process instead of opening a second one: whether a
+// print is being recorded lives only in this struct, so a restart mid-print
+// would otherwise list that print twice and leave the first row open forever.
+// Rows already stranded that way are closed on the way past.
 func NewJobWatcher(store *Store) *JobWatcher {
-	return &JobWatcher{store: store, now: time.Now}
+	w := &JobWatcher{store: store, now: time.Now}
+	if n, err := store.CloseOrphanJobs(); err != nil {
+		log.Printf("history: close orphan jobs: %v", err)
+	} else if n > 0 {
+		log.Printf("history: closed %d job row(s) left open by an earlier process", n)
+	}
+	open, err := store.ActiveJob()
+	if err != nil {
+		log.Printf("history: adopt open job: %v", err)
+		return w
+	}
+	if open != nil {
+		w.openID = open.ID
+		w.inJob = true
+	}
+	return w
 }
 
-// Poll opens a job row on a transition into "RUNNING", and closes the open
-// one on a transition out of it. Repeated calls with the same state are
-// no-ops, so it's safe to call on every status poll.
+// Poll opens a job row when a print starts and closes the open one when it
+// ends. Repeated calls with the same state are no-ops, so it's safe to call on
+// every status poll. States that mean neither — "unknown" before the printer's
+// first report, or PREPARE while it heats — leave the row alone; closing on
+// those would end a print that is still running.
 func (w *JobWatcher) Poll(gcodeState, jobName string) {
-	running := gcodeState == "RUNNING"
 	switch {
-	case running && !w.inJob:
+	case p1s.JobActive(gcodeState) && !w.inJob:
 		id, err := w.store.OpenJob(jobName, w.now().Unix())
 		if err != nil {
 			log.Printf("history: open job: %v", err)
@@ -34,8 +56,8 @@ func (w *JobWatcher) Poll(gcodeState, jobName string) {
 		}
 		w.openID = id
 		w.inJob = true
-	case !running && w.inJob:
-		if err := w.store.CloseJob(w.openID, w.now().Unix()); err != nil {
+	case p1s.JobEnded(gcodeState) && w.inJob:
+		if err := w.store.CloseJobAtLastFrame(w.openID, w.now().Unix()); err != nil {
 			log.Printf("history: close job: %v", err)
 			return
 		}
