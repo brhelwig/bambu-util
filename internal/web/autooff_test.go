@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
 func fixedClock(t *time.Time) func() time.Time {
@@ -88,5 +90,102 @@ func TestStatusExposesAutoOffCountdown(t *testing.T) {
 	bedOff, ok := s["bedOffIn"].(float64)
 	if !ok || bedOff > BedOffAfter.Seconds() || bedOff < BedOffAfter.Seconds()-60 {
 		t.Fatalf("bedOffIn = %v, want ~%v", s["bedOffIn"], BedOffAfter.Seconds())
+	}
+}
+
+// autoOffServer builds a server whose heater deadlines have already passed, so
+// the next poll would shut them down if the printer state allowed it.
+func autoOffServer(t *testing.T, connected bool, state string) (*Server, *fakeCommander) {
+	t.Helper()
+	cache := p1s.NewStateCache()
+	cache.SetConnected(connected)
+	cache.Merge(map[string]any{"gcode_state": state})
+	cmd := &fakeCommander{}
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), testSeekWindow)
+
+	now := time.Unix(1000, 0)
+	s.autoOff.now = fixedClock(&now)
+	s.autoOff.setBed(60)
+	s.autoOff.setNozzle(220)
+	now = now.Add(BedOffAfter + time.Hour)
+	return s, cmd
+}
+
+// Cutting the heaters mid-print ruins the print, so the shut-off must not act
+// while the printer is running one.
+func TestAutoOffDoesNotCutHeatersWhilePrinting(t *testing.T) {
+	for _, state := range []string{"RUNNING", "PAUSE", "PREPARE"} {
+		t.Run(state, func(t *testing.T) {
+			s, cmd := autoOffServer(t, true, state)
+			s.pollAutoOff()
+			if len(cmd.calls) != 0 {
+				t.Fatalf("commanded the printer during %s: %v", state, cmd.calls)
+			}
+		})
+	}
+}
+
+// Skipping must not consume the deadline: once the print ends the heaters still
+// have to go off, or a skipped shut-off is a shut-off lost for good.
+func TestAutoOffStillFiresOnceThePrintIsOver(t *testing.T) {
+	cache := p1s.NewStateCache()
+	cache.SetConnected(true)
+	cache.Merge(map[string]any{"gcode_state": "RUNNING"})
+	cmd := &fakeCommander{}
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), testSeekWindow)
+
+	now := time.Unix(1000, 0)
+	s.autoOff.now = fixedClock(&now)
+	s.autoOff.setBed(60)
+	s.autoOff.setNozzle(220)
+	now = now.Add(BedOffAfter + time.Hour)
+
+	for range 3 {
+		s.pollAutoOff()
+	}
+	if len(cmd.calls) != 0 {
+		t.Fatalf("commanded the printer mid-print: %v", cmd.calls)
+	}
+	if bed, nozzle := s.autoOff.remaining(); bed != 0 || nozzle != 0 {
+		t.Fatalf("deadlines were consumed while printing: bed=%d nozzle=%d", bed, nozzle)
+	}
+
+	cache.Merge(map[string]any{"gcode_state": "FINISH"})
+	s.pollAutoOff()
+	if len(cmd.bedTemps) != 1 || cmd.bedTemps[0] != 0 {
+		t.Errorf("bed was not shut off once idle: %v", cmd.bedTemps)
+	}
+	if len(cmd.nozzleTemps) != 1 || cmd.nozzleTemps[0] != 0 {
+		t.Errorf("nozzle was not shut off once idle: %v", cmd.nozzleTemps)
+	}
+}
+
+// A dropped connection must not consume the deadline either — the command
+// cannot be delivered, so it has to stay pending.
+func TestAutoOffWaitsForTheConnectionToComeBack(t *testing.T) {
+	s, cmd := autoOffServer(t, false, "IDLE")
+	s.pollAutoOff()
+	if len(cmd.calls) != 0 {
+		t.Fatalf("commanded a disconnected printer: %v", cmd.calls)
+	}
+	s.cache.SetConnected(true)
+	s.pollAutoOff()
+	if len(cmd.bedTemps) != 1 || len(cmd.nozzleTemps) != 1 {
+		t.Errorf("did not shut down after reconnecting: bed=%v nozzle=%v", cmd.bedTemps, cmd.nozzleTemps)
+	}
+}
+
+func TestAutoOffFiresWhenIdle(t *testing.T) {
+	for _, state := range []string{"IDLE", "FINISH", "FAILED"} {
+		t.Run(state, func(t *testing.T) {
+			s, cmd := autoOffServer(t, true, state)
+			s.pollAutoOff()
+			if len(cmd.bedTemps) != 1 || cmd.bedTemps[0] != 0 {
+				t.Errorf("bed = %v, want one shut-off", cmd.bedTemps)
+			}
+			if len(cmd.nozzleTemps) != 1 || cmd.nozzleTemps[0] != 0 {
+				t.Errorf("nozzle = %v, want one shut-off", cmd.nozzleTemps)
+			}
+		})
 	}
 }
