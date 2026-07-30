@@ -18,12 +18,19 @@ const (
 	HomeGcode    = "G28\n"
 )
 
-// Client is the MQTT link to the printer: cached merged state plus
-// fire-and-forget commands. Port of the Python TUI's PrinterClient.
+// publisher is the part of the MQTT client this package sends through, kept
+// narrow so tests can watch what goes out and at what delivery level.
+type publisher interface {
+	Publish(topic string, qos byte, retained bool, payload any) mqtt.Token
+}
+
+// Client is the MQTT link to the printer: cached merged state plus commands.
+// Port of the Python TUI's PrinterClient.
 type Client struct {
 	serial string
 	cache  *StateCache
 	mqtt   mqtt.Client
+	pub    publisher
 	seq    atomic.Int64
 }
 
@@ -48,6 +55,7 @@ func NewClient(ip, serial, accessCode string, cache *StateCache) *Client {
 	}
 	opts.OnConnectionLost = func(mqtt.Client, error) { cache.SetConnected(false) }
 	c.mqtt = mqtt.NewClient(opts)
+	c.pub = c.mqtt
 	return c
 }
 
@@ -66,8 +74,23 @@ func HandleReport(cache *StateCache, payload []byte) {
 	}
 }
 
+// Delivery levels. Most commands go out unacknowledged: they are either
+// self-correcting (a temperature the next status report will contradict) or
+// unsafe to repeat (an extrude, which at-least-once delivery could run twice).
+// Pause, resume, stop and unload are neither — losing a Stop is worse than
+// sending it twice, and the printer refuses the second one — so they are
+// acknowledged and the broker retries until it is.
+const (
+	qosUnacknowledged = 0
+	qosAcknowledged   = 1
+)
+
 func (c *Client) publish(payload string) {
-	c.mqtt.Publish(fmt.Sprintf("device/%s/request", c.serial), 0, false, payload)
+	c.publishAt(qosUnacknowledged, payload)
+}
+
+func (c *Client) publishAt(qos byte, payload string) mqtt.Token {
+	return c.pub.Publish(fmt.Sprintf("device/%s/request", c.serial), qos, false, payload)
 }
 
 func (c *Client) SendGcode(gcode string) {
@@ -152,7 +175,7 @@ func printCommandPayload(seq int64, command string) string {
 }
 
 func (c *Client) sendPrintCommand(command string) {
-	c.publish(printCommandPayload(c.seq.Add(1), command))
+	c.publishAt(qosAcknowledged, printCommandPayload(c.seq.Add(1), command))
 }
 
 func (c *Client) PausePrint()  { c.sendPrintCommand("pause") }
