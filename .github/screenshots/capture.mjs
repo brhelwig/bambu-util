@@ -157,8 +157,11 @@ async function main() {
     window.PushManager = class {};
     // The subscription has to carry the server's own key, or the page correctly
     // treats it as bound to an identity that is gone and resets itself to Off.
+    // Plain string replacement, not regexes: this whole stub is a template
+    // literal, which eats the backslash out of an escape and leaves an invalid
+    // pattern behind.
     const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)))
-      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
     const standIn = async () => {
       const { key } = await (await fetch("/api/push/key")).json();
       const raw = atob(key.replace(/-/g, "+").replace(/_/g, "/"));
