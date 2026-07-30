@@ -164,22 +164,28 @@ async function main() {
     await page.close();
   }
 
-  // The settings screen, reached the way a person reaches it.
+  // The settings screen, reached the way a person reaches it. A branch that
+  // predates the settings screen simply has no gear, and capturing the rest is
+  // still worth doing.
   {
     const page = await context.newPage();
     await page.route("**/api/status", route => route.fulfill({ json: { ...idle, ams } }));
     await page.goto(BASE + "/", { waitUntil: "networkidle" });
-    await page.click("#settingsBtn");
-    await page.waitForTimeout(400);
-    const file = `${OUT}/09-settings.png`;
-    await page.screenshot({ path: file, fullPage: true });
-    shots.push({
-      name: "09-settings",
-      title: "Settings",
-      note: "Its own screen behind the gear, not more cards under the printer status.",
-      file,
-    });
-    console.log("captured Settings");
+    if (await page.locator("#settingsBtn").count()) {
+      await page.click("#settingsBtn");
+      await page.waitForTimeout(400);
+      const file = `${OUT}/09-settings.png`;
+      await page.screenshot({ path: file, fullPage: true });
+      shots.push({
+        name: "09-settings",
+        title: "Settings",
+        note: "Its own screen behind the gear, not more cards under the printer status.",
+        file,
+      });
+      console.log("captured Settings");
+    } else {
+      console.log("no settings screen on this branch, skipping");
+    }
     await page.close();
   }
 
