@@ -14,7 +14,7 @@ func TestLampAutoFirstObservationForcesOnIfAlreadyActive(t *testing.T) {
 	// not wait for the next inactive->active transition, which might be
 	// hours away.
 	now := time.Unix(1000, 0)
-	l := newLampAuto()
+	l := newLampAuto(nil)
 	l.now = fixedClock(&now)
 
 	on, off := l.poll(true)
@@ -28,7 +28,7 @@ func TestLampAutoFirstObservationForcesOnIfAlreadyActive(t *testing.T) {
 
 func TestLampAutoDoesNotRefightManualOffDuringSameActiveStretch(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto()
+	l := newLampAuto(nil)
 	l.now = fixedClock(&now)
 
 	l.poll(true) // forces on once
@@ -44,7 +44,7 @@ func TestLampAutoFirstObservationArmsOffCountdownIfAlreadyIdle(t *testing.T) {
 	// A process restart while the printer happens to be idle should arm
 	// the off-countdown immediately, not assume the lamp is already off.
 	now := time.Unix(1000, 0)
-	l := newLampAuto()
+	l := newLampAuto(nil)
 	l.now = fixedClock(&now)
 
 	on, off := l.poll(false)
@@ -59,7 +59,7 @@ func TestLampAutoFirstObservationArmsOffCountdownIfAlreadyIdle(t *testing.T) {
 
 func TestLampAutoArmsOnTransitionToInactive(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto()
+	l := newLampAuto(nil)
 	l.now = fixedClock(&now)
 
 	l.poll(true)
@@ -84,7 +84,7 @@ func TestLampAutoArmsOnTransitionToInactive(t *testing.T) {
 
 func TestLampAutoFiresOnceAfterGracePeriod(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto()
+	l := newLampAuto(nil)
 	l.now = fixedClock(&now)
 
 	l.poll(true)
@@ -106,7 +106,7 @@ func TestLampAutoFiresOnceAfterGracePeriod(t *testing.T) {
 
 func TestLampAutoCancelledByReactivation(t *testing.T) {
 	now := time.Unix(1000, 0)
-	l := newLampAuto()
+	l := newLampAuto(nil)
 	l.now = fixedClock(&now)
 
 	l.poll(true)
@@ -134,7 +134,7 @@ func TestPollLampForcesOnWhenJobRunning(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), testSeekWindow)
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow)
 
 	s.pollLamp()
 
@@ -149,7 +149,7 @@ func TestPollLampDoesNothingWhenDisconnected(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), testSeekWindow)
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow)
 
 	s.pollLamp()
 
@@ -165,7 +165,7 @@ func TestStatusExposesLampOffCountdown(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), testSeekWindow)
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSeekWindow)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 

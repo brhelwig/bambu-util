@@ -14,7 +14,7 @@ func fixedClock(t *time.Time) func() time.Time {
 
 func TestAutoOffFiresAfterWindow(t *testing.T) {
 	now := time.Unix(1000, 0)
-	a := newAutoOff()
+	a := newAutoOff(nil)
 	a.now = fixedClock(&now)
 
 	a.setBed(60)
@@ -41,7 +41,7 @@ func TestAutoOffFiresAfterWindow(t *testing.T) {
 
 func TestAutoOffResetsOnAdjust(t *testing.T) {
 	now := time.Unix(0, 0)
-	a := newAutoOff()
+	a := newAutoOff(nil)
 	a.now = fixedClock(&now)
 
 	a.setNozzle(220)
@@ -57,7 +57,7 @@ func TestAutoOffResetsOnAdjust(t *testing.T) {
 
 func TestAutoOffCancelledByZero(t *testing.T) {
 	now := time.Unix(0, 0)
-	a := newAutoOff()
+	a := newAutoOff(nil)
 	a.now = fixedClock(&now)
 
 	a.setBed(90)
@@ -101,7 +101,7 @@ func autoOffServer(t *testing.T, connected bool, state string) (*Server, *fakeCo
 	cache.SetConnected(connected)
 	cache.Merge(map[string]any{"gcode_state": state})
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), testSeekWindow)
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSeekWindow)
 
 	now := time.Unix(1000, 0)
 	s.autoOff.now = fixedClock(&now)
@@ -132,7 +132,7 @@ func TestAutoOffStillFiresOnceThePrintIsOver(t *testing.T) {
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "RUNNING"})
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), testSeekWindow)
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSeekWindow)
 
 	now := time.Unix(1000, 0)
 	s.autoOff.now = fixedClock(&now)

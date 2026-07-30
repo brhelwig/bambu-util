@@ -3,6 +3,8 @@ package web
 import (
 	"sync"
 	"time"
+
+	"github.com/brhelwig/bambu-util/internal/deadlines"
 )
 
 // Heaters left on unattended waste power and are a mild fire risk, so the bed
@@ -17,18 +19,31 @@ const (
 )
 
 type autoOff struct {
-	mu    sync.Mutex
-	now   func() time.Time
-	bedAt time.Time // zero = inactive
-	nozAt time.Time
+	mu     sync.Mutex
+	now    func() time.Time
+	timers timers
+	bedAt  time.Time // zero = inactive
+	nozAt  time.Time
 }
 
-func newAutoOff() *autoOff { return &autoOff{now: time.Now} }
+// newAutoOff resumes whatever countdowns were pending when the process last
+// stopped. One that came due while it was down is left in the past, so it fires
+// on the first poll rather than being written off as stale — a shut-off missed
+// because of a restart is the whole reason these are stored.
+func newAutoOff(store timerStore) *autoOff {
+	a := &autoOff{now: time.Now, timers: timers{store: store}}
+	pending := a.timers.load()
+	a.bedAt = pending[deadlines.BedOff]
+	a.nozAt = pending[deadlines.NozzleOff]
+	return a
+}
 
-func (a *autoOff) setBed(temp int)    { a.set(&a.bedAt, temp, BedOffAfter) }
-func (a *autoOff) setNozzle(temp int) { a.set(&a.nozAt, temp, NozzleOffAfter) }
+func (a *autoOff) setBed(temp int) { a.set(&a.bedAt, deadlines.BedOff, temp, BedOffAfter) }
+func (a *autoOff) setNozzle(temp int) {
+	a.set(&a.nozAt, deadlines.NozzleOff, temp, NozzleOffAfter)
+}
 
-func (a *autoOff) set(at *time.Time, temp int, window time.Duration) {
+func (a *autoOff) set(at *time.Time, name string, temp int, window time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if temp > 0 {
@@ -36,6 +51,7 @@ func (a *autoOff) set(at *time.Time, temp int, window time.Duration) {
 	} else {
 		*at = time.Time{}
 	}
+	a.timers.set(name, *at)
 }
 
 // due reports which heaters have reached their deadline, clearing them so each
@@ -47,10 +63,12 @@ func (a *autoOff) due() (bed, nozzle bool) {
 	if !a.bedAt.IsZero() && !t.Before(a.bedAt) {
 		bed = true
 		a.bedAt = time.Time{}
+		a.timers.clear(deadlines.BedOff)
 	}
 	if !a.nozAt.IsZero() && !t.Before(a.nozAt) {
 		nozzle = true
 		a.nozAt = time.Time{}
+		a.timers.clear(deadlines.NozzleOff)
 	}
 	return
 }

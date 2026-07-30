@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/deadlines"
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
@@ -92,9 +93,14 @@ func main() {
 		log.Fatalf("load notification identity: %v", err)
 	}
 
+	timers, err := deadlines.New(db)
+	if err != nil {
+		log.Fatalf("open pending timers: %v", err)
+	}
+
 	// The scrub bar reaches back exactly as far as frames are kept, so raising
 	// retention doesn't record footage that can't be scrubbed to.
-	srv := web.NewServer(cache, client, store, notifier, retention)
+	srv := web.NewServer(cache, client, store, notifier, timers, retention)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Start(ctx)

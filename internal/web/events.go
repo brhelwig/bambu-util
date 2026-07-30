@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/deadlines"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
 )
@@ -36,13 +37,21 @@ type printEvents struct {
 	now      func() time.Time
 	observed bool
 	wasBusy  bool
+	timers   timers
 	hmsSeen  map[string]bool
 	onSince  time.Time // zero while the bed is off, or a print is running
-	sent     map[time.Duration]bool
+	nextAt   time.Time // zero when no reminder is still to come
 }
 
-func newPrintEvents() *printEvents {
-	return &printEvents{now: time.Now, hmsSeen: map[string]bool{}, sent: map[time.Duration]bool{}}
+// newPrintEvents resumes the bed reminder clock from before the last restart,
+// so a bed on for eight hours across an update is still reported as eight, not
+// counted again from zero.
+func newPrintEvents(store timerStore) *printEvents {
+	e := &printEvents{now: time.Now, timers: timers{store: store}, hmsSeen: map[string]bool{}}
+	pending := e.timers.load()
+	e.onSince = pending[deadlines.BedOnSince]
+	e.nextAt = pending[deadlines.BedOnNext]
+	return e
 }
 
 // poll reports what should be sent this tick. A disconnected printer reports
@@ -64,7 +73,7 @@ func (e *printEvents) poll(connected bool, gs, jobName string, bedTarget float64
 		out = append(out, e.jobChange(busy, gs, jobName)...)
 	}
 	out = append(out, e.newErrors(hms, first)...)
-	out = append(out, e.bedOn(busy, bedTarget, first)...)
+	out = append(out, e.bedOn(busy, bedTarget)...)
 	e.wasBusy = busy
 	return out
 }
@@ -107,35 +116,55 @@ func (e *printEvents) newErrors(hms []p1s.HMSEntry, first bool) []push.Notificat
 }
 
 // bedOn reports how long the bed target has been above zero with no print
-// running.
-func (e *printEvents) bedOn(busy bool, bedTarget float64, first bool) []push.Notification {
+// running. What is stored is when the bed came on and when the next reminder is
+// due, rather than which reminders have already gone out, so a restart neither
+// repeats them nor starts the count again.
+func (e *printEvents) bedOn(busy bool, bedTarget float64) []push.Notification {
 	if bedTarget <= 0 || busy {
-		e.onSince = time.Time{}
-		clear(e.sent)
+		if !e.onSince.IsZero() || !e.nextAt.IsZero() {
+			e.onSince, e.nextAt = time.Time{}, time.Time{}
+			e.timers.clear(deadlines.BedOnSince)
+			e.timers.clear(deadlines.BedOnNext)
+		}
 		return nil
 	}
 	if e.onSince.IsZero() {
-		// At start-up the bed may already have been on for hours, which cannot
-		// be known — so the clock starts now and a reminder comes late rather
-		// than invented.
 		e.onSince = e.now()
-		clear(e.sent)
-		if first {
-			return nil
-		}
+		e.nextAt = e.onSince.Add(BedOnReminders[0])
+		e.timers.set(deadlines.BedOnSince, e.onSince)
+		e.timers.set(deadlines.BedOnNext, e.nextAt)
 	}
+	if e.nextAt.IsZero() || e.now().Before(e.nextAt) {
+		return nil
+	}
+
+	// Which reminder this is comes from the elapsed time rather than from the
+	// due time, so a stored value rounded to the second cannot land just short
+	// of its mark and report the wrong number of hours.
 	elapsed := e.now().Sub(e.onSince)
+	reached := BedOnReminders[0]
 	for _, after := range BedOnReminders {
-		if elapsed >= after && !e.sent[after] {
-			e.sent[after] = true
-			return []push.Notification{{
-				Title: fmt.Sprintf("Bed on for %s", roundHours(after)),
-				Body:  fmt.Sprintf("Holding %.0f°C.", bedTarget),
-				Tag:   tagBed,
-			}}
+		if elapsed >= after {
+			reached = after
 		}
 	}
-	return nil
+	e.nextAt = time.Time{}
+	for _, after := range BedOnReminders {
+		if after > reached {
+			e.nextAt = e.onSince.Add(after)
+			break
+		}
+	}
+	if e.nextAt.IsZero() {
+		e.timers.clear(deadlines.BedOnNext)
+	} else {
+		e.timers.set(deadlines.BedOnNext, e.nextAt)
+	}
+	return []push.Notification{{
+		Title: fmt.Sprintf("Bed on for %s", roundHours(reached)),
+		Body:  fmt.Sprintf("Holding %.0f°C.", bedTarget),
+		Tag:   tagBed,
+	}}
 }
 
 func roundHours(d time.Duration) string {
