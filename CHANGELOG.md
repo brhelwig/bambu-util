@@ -8,6 +8,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A theme setting: light, dark, or follow the system, which is the default. The
+  choice is kept on the device and applied before the page is drawn, so it never
+  flashes the wrong one. Every colour is now named once per theme rather than
+  written into each rule.
+- The printer screen's sections can be hidden and reordered from Settings, so
+  the parts you do not use are not in the way. Stored on the server, so the
+  layout is the same wherever the page is opened.
+
 - An Events screen, reached by the list icon in the top corner: what was sent to
   the printer and whether it was acknowledged, what the printer reported back,
   and what was sent to subscribed devices. Each entry keeps its raw message,

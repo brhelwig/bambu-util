@@ -17,6 +17,9 @@ type settingsWriter interface {
 	SetText(name, value string) error
 }
 
+// writableText is the text settings this endpoint will write.
+var writableText = map[string]bool{settings.KeyDashboard: true}
+
 // getSettings reports the current values as whole numbers: seconds for a
 // length of time, a plain count otherwise, leaving units to whatever displays
 // them.
@@ -28,6 +31,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 		settings.KeyBedOffAfter:    int(v.BedOffAfter.Seconds()),
 		settings.KeyNozzleOffAfter: int(v.NozzleOffAfter.Seconds()),
 		settings.KeyLampOffAfter:   int(v.LampOffAfter.Seconds()),
+		settings.KeyDashboard:      v.Dashboard,
 	})
 }
 
@@ -38,6 +42,23 @@ func (s *Server) setSetting(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "settings are not writable", http.StatusNotImplemented)
 		return
 	}
+	name := r.PathValue("name")
+	// A setting that holds words arrives as text; everything else is a number.
+	// Only the ones listed are writable this way — the printer's details go
+	// through their own endpoint, which also reconnects, so letting them be set
+	// here would store a printer the app is not talking to.
+	if settings.Text(name) {
+		if !writableText[name] {
+			http.Error(w, "not writable here", http.StatusBadRequest)
+			return
+		}
+		if err := s.writeSettings.SetText(name, r.URL.Query().Get("text")); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	value, err := strconv.Atoi(r.URL.Query().Get("value"))
 	if err != nil {
 		http.Error(w, "invalid value", http.StatusBadRequest)
@@ -45,7 +66,7 @@ func (s *Server) setSetting(w http.ResponseWriter, r *http.Request) {
 	}
 	// The store refuses an unknown name and an out-of-range value; both are the
 	// caller's fault rather than the server's.
-	if err := s.writeSettings.Set(r.PathValue("name"), value); err != nil {
+	if err := s.writeSettings.Set(name, value); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

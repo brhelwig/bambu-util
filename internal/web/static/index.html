@@ -7,94 +7,223 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#111418">
 <link rel="manifest" href="/manifest.webmanifest">
+<script>
+  // Before anything is drawn: a stored choice wins, otherwise follow the system.
+  try {
+    const t = localStorage.getItem("theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch {}
+</script>
 <title>Bambu Util</title>
 <style>
-  :root { color-scheme: dark; }
+  /* Every colour is named once, per theme. The blocks below only choose which
+     set is in force, so the two palettes cannot drift apart. */
+  :root {
+    --d-bg: #111418;
+    --d-card: #1b2027;
+    --d-inset: #141922;
+    --d-well: #0d0f12;
+    --d-control: #2a313b;
+    --d-text: #e8eaed;
+    --d-muted: #9aa0a6;
+    --d-accent: #c98a2b;
+    --d-accent-solid: #7a4a12;
+    --d-ok: #7bd88f;
+    --d-bad: #ff6e6e;
+    --d-danger: #6e2222;
+    --d-danger-armed: #b02a2a;
+    --d-alert-bg: #4a1414;
+    --d-alert-text: #ffb3b3;
+    --d-live: #ff3b30;
+    --d-hairline: #333;
+    --l-bg: #f2f3f5;
+    --l-card: #ffffff;
+    --l-inset: #eceef1;
+    --l-well: #dfe2e6;
+    --l-control: #e4e7eb;
+    --l-text: #1b2027;
+    --l-muted: #5f6672;
+    --l-accent: #a76a12;
+    --l-accent-solid: #a76a12;
+    --l-ok: #1f7a3d;
+    --l-bad: #b3261e;
+    --l-danger: #d9c2c0;
+    --l-danger-armed: #b3261e;
+    --l-alert-bg: #fbe3e1;
+    --l-alert-text: #7f1d1a;
+    --l-live: #d92d20;
+    --l-hairline: #c6cad1;
+    color-scheme: dark;
+    --bg: var(--d-bg);
+    --card: var(--d-card);
+    --inset: var(--d-inset);
+    --well: var(--d-well);
+    --control: var(--d-control);
+    --text: var(--d-text);
+    --muted: var(--d-muted);
+    --accent: var(--d-accent);
+    --accent-solid: var(--d-accent-solid);
+    --ok: var(--d-ok);
+    --bad: var(--d-bad);
+    --danger: var(--d-danger);
+    --danger-armed: var(--d-danger-armed);
+    --alert-bg: var(--d-alert-bg);
+    --alert-text: var(--d-alert-text);
+    --live: var(--d-live);
+    --hairline: var(--d-hairline);
+  }
+  /* No stored choice: follow the system. */
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme]) {
+      color-scheme: light;
+      --bg: var(--l-bg);
+      --card: var(--l-card);
+      --inset: var(--l-inset);
+      --well: var(--l-well);
+      --control: var(--l-control);
+      --text: var(--l-text);
+      --muted: var(--l-muted);
+      --accent: var(--l-accent);
+      --accent-solid: var(--l-accent-solid);
+      --ok: var(--l-ok);
+      --bad: var(--l-bad);
+      --danger: var(--l-danger);
+      --danger-armed: var(--l-danger-armed);
+      --alert-bg: var(--l-alert-bg);
+      --alert-text: var(--l-alert-text);
+      --live: var(--l-live);
+      --hairline: var(--l-hairline);
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: var(--l-bg);
+    --card: var(--l-card);
+    --inset: var(--l-inset);
+    --well: var(--l-well);
+    --control: var(--l-control);
+    --text: var(--l-text);
+    --muted: var(--l-muted);
+    --accent: var(--l-accent);
+    --accent-solid: var(--l-accent-solid);
+    --ok: var(--l-ok);
+    --bad: var(--l-bad);
+    --danger: var(--l-danger);
+    --danger-armed: var(--l-danger-armed);
+    --alert-bg: var(--l-alert-bg);
+    --alert-text: var(--l-alert-text);
+    --live: var(--l-live);
+    --hairline: var(--l-hairline);
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: var(--d-bg);
+    --card: var(--d-card);
+    --inset: var(--d-inset);
+    --well: var(--d-well);
+    --control: var(--d-control);
+    --text: var(--d-text);
+    --muted: var(--d-muted);
+    --accent: var(--d-accent);
+    --accent-solid: var(--d-accent-solid);
+    --ok: var(--d-ok);
+    --bad: var(--d-bad);
+    --danger: var(--d-danger);
+    --danger-armed: var(--d-danger-armed);
+    --alert-bg: var(--d-alert-bg);
+    --alert-text: var(--d-alert-text);
+    --live: var(--d-live);
+    --hairline: var(--d-hairline);
+  }
   body {
     margin: 0 auto;
     font-family: -apple-system, system-ui, sans-serif;
-    background: #111418;
-    color: #e8eaed;
+    background: var(--bg);
+    color: var(--text);
     padding: max(env(safe-area-inset-top), 12px) 16px 24px;
     max-width: 480px;
   }
   h1 { font-size: 1.1rem; font-weight: 600; margin: 8px 0 16px; }
-  .card { background: #1b2027; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
   .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.95rem; }
-  .row span:first-child { color: #9aa0a6; }
-  .ok { color: #7bd88f; }
-  .bad { color: #ff6e6e; }
+  .row span:first-child { color: var(--muted); }
+  .ok { color: var(--ok); }
+  .bad { color: var(--bad); }
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .actions button:last-child:nth-child(odd) { grid-column: 1 / -1; }
   button {
     border: 0; border-radius: 10px; padding: 16px 8px;
     font-size: 1rem; font-weight: 600;
-    background: #2a313b; color: #e8eaed;
+    background: var(--control); color: var(--text);
   }
   button:disabled { opacity: 0.4; }
-  button.warn { background: #7a4a12; }
-  button.danger { background: #6e2222; }
-  button.danger.armed { background: #b02a2a; }
-  #log { min-height: 1.2em; color: #9aa0a6; font-size: 0.85rem; margin-top: 12px; }
-  #camImg { width: 100%; border-radius: 12px; display: block; background: #0d0f12; min-height: 120px; }
+  button.warn { background: var(--accent-solid); }
+  button.danger { background: var(--danger); }
+  button.danger.armed { background: var(--danger-armed); }
+  #log { min-height: 1.2em; color: var(--muted); font-size: 0.85rem; margin-top: 12px; }
+  #camImg { width: 100%; border-radius: 12px; display: block; background: var(--well); min-height: 120px; }
   .ams-slot { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.95rem; }
-  .ams-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid #333; }
-  .card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0a6; font-weight: 600; margin: 0 0 10px; }
-  input[type=range] { width: 100%; margin: 6px 0 2px; accent-color: #c98a2b; }
+  .ams-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid var(--hairline); }
+  .card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; margin: 0 0 10px; }
+  input[type=range] { width: 100%; margin: 6px 0 2px; accent-color: var(--accent); }
   input[type=range]:disabled { opacity: 0.4; }
   .iconrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
   .iconrow.cols3 { grid-template-columns: repeat(3, 1fr); }
   .iconbtn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 13px 4px; }
   .iconbtn svg { width: 26px; height: 26px; display: block; }
   .iconbtn .cap { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.02em; }
-  .iconbtn.on { color: #c98a2b; }
-  .iconbtn.danger { background: #6e2222; }
-  .iconbtn.danger.armed { background: #b02a2a; }
-  .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
-  .notifywhat { color: #9aa0a6; font-size: 0.8rem; margin: 2px 0 10px; }
+  .iconbtn.on { color: var(--accent); }
+  .iconbtn.danger { background: var(--danger); }
+  .iconbtn.danger.armed { background: var(--danger-armed); }
+  .ams-editor { background: var(--inset); border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
+  .notifywhat { color: var(--muted); font-size: 0.8rem; margin: 2px 0 10px; }
   .topbar { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
   .screentitle { font-size: 0.95rem; font-weight: 600; flex: 1; }
   .topbar .screentitle:last-child { flex: 1; }
-  .topicon { background: none; padding: 6px; color: #9aa0a6; display: inline-flex; }
+  .topicon { background: none; padding: 6px; color: var(--muted); display: inline-flex; }
   .topicon svg { width: 22px; height: 22px; display: block; }
   /* One grid, so every box lands in the same column whatever the unit beside
      it is called. */
   .setrow { display: grid; grid-template-columns: 1fr 72px 4.5em; align-items: center; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
-  .setrow label { color: #9aa0a6; }
-  .setrow .unit { color: #9aa0a6; }
+  .setrow label { color: var(--muted); }
+  .setrow .unit { color: var(--muted); }
   .setrow select { grid-column: 2 / -1; width: 100%; }
   .kindrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
-  .kindrow label { color: #e8eaed; }
-  .kindrow input { width: 20px; height: 20px; accent-color: #c98a2b; }
-  .event { background: #1b2027; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 0.85rem; }
+  .kindrow label { color: var(--text); }
+  .kindrow input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .dashrow { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 8px; padding: 6px 0; font-size: 0.9rem; }
+  .dashrow .move { background: var(--control); padding: 6px 10px; border-radius: 6px; font-size: 0.9rem; line-height: 1; }
+  .dashrow input { width: 20px; height: 20px; accent-color: var(--accent); }
+  [data-hidden="yes"] { display: none !important; }
+  .event { background: var(--card); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 0.85rem; }
   .event .head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .event .what { font-weight: 600; overflow-wrap: anywhere; }
-  .event .when { color: #9aa0a6; font-size: 0.75rem; white-space: nowrap; }
+  .event .when { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
   .event .ack { font-size: 0.75rem; margin-top: 3px; }
-  .event .ack.yes { color: #7bd88f; }
-  .event .ack.no { color: #c98a2b; }
-  .event .ack.bad { color: #ff6e6e; }
-  .event pre { margin: 6px 0 0; padding: 8px; background: #141922; border-radius: 6px; color: #9aa0a6;
+  .event .ack.yes { color: var(--ok); }
+  .event .ack.no { color: var(--accent); }
+  .event .ack.bad { color: var(--bad); }
+  .event pre { margin: 6px 0 0; padding: 8px; background: var(--inset); border-radius: 6px; color: var(--muted);
     font-size: 0.7rem; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; }
-  .event summary { color: #9aa0a6; font-size: 0.75rem; cursor: pointer; margin-top: 4px; }
-  .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 100%; text-align: right; }
+  .event summary { color: var(--muted); font-size: 0.75rem; cursor: pointer; margin-top: 4px; }
+  .setrow input { background: var(--control); border: 0; border-radius: 6px; color: var(--text); padding: 6px 8px; font-size: 0.9rem; width: 100%; text-align: right; }
   .setrow input[type=text], .setrow input[type=password] { grid-column: 2 / -1; }
-  #printerSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; background: #7a4a12; }
+  #printerSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; background: var(--accent-solid); }
   #settingsSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; }
-  #settingsSave:not(:disabled) { background: #7a4a12; }
+  #settingsSave:not(:disabled) { background: var(--accent-solid); }
   .notifybtns { display: flex; gap: 10px; }
   .notifybtns button { flex: 1; }
   .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
-  .ams-edit-row label { color: #9aa0a6; }
-  .ams-editor input[type=text], .ams-editor input[type=number] { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.85rem; }
+  .ams-edit-row label { color: var(--muted); }
+  .ams-editor input[type=text], .ams-editor input[type=number] { background: var(--control); border: 0; border-radius: 6px; color: var(--text); padding: 6px 8px; font-size: 0.85rem; }
   .ams-editor input.temp { width: 60px; }
   .ams-editor input[type=color] { width: 46px; height: 30px; background: none; border: 0; padding: 0; }
   .ams-editor .ams-save { width: 100%; margin-top: 6px; padding: 10px; font-size: 0.9rem; }
-  select { border: 0; border-radius: 8px; padding: 8px; font-size: 0.9rem; background: #2a313b; color: #e8eaed; }
+  select { border: 0; border-radius: 8px; padding: 8px; font-size: 0.9rem; background: var(--control); color: var(--text); }
   .camctls { display: flex; align-items: center; gap: 8px; }
   .camctl { padding: 8px 12px; display: inline-flex; }
   .camctl svg { width: 18px; height: 18px; display: block; }
-  .cam-job-time { display: block; color: #9aa0a6; font-size: 0.75rem; }
+  .cam-job-time { display: block; color: var(--muted); font-size: 0.75rem; }
   /* Live is a mode, not a transport control, so it sits on the image the way
      every camera UI marks a live feed — not beside play and speed, which only
      ever act on recorded footage. */
@@ -104,11 +233,11 @@
     display: flex; align-items: center; gap: 6px;
     padding: 5px 10px 5px 8px; border-radius: 999px;
     font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
-    background: rgba(0, 0, 0, 0.55); color: #9aa0a6;
+    background: rgba(0, 0, 0, 0.55); color: var(--muted);
   }
-  .cam-live .dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa0a6; }
+  .cam-live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .cam-live.on { color: #fff; }
-  .cam-live.on .dot { background: #ff3b30; }
+  .cam-live.on .dot { background: var(--live); }
 </style>
 </head>
 <body>
@@ -124,22 +253,23 @@
 </div>
 <div class="card" id="jobCard">
   <h2>Job status</h2>
-  <div class="row" id="jobEmpty" style="color:#9aa0a6">No active print</div>
+  <div class="row" id="jobEmpty" style="color:var(--muted)">No active print</div>
   <div class="row" id="progressRow" style="display:none"><span>Progress</span><span id="progress"></span></div>
   <div class="row" id="jobRow" style="display:none"><span>Job</span><span id="jobName"></span></div>
   <div class="row" id="layerRow" style="display:none"><span>Layer</span><span id="layer"></span></div>
   <div class="row" id="timeRow" style="display:none"><span>Time remaining</span><span id="timeRemaining"></span></div>
 </div>
-<div class="card">
+<div class="card" id="machineCard">
   <h2>Machine status</h2>
   <div class="row"><span>Connection</span><span id="conn">…</span></div>
   <div class="row"><span>State</span><span id="state">…</span></div>
   <div class="row"><span>Bed</span><span id="bed">…</span></div>
   <div class="row"><span>Nozzle</span><span id="nozzle">…</span></div>
   <div class="row"><span>Fans (cool/aux/chamber)</span><span id="fans">…</span></div>
-  <div class="row" id="lampTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Lamp auto-off</span><span id="lampTimer"></span></div>
+  <div class="row" id="lampTimerRow" style="display:none; color:var(--accent); font-size:0.8rem"><span>Lamp auto-off</span><span id="lampTimer"></span></div>
 </div>
-<div id="hmsBanner" class="card" style="display:none; background:#4a1414; color:#ffb3b3;"></div>
+<div id="hmsBanner" class="card" style="display:none; background:var(--alert-bg); color:var(--alert-text);"></div>
+<div id="controlsCard">
 <div class="iconrow cols3" id="row1">
   <button class="iconbtn" id="lampBtn" aria-label="Chamber lamp" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 2a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.2v.3h6v-.3c0-.8.4-1.6 1-2.2A6 6 0 0 0 12 2z"/></svg></span><span class="cap">Lamp</span></button>
@@ -158,8 +288,9 @@
   <button class="iconbtn" data-action="unload" id="unloadBtn" aria-label="Unload loaded filament" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l7 9H5z"/><rect x="5" y="16" width="14" height="3" rx="1.5"/></svg></span><span class="cap">Unload</span></button>
 </div>
+</div>
 <div class="card" id="camCard">
-  <div id="camEmpty" style="color:#9aa0a6">No recordings yet</div>
+  <div id="camEmpty" style="color:var(--muted)">No recordings yet</div>
   <div id="camControls" style="display:none">
     <div class="cam-frame">
       <img id="camImg" alt="printer camera">
@@ -185,13 +316,13 @@
   <h2>Bed drying</h2>
   <div class="row"><span>Bed target</span><span id="dryLabel">Off</span></div>
   <input type="range" id="drySlider" min="0" max="6" step="1" value="0">
-  <div class="row" id="dryTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="dryTimer"></span></div>
+  <div class="row" id="dryTimerRow" style="display:none; color:var(--accent); font-size:0.8rem"><span>Auto-off in</span><span id="dryTimer"></span></div>
 </div>
 <div class="card" id="nozzleCard">
   <h2>Nozzle (cold pull / clean)</h2>
   <div class="row"><span>Nozzle target</span><span id="nozzleLabel">Off</span></div>
   <input type="range" id="nozzleSlider" min="0" max="4" step="1" value="0">
-  <div class="row" id="nozzleTimerRow" style="display:none; color:#c98a2b; font-size:0.8rem"><span>Auto-off in</span><span id="nozzleTimer"></span></div>
+  <div class="row" id="nozzleTimerRow" style="display:none; color:var(--accent); font-size:0.8rem"><span>Auto-off in</span><span id="nozzleTimer"></span></div>
 </div>
 <div class="card" id="amsCard" style="display:none">
   <h2>Filament (AMS)</h2>
@@ -245,7 +376,22 @@
     <button id="notifyBtn" style="display:none">Turn on</button>
     <button id="notifyTestBtn" style="display:none">Send a test</button>
   </div>
-  <div id="notifyHint" style="display:none; color:#9aa0a6; font-size:0.8rem; margin-top:8px"></div>
+  <div id="notifyHint" style="display:none; color:var(--muted); font-size:0.8rem; margin-top:8px"></div>
+</div>
+<div class="card">
+  <h2>Appearance</h2>
+  <div class="setrow"><label for="setTheme">Theme</label>
+    <select id="setTheme">
+      <option value="system">Follow system</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select></div>
+</div>
+<div class="card">
+  <h2>Dashboard</h2>
+  <div id="dashList"></div>
+  <div class="notifywhat">Unticked sections are hidden. The arrows move a section
+    up or down the page.</div>
 </div>
 <div class="card">
   <h2>Printer</h2>
@@ -404,7 +550,7 @@ function renderAms(ams, canEdit) {
       if (hasFilament && amsTarget(unit, slot) === loadedIdx) {
         const tag = document.createElement("span");
         tag.textContent = "loaded";
-        tag.style.cssText = "font-size:0.72rem; font-weight:600; color:#c98a2b";
+        tag.style.cssText = "font-size:0.72rem; font-weight:600; color:var(--accent)";
         right.appendChild(tag);
       }
       // Edit opens an inline profile editor (colour/type/temps). Idle-only,
@@ -1202,6 +1348,7 @@ $("notifyTestBtn").addEventListener("click", async () => {
 });
 
 initNotifications();
+loadDashboard();
 
 // --- Screens ----------------------------------------------------------------
 // Settings is its own screen rather than more cards under the status: nothing
@@ -1212,7 +1359,7 @@ function showScreen(which) {
   }
   $("log").textContent = "";
   window.scrollTo(0, 0);
-  if (which === "settingsScreen") { refreshSettings(); refreshPrinter(); }
+  if (which === "settingsScreen") { refreshSettings(); refreshPrinter(); loadTheme(); renderDashSettings(); }
   if (which === "eventsScreen") refreshEvents();
 }
 
@@ -1221,6 +1368,141 @@ $("settingsBack").addEventListener("click", () => showScreen("mainScreen"));
 $("eventsBtn").addEventListener("click", () => showScreen("eventsScreen"));
 $("eventsBack").addEventListener("click", () => showScreen("mainScreen"));
 $("eventsRefresh").addEventListener("click", refreshEvents);
+
+// --- Appearance -------------------------------------------------------------
+// The theme is a device preference, not an app setting: it has to be applied
+// before the first paint, which rules out waiting for the server, and one
+// person's phone and tablet are not in the same light.
+function applyTheme(choice) {
+  if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("theme", choice); } catch {}
+}
+
+function loadTheme() {
+  let choice = "system";
+  try { choice = localStorage.getItem("theme") || "system"; } catch {}
+  $("setTheme").value = choice;
+}
+
+$("setTheme").addEventListener("change", () => applyTheme($("setTheme").value));
+
+// --- Dashboard --------------------------------------------------------------
+// Which sections are on the printer screen, and in what order. Stored on the
+// server so it is the same wherever the page is opened.
+const DASH_SECTIONS = [
+  { id: "jobCard", label: "Job status" },
+  { id: "machineCard", label: "Machine status" },
+  { id: "controlsCard", label: "Controls" },
+  { id: "camCard", label: "Camera" },
+  { id: "dryCard", label: "Bed drying" },
+  { id: "nozzleCard", label: "Nozzle" },
+  { id: "amsCard", label: "Filament (AMS)" },
+];
+
+// The order in force. Anything absent is hidden; anything unknown is ignored,
+// so a section that goes away does not strand a stored layout.
+let dashOrder = DASH_SECTIONS.map(s => s.id);
+
+function applyDashboard() {
+  const main = $("mainScreen");
+  for (const { id } of DASH_SECTIONS) {
+    const el = $(id);
+    if (!el) continue;
+    if (dashOrder.includes(id)) {
+      main.appendChild(el);          // re-appending is what puts it in order
+      el.dataset.hidden = "";
+    } else {
+      el.dataset.hidden = "yes";
+    }
+  }
+  // Order the visible ones as chosen.
+  for (const id of dashOrder) {
+    const el = $(id);
+    if (el) main.appendChild(el);
+  }
+  refresh();
+}
+
+function renderDashSettings() {
+  const list = $("dashList");
+  list.innerHTML = "";
+  const known = new Map(DASH_SECTIONS.map(s => [s.id, s.label]));
+  // Chosen sections first, in their order, then the rest.
+  const rows = [...dashOrder.filter(id => known.has(id)),
+                ...DASH_SECTIONS.map(s => s.id).filter(id => !dashOrder.includes(id))];
+  rows.forEach((id, index) => {
+    const row = document.createElement("div");
+    row.className = "dashrow";
+
+    const label = document.createElement("label");
+    label.textContent = known.get(id);
+    label.htmlFor = `dash-${id}`;
+
+    const up = document.createElement("button");
+    up.className = "move";
+    up.textContent = "↑";
+    up.setAttribute("aria-label", `Move ${known.get(id)} up`);
+    up.disabled = index === 0;
+    up.addEventListener("click", () => moveDash(id, -1));
+
+    const down = document.createElement("button");
+    down.className = "move";
+    down.textContent = "↓";
+    down.setAttribute("aria-label", `Move ${known.get(id)} down`);
+    down.disabled = index === rows.length - 1;
+    down.addEventListener("click", () => moveDash(id, 1));
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = `dash-${id}`;
+    box.checked = dashOrder.includes(id);
+    box.addEventListener("change", () => {
+      dashOrder = box.checked
+        ? [...rows.filter(other => other === id || dashOrder.includes(other))]
+        : dashOrder.filter(other => other !== id);
+      saveDashboard();
+    });
+
+    row.append(label, up, down, box);
+    list.appendChild(row);
+  });
+}
+
+function moveDash(id, by) {
+  const order = [...dashOrder];
+  const at = order.indexOf(id);
+  if (at < 0) return;              // hidden sections do not move
+  const to = at + by;
+  if (to < 0 || to >= order.length) return;
+  [order[at], order[to]] = [order[to], order[at]];
+  dashOrder = order;
+  saveDashboard();
+}
+
+async function saveDashboard() {
+  renderDashSettings();
+  applyDashboard();
+  try {
+    const r = await fetch(`/api/settings/dashboard?text=${encodeURIComponent(dashOrder.join(","))}`, { method: "POST" });
+    $("settingsMsg").textContent = r.ok ? "Saved." : (await r.text()).trim();
+  } catch (e) {
+    $("settingsMsg").textContent = `could not save: ${e.message || e}`;
+  }
+}
+
+async function loadDashboard() {
+  if (DEMO) return;
+  try {
+    const r = await fetch("/api/settings");
+    if (!r.ok) return;
+    const stored = (await r.json()).dashboard;
+    if (typeof stored === "string" && stored !== "") dashOrder = stored.split(",");
+  } catch {
+    return;
+  }
+  applyDashboard();
+}
 
 // --- Events -----------------------------------------------------------------
 // What went to the printer, what came back, and what was sent to a phone. The
