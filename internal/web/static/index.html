@@ -685,11 +685,36 @@ function fmtCamTime(ts, extra) {
   });
 }
 
-function showCamFrame(ts) {
-  const img = new Image();
-  img.onload = () => { $("camImg").src = img.src; };
-  img.src = `/camera/history/frame?ts=${Math.floor(ts)}`; // onerror: hold the last frame shown
-  $("camTime").textContent = fmtCamTime(ts, { second: "2-digit" });
+// Each frame is fetched rather than assigned to an <img> src, because the only
+// way to learn when a frame was actually taken is a response header, and an
+// <img> cannot read those. The endpoint returns the first frame at or after the
+// time asked for, and retention leaves real gaps between kept prints, so the two
+// can be hours apart — captioning with the requested time would misdate the
+// picture on screen.
+let camFrameSeq = 0;  // drops responses overtaken by a newer request
+let camFrameUrl = null; // object URL on screen, revoked when replaced
+
+async function showCamFrame(ts) {
+  const seq = ++camFrameSeq;
+  let r;
+  try {
+    r = await fetch(`/camera/history/frame?ts=${Math.floor(ts)}`);
+  } catch {
+    return; // hold the frame and caption already shown
+  }
+  // A 404 means nothing was recorded at or after this point; holding the last
+  // frame is better than blanking the view.
+  if (!r.ok) return;
+  const taken = Number(r.headers.get("X-Frame-Timestamp"));
+  const blob = await r.blob();
+  // At four frames a second a slow response can land after a newer one; showing
+  // it would paint a stale frame over a fresher one.
+  if (seq !== camFrameSeq) return;
+  const url = URL.createObjectURL(blob);
+  $("camImg").src = url;
+  if (camFrameUrl) URL.revokeObjectURL(camFrameUrl); // else every frame leaks
+  camFrameUrl = url;
+  $("camTime").textContent = fmtCamTime(taken > 0 ? taken : ts, { second: "2-digit" });
 }
 
 // seekTo shows one frame and moves the thumb to match.
