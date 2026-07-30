@@ -146,10 +146,11 @@ async function main() {
     deviceScaleFactor: 2,
     colorScheme: "dark",
   });
-  // Headless Chromium refuses notifications by default, which would show the
-  // card reading "Blocked in browser settings" — an artefact of the harness,
-  // not anything a person would see on their own phone.
-  await context.grantPermissions(["notifications"], { origin: BASE });
+  // Headless Chromium refuses notifications regardless of this, so the card
+  // reads as blocked in the captures. That is the capture browser's answer, not
+  // the app's, and the comment says so rather than the previews implying a
+  // fault.
+  await context.grantPermissions(["notifications"]).catch(() => {});
 
   const shots = [];
   for (const state of states) {

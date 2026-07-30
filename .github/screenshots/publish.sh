@@ -47,6 +47,9 @@ raw() { echo "https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DIR}/$1"; }
   echo "from a live printer. The camera card shows its genuine empty state — no footage"
   echo "is staged."
   echo
+  echo "The notification card reports the *capture browser*'"'"'s permission, which headless"
+  echo "Chromium always refuses — on a phone it reads Off with a Turn on button."
+  echo
   for f in "${GITHUB_WORKSPACE}"/shots/*.png; do
     name=$(basename "$f" .png)
     title=$(echo "${name#*-}" | tr '-' ' ')
