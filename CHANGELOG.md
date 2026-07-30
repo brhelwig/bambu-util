@@ -49,6 +49,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The app is called **Bambu Util**, in the page heading, the browser tab, the
+  notifications it sends, and the web manifest. A Home Screen icon added before
+  this keeps its old label until it is removed and re-added — iOS reads the
+  manifest at install time. "P1S" now only ever refers to the printer.
 - Notification subscriptions moved into the existing database, having briefly
   had a `push.db` of their own. An installation tracking `main` that already
   turned notifications on will mint a fresh identity on the next start, and

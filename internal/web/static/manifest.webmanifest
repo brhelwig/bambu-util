@@ -1,6 +1,6 @@
 {
-  "name": "P1S Bridge",
-  "short_name": "P1S",
+  "name": "Bambu Util",
+  "short_name": "Bambu Util",
   "display": "standalone",
   "start_url": "/",
   "background_color": "#111418",

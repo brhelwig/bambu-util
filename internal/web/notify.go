@@ -76,7 +76,7 @@ func (s *Server) pushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 // the printer.
 func (s *Server) pushTest(w http.ResponseWriter, r *http.Request) {
 	delivered, err := s.notify.Send(r.Context(), push.Notification{
-		Title: "P1S Bridge",
+		Title: "Bambu Util",
 		Body:  "Notifications are working.",
 		Tag:   "test",
 	})
