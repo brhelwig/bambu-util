@@ -15,6 +15,7 @@ import (
 
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
+	"github.com/brhelwig/bambu-util/internal/push"
 	"github.com/brhelwig/bambu-util/internal/web"
 )
 
@@ -76,9 +77,19 @@ func main() {
 		return p1s.StreamFrames(ctx, net.JoinHostPort(ip, "6000"), "bblp", accessCode, yield)
 	}, store)
 
+	notifyStore, err := push.Open(filepath.Join(dataDir, "push.db"))
+	if err != nil {
+		log.Fatalf("open notification store: %v", err)
+	}
+	defer notifyStore.Close()
+	notifier, err := push.NewSender(notifyStore)
+	if err != nil {
+		log.Fatalf("load notification identity: %v", err)
+	}
+
 	// The scrub bar reaches back exactly as far as frames are kept, so raising
 	// retention doesn't record footage that can't be scrubbed to.
-	srv := web.NewServer(cache, client, store, retention)
+	srv := web.NewServer(cache, client, store, notifier, retention)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Start(ctx)
