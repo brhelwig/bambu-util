@@ -11,10 +11,11 @@ import (
 // JobWatcher opens and closes job rows in a Store based on gcode_state
 // transitions, so recorded frames can be grouped and played back per print.
 type JobWatcher struct {
-	store  *Store
-	now    func() time.Time
-	openID int64
-	inJob  bool
+	store    *Store
+	now      func() time.Time
+	openID   int64
+	openName string
+	inJob    bool
 }
 
 // NewJobWatcher creates a watcher writing job rows to store. It adopts a row
@@ -36,6 +37,7 @@ func NewJobWatcher(store *Store) *JobWatcher {
 	}
 	if open != nil {
 		w.openID = open.ID
+		w.openName = open.Name
 		w.inJob = true
 	}
 	return w
@@ -48,21 +50,41 @@ func NewJobWatcher(store *Store) *JobWatcher {
 // those would end a print that is still running.
 func (w *JobWatcher) Poll(gcodeState, jobName string) {
 	switch {
-	case p1s.JobActive(gcodeState) && !w.inJob:
-		id, err := w.store.OpenJob(jobName, w.now().Unix())
-		if err != nil {
-			log.Printf("history: open job: %v", err)
-			return
+	case p1s.JobActive(gcodeState):
+		// A print running under a different name than the open row means a job
+		// boundary went by unobserved — the service was down across it. Close the
+		// old row rather than filing this print's footage under the last one's
+		// name and start time. An empty name is a report that simply didn't carry
+		// one, not evidence of a different print.
+		if w.inJob && jobName != "" && jobName != w.openName {
+			w.closeOpen()
 		}
-		w.openID = id
-		w.inJob = true
+		if !w.inJob {
+			w.openFor(jobName)
+		}
 	case p1s.JobEnded(gcodeState) && w.inJob:
-		if err := w.store.CloseJobAtLastFrame(w.openID, w.now().Unix()); err != nil {
-			log.Printf("history: close job: %v", err)
-			return
-		}
-		w.inJob = false
+		w.closeOpen()
 	}
+}
+
+func (w *JobWatcher) openFor(jobName string) {
+	id, err := w.store.OpenJob(jobName, w.now().Unix())
+	if err != nil {
+		log.Printf("history: open job: %v", err)
+		return
+	}
+	w.openID = id
+	w.openName = jobName
+	w.inJob = true
+}
+
+func (w *JobWatcher) closeOpen() {
+	if err := w.store.CloseJobAtLastFrame(w.openID, w.now().Unix()); err != nil {
+		// Left open on purpose: the next poll in the same state retries.
+		log.Printf("history: close job: %v", err)
+		return
+	}
+	w.inJob = false
 }
 
 // Run calls snapshot and Polls its result on every tick of interval, until

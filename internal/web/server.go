@@ -420,6 +420,10 @@ func normalizeColor(raw string) (string, error) {
 // whole job is one drag of the bar and nothing that came before is in the way.
 // Footage older than this is still reachable, but only by picking a job from the
 // recent-jobs list.
+//
+// SeekWindow is fixed rather than derived from RECORDING_RETENTION: raising
+// retention past 24h records footage the bar cannot reach, which is only
+// reachable through the jobs list.
 const (
 	SeekWindow = 24 * time.Hour
 	JobLeadIn  = 5 * time.Minute

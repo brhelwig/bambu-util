@@ -40,7 +40,11 @@ follow [Semantic Versioning](https://semver.org/).
   rate they were replaying.
 - The five most recently finished prints keep their footage regardless of
   `RECORDING_RETENTION`, thinned to one frame every 10 seconds once past the
-  cutoff. Whole prints at the full recording rate would add gigabytes.
+  cutoff. Whole prints at the full recording rate would add gigabytes. The
+  in-progress print is protected too, so a print longer than the retention
+  window still yields a whole timelapse — but only back 48h, so a job row left
+  open by a printer that vanished mid-print cannot exempt footage from
+  retention indefinitely.
 - Recent jobs show each print's start time, so two runs of the same file can
   be told apart.
 - **Live** and **Play** are icon buttons; Live also lights up while the view
@@ -58,6 +62,9 @@ follow [Semantic Versioning](https://semver.org/).
   counts as the same job, and a restart adopts the row already open. Printer
   states that mean neither running nor finished — `PREPARE`, or `unknown`
   before the first status report — no longer end a job that is still going.
+  A print running under a different name than the adopted row starts its own
+  row, so a job boundary crossed while the service was down no longer files
+  one print's footage under the previous print's name.
 
 ### Removed
 

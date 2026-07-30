@@ -699,20 +699,24 @@ function setCamPlayIcon(playing) {
   $("camPlayBtn").setAttribute("aria-label", playing ? "Pause timelapse" : "Play timelapse");
 }
 
+// stopCamPlayback only stops advancing. The job being watched — camBoundEnd and
+// camJobSpan — outlives it, because pausing is not leaving the job: clearing the
+// cap here let a resumed timelapse run past its job's end and on to the live
+// tail, with the thumb stuck at the end of the bar. Only Live leaves a job.
 function stopCamPlayback() {
   camPlaying = false;
-  camBoundEnd = null;
   setCamPlayIcon(false);
   if (camPlayTimer) { clearInterval(camPlayTimer); camPlayTimer = null; }
 }
 
 function startCamPlayback() {
+  const cap = camBoundEnd ?? (camRange && camRange.newest);
+  if (cap == null) return; // nothing to play towards yet
   setFollowing(false);
   camPlaying = true;
   setCamPlayIcon(true);
   const step = Number($("camSpeedSelect").value) * (CAM_TICK_MS / 1000);
   camPlayTimer = setInterval(() => {
-    const cap = camBoundEnd ?? camRange.newest;
     if (camPos + step >= cap) {
       seekTo(cap);
       stopCamPlayback();
@@ -725,6 +729,11 @@ function startCamPlayback() {
 $("camPlayBtn").addEventListener("click", () => {
   if (camPlaying) stopCamPlayback();
   else startCamPlayback();
+});
+// The speed is read when playback starts, so a change mid-timelapse only takes
+// effect by restarting the timer.
+$("camSpeedSelect").addEventListener("change", () => {
+  if (camPlaying) { stopCamPlayback(); startCamPlayback(); }
 });
 setCamPlayIcon(false);
 setFollowing(camFollowing);
@@ -739,6 +748,7 @@ $("camSlider").addEventListener("input", () => {
 $("camLiveBtn").addEventListener("click", () => {
   stopCamPlayback();
   camJobSpan = null;
+  camBoundEnd = null;
   setFollowing(true);
   if (camRange && camRange.newest != null) {
     setCamBounds(camRange.oldest, camRange.newest);
@@ -747,10 +757,14 @@ $("camLiveBtn").addEventListener("click", () => {
 });
 
 function playJob(job) {
+  // An in-progress job is capped by the live tail, so without a known range
+  // there is no end to play towards and no valid upper bound for the bar.
+  const end = job.end || (camRange && camRange.newest);
+  if (end == null) return;
   stopCamPlayback();
   setFollowing(false);
-  camBoundEnd = job.end || (camRange && camRange.newest);
-  camJobSpan = { min: job.start, max: camBoundEnd };
+  camBoundEnd = end;
+  camJobSpan = { min: job.start, max: end };
   setCamBounds(camJobSpan.min, camJobSpan.max);
   seekTo(job.start);
   startCamPlayback();

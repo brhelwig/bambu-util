@@ -289,6 +289,58 @@ func TestActiveJobReturnsTheOpenOne(t *testing.T) {
 	}
 }
 
+func TestPruneBoundsHowFarBackAnOpenJobProtectsFootage(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	// A printer that drops off the network mid-print leaves RUNNING as the last
+	// state it reported, so this row never closes. Without a bound it would
+	// exempt everything from its start onward from retention, forever.
+	const day = int64(86400)
+	const now = 100 * day
+	s.OpenJob("stuck-open.3mf", now-30*day)
+	// One frame a day across the whole stuck span.
+	for d := int64(30); d >= 0; d-- {
+		s.InsertFrame(now-d*day, []byte{1})
+	}
+
+	if err := s.Prune(now - day); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deliberately not asserted against MaxOpenJobSpan: a test that reads the
+	// same constant it is pinning cannot fail. 30 days is far beyond any bound
+	// worth setting, so month-old footage must be gone either way.
+	got := frameTimestamps(t, s)
+	if len(got) == 0 {
+		t.Fatal("bounding deleted the running print's recent footage too")
+	}
+	if oldest := got[0]; oldest <= now-29*day {
+		t.Fatalf("oldest surviving frame is %d days old; a stuck-open row is still "+
+			"exempting footage from retention without bound (all: %v)", (now-oldest)/day, got)
+	}
+}
+
+func TestPruneKeepsAWholeLongRunningPrint(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	// A print longer than the retention window keeps its early footage, which is
+	// the reason the in-progress job is protected at all.
+	const hour = int64(3600)
+	const now = 1_000_000
+	s.OpenJob("36h-print.3mf", now-36*hour)
+	for h := int64(36); h >= 0; h-- {
+		s.InsertFrame(now-h*hour, []byte{1})
+	}
+
+	if err := s.Prune(now - 24*hour); err != nil {
+		t.Fatal(err)
+	}
+	got := frameTimestamps(t, s)
+	if got[0] != now-36*hour {
+		t.Fatalf("oldest surviving frame is %d, want the print's first frame %d", got[0], now-36*hour)
+	}
+}
+
 func TestCloseOrphanJobsLeavesASingleOpenRowAlone(t *testing.T) {
 	s, _ := Open(":memory:")
 	defer s.Close()

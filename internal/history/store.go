@@ -107,13 +107,22 @@ const KeptJobs = 5
 // is still more footage than the playback can show.
 const ThinInterval = 10
 
+// MaxOpenJobSpan bounds, in seconds, how far back from the cutoff the
+// in-progress print's footage is protected. The print's own row is what protects
+// it, and that row only closes once the printer reports a finished state — a
+// printer that drops off the network mid-print leaves RUNNING as the last thing
+// it said, so the row can stay open indefinitely. Without this bound that one row
+// would exempt everything from its start onward from retention, permanently. Set
+// well past any real print length, so it only ever catches the stuck case.
+const MaxOpenJobSpan = 48 * 60 * 60
+
 // Prune enforces the retention policy. Frames older than cutoff are deleted
 // unless they belong to a kept print — the job still in progress, or one of the
 // KeptJobs most recently finished — whose footage is instead thinned to one
 // frame per ThinInterval. Job rows go only once they are both older than cutoff
 // and no longer among the kept ones.
 func (s *Store) Prune(cutoff int64) error {
-	kept, err := s.keptWindows()
+	kept, err := s.keptWindows(cutoff)
 	if err != nil {
 		return err
 	}
@@ -130,7 +139,7 @@ func (s *Store) Prune(cutoff int64) error {
 		WHERE end_ts IS NOT NULL AND end_ts < ?
 		  AND id NOT IN (
 		    SELECT id FROM jobs WHERE end_ts IS NOT NULL
-		    ORDER BY start_ts DESC LIMIT ?
+		    ORDER BY start_ts DESC, id DESC LIMIT ?
 		  )`, cutoff, KeptJobs)
 	return err
 }
@@ -142,16 +151,16 @@ type window struct {
 	end   *int64
 }
 
-func (s *Store) keptWindows() ([]window, error) {
+func (s *Store) keptWindows(cutoff int64) ([]window, error) {
 	rows, err := s.db.Query(`
 		SELECT start_ts, end_ts FROM (
 		  SELECT start_ts, end_ts FROM jobs WHERE end_ts IS NULL
-		  ORDER BY start_ts DESC LIMIT 1
+		  ORDER BY start_ts DESC, id DESC LIMIT 1
 		)
 		UNION ALL
 		SELECT start_ts, end_ts FROM (
 		  SELECT start_ts, end_ts FROM jobs WHERE end_ts IS NOT NULL
-		  ORDER BY start_ts DESC LIMIT ?
+		  ORDER BY start_ts DESC, id DESC LIMIT ?
 		)`, KeptJobs)
 	if err != nil {
 		return nil, err
@@ -168,6 +177,8 @@ func (s *Store) keptWindows() ([]window, error) {
 		if end.Valid {
 			v := end.Int64
 			w.end = &v
+		} else if floor := cutoff - MaxOpenJobSpan; w.start < floor {
+			w.start = floor // see MaxOpenJobSpan
 		}
 		out = append(out, w)
 	}
@@ -242,7 +253,7 @@ func (s *Store) CloseJob(id, endTs int64) error {
 // ActiveJob returns the print still in progress — the newest row with no end
 // time — or nil when none is open.
 func (s *Store) ActiveJob() (*Job, error) {
-	row := s.db.QueryRow(`SELECT id, name, start_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC LIMIT 1`)
+	row := s.db.QueryRow(`SELECT id, name, start_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC, id DESC LIMIT 1`)
 	var j Job
 	if err := row.Scan(&j.ID, &j.Name, &j.Start); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -287,7 +298,7 @@ func (s *Store) CloseJobAtLastFrame(id, fallback int64) error {
 // wreckage from a process that exited mid-print back when a restart opened a
 // second row instead of adopting the first.
 func (s *Store) CloseOrphanJobs() (int, error) {
-	rows, err := s.db.Query(`SELECT id, start_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC`)
+	rows, err := s.db.Query(`SELECT id, start_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC, id DESC`)
 	if err != nil {
 		return 0, err
 	}
@@ -317,10 +328,13 @@ func (s *Store) CloseOrphanJobs() (int, error) {
 	return len(orphans) - 1, nil
 }
 
-// RecentJobs returns every job row currently stored, newest-started first.
+// RecentJobs returns every job row currently stored, newest-started first. Rows
+// sharing a start second are broken by insertion order, so "newest" is never
+// ambiguous — two prints can start in the same second if one is restarted
+// immediately.
 // Prune keeps this bounded to the prints whose footage is still retained.
 func (s *Store) RecentJobs() ([]Job, error) {
-	rows, err := s.db.Query(`SELECT id, name, start_ts, end_ts FROM jobs ORDER BY start_ts DESC`)
+	rows, err := s.db.Query(`SELECT id, name, start_ts, end_ts FROM jobs ORDER BY start_ts DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}
