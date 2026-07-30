@@ -14,8 +14,15 @@ follow [Semantic Versioning](https://semver.org/).
   alongside the server identity browsers bind to — losing that directory
   silently unsubscribes every phone, so it belongs on a volume.
   Requires HTTPS, and on iPhone and iPad iOS 16.4 or later with the app
-  added to the Home Screen. Only the test message exists so far; printer
-  events follow.
+  added to the Home Screen.
+- Notifications for what the printer does: a print starting, finishing, or
+  ending without finishing; any error the printer raises, which is how
+  filament runout arrives; and a reminder at 1, 8, 16 and 24 hours when the
+  bed is left hot with no print running, plus a message when the automatic
+  shut-off turns a heater off. Each is sent on the change itself, so a printer
+  sitting in a finished state does not keep announcing it, and the first look
+  after a restart is silent rather than reporting a print that ended hours
+  ago.
 - Always-on camera recording into a rolling history buffer (default 24h,
   configurable via `RECORDING_RETENTION`), stored in SQLite under `DATA_DIR`.
 - One camera view: follows the live tail of the recording buffer by

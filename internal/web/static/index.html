@@ -51,6 +51,7 @@
   .iconbtn.danger { background: #6e2222; }
   .iconbtn.danger.armed { background: #b02a2a; }
   .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
+  .notifywhat { color: #9aa0a6; font-size: 0.8rem; margin: 2px 0 10px; }
   .notifybtns { display: flex; gap: 10px; }
   .notifybtns button { flex: 1; }
   .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
@@ -159,6 +160,8 @@
 <div class="card" id="notifyCard">
   <h2>Notifications</h2>
   <div class="row"><span id="notifyState">…</span></div>
+  <div class="notifywhat">When a print starts, finishes or stops, when the printer
+    raises an error, and when the bed is left hot with nothing printing.</div>
   <div class="notifybtns">
     <button id="notifyBtn" style="display:none">Turn on</button>
     <button id="notifyTestBtn" style="display:none">Send a test</button>

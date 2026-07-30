@@ -49,9 +49,12 @@ Features:
   overridden — automation only ever acts on the active/idle transitions
   themselves
 - iOS "Add to Home Screen" gives an app-like full-screen page
-- Notifications to the phone, so the page does not have to be open. Turn them
-  on from the Notifications card; a test button confirms the whole path
-  before waiting on the printer. Requires the app to be served over HTTPS.
+- Notifications to the phone, so the page does not have to be open: a print
+  starting, finishing or ending without finishing; any error the printer
+  raises, which is how filament runout arrives; and a reminder at 1, 8, 16 and
+  24 hours when the bed is left hot with nothing printing. Turn them on from
+  the Notifications card; a test button confirms the whole path before waiting
+  on the printer. Requires the app to be served over HTTPS.
   On iPhone and iPad it additionally requires iOS 16.4 or later **and the app
   added to the Home Screen** — a Safari tab cannot receive notifications, and
   the page says so rather than failing quietly
