@@ -28,7 +28,6 @@ type Commander interface {
 	SetNozzleTemp(int)
 	Extrude()
 	UnloadFilament()
-	LoadFilament(slot, currTemp, tarTemp int)
 	SetAmsFilament(amsID, trayID int, trayInfoIdx, color, trayType string, tempMin, tempMax int)
 	SetChamberLight(bool)
 	PausePrint()
@@ -230,9 +229,6 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	case "extrude":
 		s.extrude(w, connected, gs, fields)
 		return
-	case "load":
-		s.load(w, r, connected, gs, fields)
-		return
 	case "set-filament":
 		s.setFilament(w, r, connected, gs)
 		return
@@ -318,32 +314,6 @@ func (s *Server) extrude(w http.ResponseWriter, connected bool, gs string, field
 	}
 	s.cmd.Extrude()
 	fmt.Fprint(w, "sent: extrude")
-}
-
-// MaxAMSSlot is the highest global tray index Load accepts. Bambu supports up
-// to 4 AMS units of 4 trays, addressed as ams_id*4 + tray_id (0-15).
-const MaxAMSSlot = 15
-
-// load feeds an AMS tray (?slot=0-15, the global ams_id*4+tray_id index) into
-// the hotend. Per the chosen design it heats to whatever nozzle target the user
-// set via the slider, so it refuses when no nozzle target is set.
-func (s *Server) load(w http.ResponseWriter, r *http.Request, connected bool, gs string, fields map[string]any) {
-	slot, err := strconv.Atoi(r.URL.Query().Get("slot"))
-	if err != nil || slot < 0 || slot > MaxAMSSlot {
-		http.Error(w, "invalid slot", http.StatusBadRequest)
-		return
-	}
-	if !guardIdle(w, connected, gs) {
-		return
-	}
-	tar, _ := fields["nozzle_target_temper"].(float64)
-	if tar <= 0 {
-		http.Error(w, "blocked: set a nozzle temperature first", http.StatusConflict)
-		return
-	}
-	cur, _ := fields["nozzle_temper"].(float64)
-	s.cmd.LoadFilament(slot, int(cur), int(tar))
-	fmt.Fprintf(w, "sent: load slot %d", slot)
 }
 
 // MaxAMSUnit is the highest AMS unit index accepted (Bambu supports up to 4
