@@ -57,9 +57,12 @@
   .topbar .screentitle:last-child { flex: 1; }
   .topicon { background: none; padding: 6px; color: #9aa0a6; display: inline-flex; }
   .topicon svg { width: 22px; height: 22px; display: block; }
-  .setrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
+  /* One grid, so every box lands in the same column whatever the unit beside
+     it is called. */
+  .setrow { display: grid; grid-template-columns: 1fr 72px 4.5em; align-items: center; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
   .setrow label { color: #9aa0a6; }
-  .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 72px; text-align: right; }
+  .setrow .unit { color: #9aa0a6; }
+  .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 100%; text-align: right; }
   #settingsSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; }
   #settingsSave:not(:disabled) { background: #7a4a12; }
   .notifybtns { display: flex; gap: 10px; }
@@ -197,15 +200,15 @@
 <div class="card">
   <h2>Timings</h2>
   <div class="setrow"><label for="setRetention">Camera history</label>
-    <span><input type="number" id="setRetention" min="1" max="720" step="1"> hours</span></div>
+    <input type="number" id="setRetention" min="1" max="720" step="1"><span class="unit">hours</span></div>
   <div class="setrow"><label for="setKeptJobs">Prints kept</label>
-    <span><input type="number" id="setKeptJobs" min="0" max="50" step="1"> jobs</span></div>
+    <input type="number" id="setKeptJobs" min="0" max="50" step="1"><span class="unit">jobs</span></div>
   <div class="setrow"><label for="setBedOff">Bed auto-off</label>
-    <span><input type="number" id="setBedOff" min="1" max="168" step="1"> hours</span></div>
+    <input type="number" id="setBedOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
   <div class="setrow"><label for="setNozzleOff">Nozzle auto-off</label>
-    <span><input type="number" id="setNozzleOff" min="1" max="10080" step="1"> minutes</span></div>
+    <input type="number" id="setNozzleOff" min="1" max="10080" step="1"><span class="unit">minutes</span></div>
   <div class="setrow"><label for="setLampOff">Lamp off after idle</label>
-    <span><input type="number" id="setLampOff" min="1" max="168" step="1"> hours</span></div>
+    <input type="number" id="setLampOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
   <div class="notifywhat">The camera history window is also how far back the scrub
     bar reaches. Prints kept hold their footage past that window, thinned to one frame
     every 10 seconds. Auto-off countdowns already running keep the window they started with.</div>
