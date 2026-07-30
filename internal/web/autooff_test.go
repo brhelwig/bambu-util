@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/brhelwig/bambu-util/internal/p1s"
+	"github.com/brhelwig/bambu-util/internal/settings"
 )
 
 func fixedClock(t *time.Time) func() time.Time {
@@ -14,18 +15,18 @@ func fixedClock(t *time.Time) func() time.Time {
 
 func TestAutoOffFiresAfterWindow(t *testing.T) {
 	now := time.Unix(1000, 0)
-	a := newAutoOff(nil)
+	a := newAutoOff(nil, testSettings)
 	a.now = fixedClock(&now)
 
 	a.setBed(60)
-	if bed, _ := a.remaining(); bed != int(BedOffAfter.Seconds()) {
-		t.Fatalf("remaining = %d, want %d", bed, int(BedOffAfter.Seconds()))
+	if bed, _ := a.remaining(); bed != int(settings.Defaults.BedOffAfter.Seconds()) {
+		t.Fatalf("remaining = %d, want %d", bed, int(settings.Defaults.BedOffAfter.Seconds()))
 	}
 	if bed, _ := a.due(); bed {
 		t.Fatal("fired before the window elapsed")
 	}
 
-	now = now.Add(BedOffAfter + time.Second)
+	now = now.Add(settings.Defaults.BedOffAfter + time.Second)
 	bed, _ := a.due()
 	if !bed {
 		t.Fatal("did not fire after the window elapsed")
@@ -41,7 +42,7 @@ func TestAutoOffFiresAfterWindow(t *testing.T) {
 
 func TestAutoOffResetsOnAdjust(t *testing.T) {
 	now := time.Unix(0, 0)
-	a := newAutoOff(nil)
+	a := newAutoOff(nil, testSettings)
 	a.now = fixedClock(&now)
 
 	a.setNozzle(220)
@@ -50,14 +51,14 @@ func TestAutoOffResetsOnAdjust(t *testing.T) {
 		t.Fatalf("remaining = %d, want %d", nozzle, int((5 * time.Minute).Seconds()))
 	}
 	a.setNozzle(250) // adjusting resets the full window
-	if _, nozzle := a.remaining(); nozzle != int(NozzleOffAfter.Seconds()) {
-		t.Fatalf("remaining after reset = %d, want %d", nozzle, int(NozzleOffAfter.Seconds()))
+	if _, nozzle := a.remaining(); nozzle != int(settings.Defaults.NozzleOffAfter.Seconds()) {
+		t.Fatalf("remaining after reset = %d, want %d", nozzle, int(settings.Defaults.NozzleOffAfter.Seconds()))
 	}
 }
 
 func TestAutoOffCancelledByZero(t *testing.T) {
 	now := time.Unix(0, 0)
-	a := newAutoOff(nil)
+	a := newAutoOff(nil, testSettings)
 	a.now = fixedClock(&now)
 
 	a.setBed(90)
@@ -65,7 +66,7 @@ func TestAutoOffCancelledByZero(t *testing.T) {
 	if bed, _ := a.remaining(); bed != -1 {
 		t.Fatalf("remaining = %d after off, want -1", bed)
 	}
-	now = now.Add(BedOffAfter + time.Hour)
+	now = now.Add(settings.Defaults.BedOffAfter + time.Hour)
 	if bed, _ := a.due(); bed {
 		t.Fatal("cancelled timer still fired")
 	}
@@ -88,8 +89,8 @@ func TestStatusExposesAutoOffCountdown(t *testing.T) {
 	resp2, _ := ts.Client().Get(ts.URL + "/api/status")
 	json.NewDecoder(resp2.Body).Decode(&s)
 	bedOff, ok := s["bedOffIn"].(float64)
-	if !ok || bedOff > BedOffAfter.Seconds() || bedOff < BedOffAfter.Seconds()-60 {
-		t.Fatalf("bedOffIn = %v, want ~%v", s["bedOffIn"], BedOffAfter.Seconds())
+	if !ok || bedOff > settings.Defaults.BedOffAfter.Seconds() || bedOff < settings.Defaults.BedOffAfter.Seconds()-60 {
+		t.Fatalf("bedOffIn = %v, want ~%v", s["bedOffIn"], settings.Defaults.BedOffAfter.Seconds())
 	}
 }
 
@@ -101,13 +102,13 @@ func autoOffServer(t *testing.T, connected bool, state string) (*Server, *fakeCo
 	cache.SetConnected(connected)
 	cache.Merge(map[string]any{"gcode_state": state})
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSeekWindow)
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil)
 
 	now := time.Unix(1000, 0)
 	s.autoOff.now = fixedClock(&now)
 	s.autoOff.setBed(60)
 	s.autoOff.setNozzle(220)
-	now = now.Add(BedOffAfter + time.Hour)
+	now = now.Add(settings.Defaults.BedOffAfter + time.Hour)
 	return s, cmd
 }
 
@@ -132,13 +133,13 @@ func TestAutoOffStillFiresOnceThePrintIsOver(t *testing.T) {
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "RUNNING"})
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSeekWindow)
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil)
 
 	now := time.Unix(1000, 0)
 	s.autoOff.now = fixedClock(&now)
 	s.autoOff.setBed(60)
 	s.autoOff.setNozzle(220)
-	now = now.Add(BedOffAfter + time.Hour)
+	now = now.Add(settings.Defaults.BedOffAfter + time.Hour)
 
 	for range 3 {
 		s.pollAutoOff()

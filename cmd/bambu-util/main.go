@@ -17,6 +17,7 @@ import (
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
+	"github.com/brhelwig/bambu-util/internal/settings"
 	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 	"github.com/brhelwig/bambu-util/internal/web"
 )
@@ -28,10 +29,6 @@ func mustEnv(key string) string {
 	}
 	return v
 }
-
-// DefaultRetention is how long recorded frames are kept when
-// RECORDING_RETENTION isn't set.
-const DefaultRetention = 24 * time.Hour
 
 func jobNameString(fields map[string]any) string {
 	if v, ok := p1s.JobName(fields).(string); ok {
@@ -51,14 +48,6 @@ func main() {
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
 		dataDir = "./data"
-	}
-	retention := DefaultRetention
-	if v := os.Getenv("RECORDING_RETENTION"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			log.Fatalf("invalid RECORDING_RETENTION %q: %v", v, err)
-		}
-		retention = d
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		log.Fatalf("create data dir %s: %v", dataDir, err)
@@ -98,21 +87,26 @@ func main() {
 		log.Fatalf("open pending timers: %v", err)
 	}
 
+	config, err := settings.New(db)
+	if err != nil {
+		log.Fatalf("open settings: %v", err)
+	}
+
 	// The scrub bar reaches back exactly as far as frames are kept, so raising
 	// retention doesn't record footage that can't be scrubbed to.
-	srv := web.NewServer(cache, client, store, notifier, timers, retention)
+	srv := web.NewServer(cache, client, store, notifier, timers, config.Values, config)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Start(ctx)
 	go srv.EnforceAutoOff(ctx)
 	go srv.EnforceLampAutomation(ctx)
 	go srv.EnforceEventNotifications(ctx)
-	go history.RunPruner(ctx, store, retention, 5*time.Minute, time.Now)
+	go history.RunPruner(ctx, store, func() time.Duration { return config.Values().Retention }, 5*time.Minute, time.Now)
 	go history.NewJobWatcher(store).Run(ctx, 2*time.Second, func() (string, string) {
 		fields, _ := cache.Snapshot()
 		return p1s.GcodeState(fields), jobNameString(fields)
 	})
 
-	log.Printf("bambu-util listening on %s (printer %s, recording retention %s)", addr, ip, retention)
+	log.Printf("bambu-util listening on %s (printer %s)", addr, ip)
 	log.Fatal(http.ListenAndServe(addr, srv.Handler()))
 }

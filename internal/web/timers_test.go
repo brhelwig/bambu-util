@@ -7,6 +7,7 @@ import (
 
 	"github.com/brhelwig/bambu-util/internal/deadlines"
 	"github.com/brhelwig/bambu-util/internal/p1s"
+	"github.com/brhelwig/bambu-util/internal/settings"
 )
 
 func openTestTimers(t *testing.T) *deadlines.Store {
@@ -25,18 +26,18 @@ func TestAHeaterShutOffSurvivesARestart(t *testing.T) {
 	store := openTestTimers(t)
 	now := time.Unix(1_000_000, 0)
 
-	before := newAutoOff(store)
+	before := newAutoOff(store, testSettings)
 	before.now = fixedClock(&now)
 	before.setBed(60)
 	before.setNozzle(220)
 
 	// The process stops and starts again an hour later.
 	now = now.Add(time.Hour)
-	after := newAutoOff(store)
+	after := newAutoOff(store, testSettings)
 	after.now = fixedClock(&now)
 
 	bed, nozzle := after.remaining()
-	if want := int((BedOffAfter - time.Hour).Seconds()); bed != want {
+	if want := int((settings.Defaults.BedOffAfter - time.Hour).Seconds()); bed != want {
 		t.Errorf("bed countdown = %ds, want %ds — the hour before the restart should still count", bed, want)
 	}
 	// The nozzle's 15 minutes elapsed while the process was down.
@@ -54,12 +55,12 @@ func TestAShutOffThatLapsedWhileDownStillFires(t *testing.T) {
 	store := openTestTimers(t)
 	now := time.Unix(1_000_000, 0)
 
-	before := newAutoOff(store)
+	before := newAutoOff(store, testSettings)
 	before.now = fixedClock(&now)
 	before.setBed(60)
 
-	now = now.Add(BedOffAfter + 12*time.Hour) // down for a day and a half
-	after := newAutoOff(store)
+	now = now.Add(settings.Defaults.BedOffAfter + 12*time.Hour) // down for a day and a half
+	after := newAutoOff(store, testSettings)
 	after.now = fixedClock(&now)
 	if bed, _ := after.due(); !bed {
 		t.Error("an overdue shut-off was written off as stale")
@@ -70,7 +71,7 @@ func TestTurningAHeaterOffForgetsItsShutOff(t *testing.T) {
 	store := openTestTimers(t)
 	now := time.Unix(1_000_000, 0)
 
-	before := newAutoOff(store)
+	before := newAutoOff(store, testSettings)
 	before.now = fixedClock(&now)
 	before.setBed(60)
 	before.setBed(0)
@@ -82,7 +83,7 @@ func TestTurningAHeaterOffForgetsItsShutOff(t *testing.T) {
 	if at, ok := pending[deadlines.BedOff]; ok {
 		t.Errorf("a shut-off is still pending at %v after the bed was turned off", at)
 	}
-	if bed, _ := newAutoOff(store).remaining(); bed != -1 {
+	if bed, _ := newAutoOff(store, testSettings).remaining(); bed != -1 {
 		t.Errorf("a restart resumed a shut-off that was cancelled: %ds", bed)
 	}
 }
@@ -91,15 +92,15 @@ func TestFiringAShutOffForgetsIt(t *testing.T) {
 	store := openTestTimers(t)
 	now := time.Unix(1_000_000, 0)
 
-	a := newAutoOff(store)
+	a := newAutoOff(store, testSettings)
 	a.now = fixedClock(&now)
 	a.setBed(60)
-	now = now.Add(BedOffAfter + time.Second)
+	now = now.Add(settings.Defaults.BedOffAfter + time.Second)
 	if bed, _ := a.due(); !bed {
 		t.Fatal("did not fire")
 	}
 
-	if bed, _ := newAutoOff(store).remaining(); bed != -1 {
+	if bed, _ := newAutoOff(store, testSettings).remaining(); bed != -1 {
 		t.Errorf("a restart resurrected a shut-off that already fired: %ds", bed)
 	}
 }
@@ -108,15 +109,15 @@ func TestTheLampCountdownSurvivesARestart(t *testing.T) {
 	store := openTestTimers(t)
 	now := time.Unix(1_000_000, 0)
 
-	before := newLampAuto(store)
+	before := newLampAuto(store, testSettings)
 	before.now = fixedClock(&now)
 	before.poll(true)  // active: lamp on
 	before.poll(false) // idle: the countdown arms
 
 	now = now.Add(6 * time.Hour)
-	after := newLampAuto(store)
+	after := newLampAuto(store, testSettings)
 	after.now = fixedClock(&now)
-	if got, want := after.remaining(), int((LampInactiveOffAfter - 6*time.Hour).Seconds()); got != want {
+	if got, want := after.remaining(), int((settings.Defaults.LampOffAfter - 6*time.Hour).Seconds()); got != want {
 		t.Errorf("lamp countdown = %ds, want %ds", got, want)
 	}
 	// Two more hours and it is due, rather than eight from the restart.
@@ -202,10 +203,10 @@ func TestTheStatusCountdownSurvivesARestart(t *testing.T) {
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
 
-	first := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSeekWindow)
+	first := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil)
 	first.autoOff.setBed(60)
 
-	second := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSeekWindow)
+	second := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil)
 	bed, _ := second.autoOff.remaining()
 	if bed <= 0 {
 		t.Errorf("bed countdown after a restart = %d, want the remaining time", bed)
@@ -222,13 +223,13 @@ func (brokenTimers) All() (map[string]time.Time, error) { return nil, fmt.Errorf
 
 func TestAFailingStoreStillLeavesTheTimersWorking(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
-	a := newAutoOff(brokenTimers{})
+	a := newAutoOff(brokenTimers{}, testSettings)
 	a.now = fixedClock(&now)
 	a.setBed(60)
-	if bed, _ := a.remaining(); bed != int(BedOffAfter.Seconds()) {
+	if bed, _ := a.remaining(); bed != int(settings.Defaults.BedOffAfter.Seconds()) {
 		t.Errorf("countdown = %ds, want it armed despite the store failing", bed)
 	}
-	now = now.Add(BedOffAfter + time.Second)
+	now = now.Add(settings.Defaults.BedOffAfter + time.Second)
 	if bed, _ := a.due(); !bed {
 		t.Error("the shut-off did not fire when the store was failing")
 	}

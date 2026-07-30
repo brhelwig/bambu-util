@@ -6,10 +6,11 @@ import (
 	"time"
 )
 
-// RunPruner deletes frames (and fully-expired job rows) older than
-// retention, on every tick of interval, until ctx is cancelled. Call once,
-// from main.
-func RunPruner(ctx context.Context, store *Store, retention, interval time.Duration, now func() time.Time) {
+// RunPruner deletes frames (and fully-expired job rows) older than the
+// retention window, on every tick of interval, until ctx is cancelled. The
+// window is read each tick rather than captured, so changing it in the settings
+// takes effect without a restart. Call once, from main.
+func RunPruner(ctx context.Context, store *Store, retention func() time.Duration, interval time.Duration, now func() time.Time) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -17,7 +18,7 @@ func RunPruner(ctx context.Context, store *Store, retention, interval time.Durat
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cutoff := now().Add(-retention).Unix()
+			cutoff := now().Add(-retention()).Unix()
 			if err := store.Prune(cutoff); err != nil {
 				log.Printf("history: prune: %v", err)
 			}

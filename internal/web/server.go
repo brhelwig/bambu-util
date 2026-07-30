@@ -37,29 +37,28 @@ type Commander interface {
 }
 
 type Server struct {
-	cache      *p1s.StateCache
-	cmd        Commander
-	store      *history.Store
-	notify     *push.Sender
-	events     *printEvents
-	autoOff    *autoOff
-	lamp       *lampAuto
-	seekWindow time.Duration
-	now        func() time.Time
+	cache         *p1s.StateCache
+	cmd           Commander
+	store         *history.Store
+	notify        *push.Sender
+	events        *printEvents
+	autoOff       *autoOff
+	lamp          *lampAuto
+	settings      current
+	writeSettings settingsWriter
+	now           func() time.Time
 }
 
-// NewServer builds the HTTP layer. seekWindow is how far back the camera scrub
-// bar reaches while the printer is idle: pass the recording retention, so the bar
-// spans exactly the footage the rolling buffer still holds and none is recorded
-// that cannot be scrubbed to.
-// timers persists the countdowns across a restart; pass nil to keep them in
-// memory only.
-func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, seekWindow time.Duration) *Server {
+// NewServer builds the HTTP layer. cur answers what the settings are at the
+// moment they are consulted, so an edit takes effect without a restart. timers
+// persists the countdowns across a restart; pass nil to keep them in memory
+// only.
+func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, cur current, write settingsWriter) *Server {
 	return &Server{
 		cache: cache, cmd: cmd, store: store, notify: notify,
 		events:  newPrintEvents(timers),
-		autoOff: newAutoOff(timers), lamp: newLampAuto(timers),
-		seekWindow: seekWindow, now: time.Now,
+		autoOff: newAutoOff(timers, cur), lamp: newLampAuto(timers, cur),
+		settings: cur, writeSettings: write, now: time.Now,
 	}
 }
 
@@ -194,6 +193,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /camera/history/range", s.historyRange)
 	mux.HandleFunc("GET /camera/history/frame", s.historyFrame)
 	mux.HandleFunc("GET /camera/history/jobs", s.historyJobs)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("POST /api/settings/{name}", s.setSetting)
 	mux.HandleFunc("GET /api/push/key", s.pushKey)
 	mux.HandleFunc("POST /api/push/subscribe", s.pushSubscribe)
 	mux.HandleFunc("POST /api/push/unsubscribe", s.pushUnsubscribe)
@@ -495,7 +496,7 @@ func (s *Server) seekStart() int64 {
 			return job.Start - int64(JobLeadIn.Seconds())
 		}
 	}
-	return s.now().Add(-s.seekWindow).Unix()
+	return s.now().Add(-s.settings().Retention).Unix()
 }
 
 // FrameTimestampHeader carries the unix second a served frame was actually

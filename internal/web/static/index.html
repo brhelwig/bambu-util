@@ -52,6 +52,11 @@
   .iconbtn.danger.armed { background: #b02a2a; }
   .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
   .notifywhat { color: #9aa0a6; font-size: 0.8rem; margin: 2px 0 10px; }
+  #settingsCard summary { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0a6; font-weight: 600; }
+  .setrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
+  .setrow label { color: #9aa0a6; }
+  .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 72px; text-align: right; }
+  #settingsCard[open] summary { margin-bottom: 8px; }
   .notifybtns { display: flex; gap: 10px; }
   .notifybtns button { flex: 1; }
   .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
@@ -168,6 +173,19 @@
   </div>
   <div id="notifyHint" style="display:none; color:#9aa0a6; font-size:0.8rem; margin-top:8px"></div>
 </div>
+<details class="card" id="settingsCard">
+  <summary>Settings</summary>
+  <div class="setrow"><label for="setRetention">Camera history</label>
+    <span><input type="number" id="setRetention" min="1" max="720" step="1"> hours</span></div>
+  <div class="setrow"><label for="setBedOff">Bed auto-off</label>
+    <span><input type="number" id="setBedOff" min="1" max="168" step="1"> hours</span></div>
+  <div class="setrow"><label for="setNozzleOff">Nozzle auto-off</label>
+    <span><input type="number" id="setNozzleOff" min="1" max="10080" step="1"> minutes</span></div>
+  <div class="setrow"><label for="setLampOff">Lamp off after idle</label>
+    <span><input type="number" id="setLampOff" min="1" max="168" step="1"> hours</span></div>
+  <div class="notifywhat">The camera history window is also how far back the scrub
+    bar reaches. Auto-off countdowns already running keep the window they started with.</div>
+</details>
 <div id="log"></div>
 <script>
 const $ = id => document.getElementById(id);
@@ -1024,6 +1042,50 @@ $("notifyTestBtn").addEventListener("click", async () => {
 });
 
 initNotifications();
+
+// --- Settings ---------------------------------------------------------------
+// Each control edits one setting and saves as soon as it is changed. The server
+// is the only thing that decides whether a value is allowed, so a refusal is
+// shown and the field put back to what is actually stored.
+const SETTINGS = [
+  { id: "setRetention", name: "retention", perUnit: 3600 },
+  { id: "setBedOff", name: "bed-off-after", perUnit: 3600 },
+  { id: "setNozzleOff", name: "nozzle-off-after", perUnit: 60 },
+  { id: "setLampOff", name: "lamp-off-after", perUnit: 3600 },
+];
+
+async function refreshSettings() {
+  if (DEMO) return;
+  let values;
+  try {
+    const r = await fetch("/api/settings");
+    if (!r.ok) return;
+    values = await r.json();
+  } catch {
+    return; // leave whatever is on screen
+  }
+  for (const s of SETTINGS) $(s.id).value = Math.round(values[s.name] / s.perUnit);
+}
+
+for (const s of SETTINGS) {
+  $(s.id).addEventListener("change", async () => {
+    const seconds = Math.round(Number($(s.id).value) * s.perUnit);
+    try {
+      const r = await fetch(`/api/settings/${s.name}?seconds=${seconds}`, { method: "POST" });
+      if (!r.ok) {
+        $("log").textContent = (await r.text()).trim();
+        await refreshSettings();
+        return;
+      }
+      $("log").textContent = "saved";
+    } catch (e) {
+      $("log").textContent = `could not save: ${e.message || e}`;
+      await refreshSettings();
+    }
+  });
+}
+
+refreshSettings();
 </script>
 </body>
 </html>

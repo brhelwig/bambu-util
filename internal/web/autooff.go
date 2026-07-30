@@ -9,38 +9,38 @@ import (
 
 // Heaters left on unattended waste power and are a mild fire risk, so the bed
 // and nozzle are shut off automatically some time after they were last set
-// through this app. Enforcement is server-side (see Server.pollAutoOff) so it
-// still fires when no browser is open, and it waits for the printer to be idle
-// so it can never cut the heat out from under a print. Adjusting a heater —
-// including turning it off — resets its timer.
-const (
-	BedOffAfter    = 24 * time.Hour
-	NozzleOffAfter = 15 * time.Minute
-)
+// through this app. How long is a setting. Enforcement is server-side (see
+// Server.pollAutoOff) so it still fires when no browser is open, and it waits
+// for the printer to be idle so it can never cut the heat out from under a
+// print. Adjusting a heater — including turning it off — resets its timer.
 
 type autoOff struct {
-	mu     sync.Mutex
-	now    func() time.Time
-	timers timers
-	bedAt  time.Time // zero = inactive
-	nozAt  time.Time
+	mu       sync.Mutex
+	now      func() time.Time
+	settings current
+	timers   timers
+	bedAt    time.Time // zero = inactive
+	nozAt    time.Time
 }
 
 // newAutoOff resumes whatever countdowns were pending when the process last
 // stopped. One that came due while it was down is left in the past, so it fires
 // on the first poll rather than being written off as stale — a shut-off missed
 // because of a restart is the whole reason these are stored.
-func newAutoOff(store timerStore) *autoOff {
-	a := &autoOff{now: time.Now, timers: timers{store: store}}
+func newAutoOff(store timerStore, cur current) *autoOff {
+	a := &autoOff{now: time.Now, settings: cur, timers: timers{store: store}}
 	pending := a.timers.load()
 	a.bedAt = pending[deadlines.BedOff]
 	a.nozAt = pending[deadlines.NozzleOff]
 	return a
 }
 
-func (a *autoOff) setBed(temp int) { a.set(&a.bedAt, deadlines.BedOff, temp, BedOffAfter) }
+func (a *autoOff) setBed(temp int) {
+	a.set(&a.bedAt, deadlines.BedOff, temp, a.settings().BedOffAfter)
+}
+
 func (a *autoOff) setNozzle(temp int) {
-	a.set(&a.nozAt, deadlines.NozzleOff, temp, NozzleOffAfter)
+	a.set(&a.nozAt, deadlines.NozzleOff, temp, a.settings().NozzleOffAfter)
 }
 
 func (a *autoOff) set(at *time.Time, name string, temp int, window time.Duration) {
