@@ -100,6 +100,7 @@ func main() {
 	go hub.Start(ctx)
 	go srv.EnforceAutoOff(ctx)
 	go srv.EnforceLampAutomation(ctx)
+	go srv.EnforceEventNotifications(ctx)
 	go history.RunPruner(ctx, store, retention, 5*time.Minute, time.Now)
 	go history.NewJobWatcher(store).Run(ctx, 2*time.Second, func() (string, string) {
 		fields, _ := cache.Snapshot()

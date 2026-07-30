@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,6 +41,7 @@ type Server struct {
 	cmd        Commander
 	store      *history.Store
 	notify     *push.Sender
+	events     *printEvents
 	autoOff    *autoOff
 	lamp       *lampAuto
 	seekWindow time.Duration
@@ -53,6 +55,7 @@ type Server struct {
 func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, seekWindow time.Duration) *Server {
 	return &Server{
 		cache: cache, cmd: cmd, store: store, notify: notify,
+		events:  newPrintEvents(),
 		autoOff: newAutoOff(), lamp: newLampAuto(),
 		seekWindow: seekWindow, now: time.Now,
 	}
@@ -88,9 +91,51 @@ func (s *Server) pollAutoOff() {
 	bed, nozzle := s.autoOff.due()
 	if bed {
 		s.cmd.SetBedTemp(0)
+		s.send(push.Notification{
+			Title: "Bed turned off",
+			Body:  "It had been on since it was last set here.",
+			Tag:   tagBed,
+		})
 	}
 	if nozzle {
 		s.cmd.SetNozzleTemp(0)
+		s.send(push.Notification{
+			Title: "Nozzle turned off",
+			Body:  "It had been on since it was last set here.",
+			Tag:   tagBed,
+		})
+	}
+}
+
+// EnforceEventNotifications watches the printer and notifies on what changes.
+// Call once (from main).
+func (s *Server) EnforceEventNotifications(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.pollEvents()
+		}
+	}
+}
+
+func (s *Server) pollEvents() {
+	fields, connected := s.cache.Snapshot()
+	bedTarget, _ := fields["bed_target_temper"].(float64)
+	jobName, _ := p1s.JobName(fields).(string)
+	for _, n := range s.events.poll(connected, p1s.GcodeState(fields), jobName, bedTarget, p1s.HMSErrors(fields)) {
+		s.send(n)
+	}
+}
+
+// send delivers one notification, letting a delivery failure go no further than
+// the log: nothing the printer does should hinge on whether a phone was told.
+func (s *Server) send(n push.Notification) {
+	if _, err := s.notify.Send(context.Background(), n); err != nil {
+		log.Printf("notify %q: %v", n.Title, err)
 	}
 }
 
