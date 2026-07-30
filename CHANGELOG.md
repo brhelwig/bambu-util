@@ -33,6 +33,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Notification subscriptions moved into the existing database, having briefly
+  had a `push.db` of their own. An installation tracking `main` that already
+  turned notifications on will mint a fresh identity on the next start, and
+  those phones stop receiving until notifications are turned on again — the
+  page notices and resets itself to Off. Delete the orphaned
+  `DATA_DIR/push.db`; nothing reads it any more. No released version is
+  affected.
 - The camera connection is now held continuously so it can record, instead
   of only while a viewer is on the page. Bambu Studio's own camera view will
   not work while bambu-util is running.

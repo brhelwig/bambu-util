@@ -66,7 +66,7 @@ Environment variables only — no config files:
 | `PRINTER_SERIAL` | yes | Printer serial (Settings → Device) |
 | `PRINTER_ACCESS_CODE` | yes | LAN access code (Settings → WLAN) |
 | `LISTEN_ADDR` | no | Listen address, default `:8081` |
-| `DATA_DIR` | no | Directory for the database, default `./data`. Mount a volume here so the history buffer survives restarts — and so notification subscriptions do, since losing the server's identity silently unsubscribes every phone. |
+| `DATA_DIR` | no | Directory for the database, default `./data`. Mount a volume here so the history buffer survives restarts — and so notification subscriptions do, since losing the server's identity silently unsubscribes every phone. Write-ahead logging means the directory also holds `-wal` and `-shm` files; a backup taken while the app runs needs all three, not just the `.db`. |
 | `RECORDING_RETENTION` | no | How long to keep recorded frames, as a Go duration (`12h`, `48h`, ...), default `24h`. Also how far back the scrub bar reaches when no print is running |
 
 ### Run

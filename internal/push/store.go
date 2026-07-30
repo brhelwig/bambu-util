@@ -33,11 +33,12 @@ type Subscription struct {
 
 // Store holds subscriptions and this server's identity.
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	owned bool
 }
 
-// Open makes a store over its own database at path. The app shares one
-// database between stores and calls New; this is for tests.
+// Open makes a store over a database of its own at path, which Close then
+// closes. The app shares one database across stores and calls New instead.
 func Open(path string) (*Store, error) {
 	db, err := sqlitedb.Open(path)
 	if err != nil {
@@ -48,10 +49,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	store.owned = true
 	return store, nil
 }
 
-// New returns a store over db, creating its tables if needed.
+// New returns a store over db, creating its tables if needed. The caller keeps
+// ownership of db.
 func New(db *sql.DB) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
@@ -59,7 +62,14 @@ func New(db *sql.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+// Close closes the database, unless it belongs to whoever passed it in —
+// closing a shared handle would take every other store down with it.
+func (s *Store) Close() error {
+	if !s.owned {
+		return nil
+	}
+	return s.db.Close()
+}
 
 // Key returns this server's identity, generating and storing one the first time
 // it is asked. The key is persistent because browsers bind their subscription
