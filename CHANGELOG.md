@@ -36,7 +36,7 @@ follow [Semantic Versioning](https://semver.org/).
   printer is idle, and starts 5 minutes before the print began while one is
   running, so a job is one drag of the bar. Older footage — the kept prints'
   thinned timelapses — is still reachable by picking a job from the list.
-- Timelapse speeds are 60x, 300x, and 600x, and play back at 4 frames per
+- Timelapse speeds are 30x, 60x, 300x, and 600x, and play back at 4 frames per
   second instead of 1 — the old 1x-20x speeds were slower than the recording
   rate they were replaying.
 - The five most recently finished prints keep their footage regardless of
@@ -81,6 +81,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Chamber temperature. The P1S reports a value that does not track the
   chamber (5°C mid-print, with the bed at 55°C), and there is no way to make
   it meaningful. The chamber *fan* speed is unaffected.
+- Wi-Fi signal strength. Nothing is decided by it, and the printer being
+  reachable is already reported by the connection row.
 
 ## [0.5.0] - 2026-07-22
 

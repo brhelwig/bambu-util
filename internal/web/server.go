@@ -156,7 +156,6 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"totalLayerNum":    fields["total_layer_num"],
 		"remainingMinutes": fields["mc_remaining_time"],
 		"chamberLight":     p1s.ChamberLight(fields),
-		"wifiSignal":       fields["wifi_signal"],
 		"fans": map[string]any{
 			"cooling": fields["cooling_fan_speed"],
 			"aux":     fields["big_fan1_speed"],
