@@ -42,6 +42,9 @@ func readSettings(t *testing.T, ts *httptest.Server) map[string]any {
 func TestSettingsAreServedAsSeconds(t *testing.T) {
 	ts, _ := settingsTestServer(t)
 	got := readSettings(t, ts)
+	if got := readSettings(t, ts)[settings.KeyKeptJobs]; got != float64(settings.Defaults.KeptJobs) {
+		t.Errorf("kept jobs = %v, want %d", got, settings.Defaults.KeptJobs)
+	}
 	for name, want := range map[string]time.Duration{
 		settings.KeyRetention:      settings.Defaults.Retention,
 		settings.KeyBedOffAfter:    settings.Defaults.BedOffAfter,
@@ -56,7 +59,7 @@ func TestSettingsAreServedAsSeconds(t *testing.T) {
 
 func TestChangingASettingTakesEffect(t *testing.T) {
 	ts, config := settingsTestServer(t)
-	resp, err := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyBedOffAfter+"?seconds=3600", "", nil)
+	resp, err := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyBedOffAfter+"?value=3600", "", nil)
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -75,7 +78,7 @@ func TestChangingASettingTakesEffect(t *testing.T) {
 // so the countdown a heater is given must come from the current value.
 func TestANewShutOffWindowAppliesToTheNextHeaterSet(t *testing.T) {
 	ts, _ := settingsTestServer(t)
-	if resp, _ := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyBedOffAfter+"?seconds=7200", "", nil); resp.StatusCode != http.StatusNoContent {
+	if resp, _ := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyBedOffAfter+"?value=7200", "", nil); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("changing the setting returned %d", resp.StatusCode)
 	}
 	if resp, _ := ts.Client().Post(ts.URL+"/api/actions/set-bed-temp?temp=60", "", nil); resp.StatusCode != http.StatusOK {
@@ -101,12 +104,13 @@ func TestANewShutOffWindowAppliesToTheNextHeaterSet(t *testing.T) {
 func TestBadSettingWritesAreRefused(t *testing.T) {
 	ts, config := settingsTestServer(t)
 	cases := map[string]string{
-		"unknown setting": "/api/settings/chamber-temperature?seconds=3600",
-		"not a number":    "/api/settings/" + settings.KeyRetention + "?seconds=soon",
+		"unknown setting": "/api/settings/chamber-temperature?value=3600",
+		"not a number":    "/api/settings/" + settings.KeyRetention + "?value=soon",
 		"missing value":   "/api/settings/" + settings.KeyRetention,
-		"far too long":    "/api/settings/" + settings.KeyRetention + "?seconds=999999999",
-		"far too short":   "/api/settings/" + settings.KeyRetention + "?seconds=1",
-		"negative":        "/api/settings/" + settings.KeyRetention + "?seconds=-3600",
+		"far too long":    "/api/settings/" + settings.KeyRetention + "?value=999999999",
+		"far too short":   "/api/settings/" + settings.KeyRetention + "?value=1",
+		"negative":        "/api/settings/" + settings.KeyRetention + "?value=-3600",
+		"count too high":  "/api/settings/" + settings.KeyKeptJobs + "?value=5000",
 	}
 	for name, path := range cases {
 		resp, err := ts.Client().Post(ts.URL+path, "", nil)
@@ -131,7 +135,7 @@ func TestAServerWithNoWritableSettingsSaysSo(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	if resp, _ := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyRetention+"?seconds=3600", "", nil); resp.StatusCode != http.StatusNotImplemented {
+	if resp, _ := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyRetention+"?value=3600", "", nil); resp.StatusCode != http.StatusNotImplemented {
 		t.Errorf("status %d, want 501", resp.StatusCode)
 	}
 	if got := readSettings(t, ts)[settings.KeyRetention]; got != float64(int(settings.Defaults.Retention.Seconds())) {

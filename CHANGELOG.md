@@ -14,7 +14,10 @@ follow [Semantic Versioning](https://semver.org/).
   status, so nothing has to be scrolled past to reach the controls;
   notifications moved onto it too. The values are kept in the database and read
   whenever they are consulted, so a change takes effect without a restart. A
-  countdown already running keeps the window it started with.
+  countdown already running keeps the window it started with. How many finished
+  prints keep their footage is a setting too, having been fixed at five. Changes
+  are applied by a Save button rather than as you type, so a half-typed number
+  never becomes the shut-off window.
   `RECORDING_RETENTION` is gone — the same setting now lives on the page.
 
 - Notifications to the phone, so the page does not have to be open. Turn

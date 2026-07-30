@@ -146,11 +146,29 @@ async function main() {
     deviceScaleFactor: 2,
     colorScheme: "dark",
   });
-  // Headless Chromium refuses notifications regardless of this, so the card
-  // reads as blocked in the captures. That is the capture browser's answer, not
-  // the app's, and the comment says so rather than the previews implying a
-  // fault.
-  await context.grantPermissions(["notifications"]).catch(() => {});
+  // Headless Chromium refuses notifications outright, so left alone every
+  // capture would show the card blocked — the capture browser's answer, not the
+  // app's. These stubs stand in for the browser's own notification support so
+  // the card renders as a phone renders it. Only the browser is stood in for;
+  // the card's own logic is the real one.
+  const notificationSupport = (permission, subscribed) => `
+    window.Notification = { permission: ${JSON.stringify(permission)},
+      requestPermission: async () => ${JSON.stringify(permission)} };
+    window.PushManager = class {};
+    const key = new Uint8Array(65); key[0] = 4;
+    const subscription = {
+      endpoint: "https://push.example.net/stand-in",
+      options: { applicationServerKey: key.buffer },
+      unsubscribe: async () => true,
+      toJSON: () => ({ endpoint: "https://push.example.net/stand-in", keys: {} }),
+    };
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {
+      register: async () => ({ pushManager: {
+        getSubscription: async () => ${subscribed ? "subscription" : "null"},
+        subscribe: async () => subscription,
+      }}),
+    }});
+  `;
 
   const shots = [];
   for (const state of states) {
@@ -169,28 +187,31 @@ async function main() {
     await page.close();
   }
 
-  // The settings screen, reached the way a person reaches it. A branch that
-  // predates the settings screen simply has no gear, and capturing the rest is
-  // still worth doing.
-  {
+  // The settings screen, reached the way a person reaches it, with notifications
+  // in each of the states a phone can show. A branch that predates the settings
+  // screen simply has no gear, and capturing the rest is still worth doing.
+  const settingsShots = [
+    { name: "09-settings", title: "Settings", permission: "default", subscribed: false,
+      note: "Its own screen behind the gear, not more cards under the printer status." },
+    { name: "10-notifications-on", title: "Notifications on", permission: "granted", subscribed: true,
+      note: "Once a phone has subscribed, with the test that proves delivery before anything rides on it." },
+  ];
+  for (const shot of settingsShots) {
     const page = await context.newPage();
+    await page.addInitScript(notificationSupport(shot.permission, shot.subscribed));
     await page.route("**/api/status", route => route.fulfill({ json: { ...idle, ams } }));
     await page.goto(BASE + "/", { waitUntil: "networkidle" });
-    if (await page.locator("#settingsBtn").count()) {
-      await page.click("#settingsBtn");
-      await page.waitForTimeout(400);
-      const file = `${OUT}/09-settings.png`;
-      await page.screenshot({ path: file, fullPage: true });
-      shots.push({
-        name: "09-settings",
-        title: "Settings",
-        note: "Its own screen behind the gear, not more cards under the printer status.",
-        file,
-      });
-      console.log("captured Settings");
-    } else {
+    if (!await page.locator("#settingsBtn").count()) {
       console.log("no settings screen on this branch, skipping");
+      await page.close();
+      break;
     }
+    await page.click("#settingsBtn");
+    await page.waitForTimeout(500);
+    const file = `${OUT}/${shot.name}.png`;
+    await page.screenshot({ path: file, fullPage: true });
+    shots.push({ ...shot, file });
+    console.log(`captured ${shot.title}`);
     await page.close();
   }
 

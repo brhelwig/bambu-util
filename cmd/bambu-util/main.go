@@ -101,7 +101,10 @@ func main() {
 	go srv.EnforceAutoOff(ctx)
 	go srv.EnforceLampAutomation(ctx)
 	go srv.EnforceEventNotifications(ctx)
-	go history.RunPruner(ctx, store, func() time.Duration { return config.Values().Retention }, 5*time.Minute, time.Now)
+	go history.RunPruner(ctx, store, func() history.Policy {
+		v := config.Values()
+		return history.Policy{Window: v.Retention, KeptJobs: v.KeptJobs}
+	}, 5*time.Minute, time.Now)
 	go history.NewJobWatcher(store).Run(ctx, 2*time.Second, func() (string, string) {
 		fields, _ := cache.Snapshot()
 		return p1s.GcodeState(fields), jobNameString(fields)

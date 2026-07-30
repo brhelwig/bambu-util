@@ -25,7 +25,7 @@ func TestAnUnconfiguredStoreReportsTheDefaults(t *testing.T) {
 
 func TestSetAndReadBack(t *testing.T) {
 	store := openTest(t)
-	if err := store.SetDuration(KeyRetention, 48*time.Hour); err != nil {
+	if err := store.Set(KeyRetention, 48*3600); err != nil {
 		t.Fatalf("SetDuration: %v", err)
 	}
 	if got := store.Values().Retention; got != 48*time.Hour {
@@ -40,7 +40,7 @@ func TestSetAndReadBack(t *testing.T) {
 func TestEverySettingCanBeChanged(t *testing.T) {
 	store := openTest(t)
 	for _, name := range []string{KeyRetention, KeyBedOffAfter, KeyNozzleOffAfter, KeyLampOffAfter} {
-		if err := store.SetDuration(name, 2*time.Hour); err != nil {
+		if err := store.Set(name, 2*3600); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -63,7 +63,7 @@ func TestSettingsSurviveReopeningTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := first.SetDuration(KeyLampOffAfter, 90*time.Minute); err != nil {
+	if err := first.Set(KeyLampOffAfter, 90*60); err != nil {
 		t.Fatalf("SetDuration: %v", err)
 	}
 	first.Close()
@@ -79,7 +79,7 @@ func TestSettingsSurviveReopeningTheFile(t *testing.T) {
 }
 
 func TestAnUnknownSettingIsRefused(t *testing.T) {
-	err := openTest(t).SetDuration("chamber-temperature", time.Hour)
+	err := openTest(t).Set("chamber-temperature", 3600)
 	if err == nil {
 		t.Fatal("an unknown setting was accepted")
 	}
@@ -92,18 +92,18 @@ func TestAnUnknownSettingIsRefused(t *testing.T) {
 // of a year fills the disk.
 func TestValuesOutsideTheBoundsAreRefused(t *testing.T) {
 	store := openTest(t)
-	cases := map[string]time.Duration{
-		"retention far too long":  365 * 24 * time.Hour,
-		"retention far too short": time.Second,
-		"shut-off far too long":   365 * 24 * time.Hour,
+	cases := map[string]int{
+		"retention far too long":  365 * 24 * 3600,
+		"retention far too short": 1,
+		"shut-off far too long":   365 * 24 * 3600,
 	}
-	for name, d := range cases {
+	for name, value := range cases {
 		key := KeyRetention
 		if strings.HasPrefix(name, "shut-off") {
 			key = KeyBedOffAfter
 		}
-		if err := store.SetDuration(key, d); err == nil {
-			t.Errorf("%s (%s) was accepted", name, d)
+		if err := store.Set(key, value); err == nil {
+			t.Errorf("%s (%d) was accepted", name, value)
 		}
 	}
 	if got := store.Values(); got != Defaults {
@@ -115,7 +115,7 @@ func TestValuesOutsideTheBoundsAreRefused(t *testing.T) {
 // should cost that setting, not the printer.
 func TestAValueThatCannotBeReadFallsBackToItsDefault(t *testing.T) {
 	store := openTest(t)
-	for _, bad := range []string{"not a duration", "", "999999h"} {
+	for _, bad := range []string{"not a number", "", "999999999"} {
 		if _, err := store.db.Exec(
 			`INSERT INTO settings (name, value) VALUES (?, ?)
 			 ON CONFLICT(name) DO UPDATE SET value = excluded.value`, KeyRetention, bad); err != nil {
@@ -127,5 +127,40 @@ func TestAValueThatCannotBeReadFallsBackToItsDefault(t *testing.T) {
 		if got := store.Values().Retention; got != Defaults.Retention {
 			t.Errorf("stored %q gave retention %s, want the default %s", bad, got, Defaults.Retention)
 		}
+	}
+}
+
+func TestJobRetentionIsASetting(t *testing.T) {
+	store := openTest(t)
+	if got := store.Values().KeptJobs; got != Defaults.KeptJobs {
+		t.Errorf("kept jobs = %d, want the default %d", got, Defaults.KeptJobs)
+	}
+	if err := store.Set(KeyKeptJobs, 12); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got := store.Values().KeptJobs; got != 12 {
+		t.Errorf("kept jobs = %d, want 12", got)
+	}
+	// Keeping none is a real choice: retention alone then decides everything.
+	if err := store.Set(KeyKeptJobs, 0); err != nil {
+		t.Errorf("keeping no jobs was refused: %v", err)
+	}
+	if err := store.Set(KeyKeptJobs, -1); err == nil {
+		t.Error("a negative count was accepted")
+	}
+	if err := store.Set(KeyKeptJobs, 5000); err == nil {
+		t.Error("keeping every print ever made was accepted")
+	}
+}
+
+// A count is not seconds, and the page needs to know which it is to label it.
+func TestSecondsSaysWhichSettingsAreLengthsOfTime(t *testing.T) {
+	for _, name := range []string{KeyRetention, KeyBedOffAfter, KeyNozzleOffAfter, KeyLampOffAfter} {
+		if !Seconds(name) {
+			t.Errorf("%s should be a length of time", name)
+		}
+	}
+	if Seconds(KeyKeptJobs) {
+		t.Error("kept jobs is a count, not a length of time")
 	}
 }

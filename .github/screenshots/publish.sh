@@ -47,8 +47,9 @@ raw() { echo "https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DIR}/$1"; }
   echo "from a live printer. The camera card shows its genuine empty state — no footage"
   echo "is staged."
   echo
-  echo "The notification card reports the permission of the capture browser, which"
-  echo "headless Chromium always refuses. On a phone it reads Off, with a Turn on button."
+  echo "Headless Chromium refuses notifications outright, so the browser'"'"'s own"
+  echo "notification support is stood in for on the settings shots. The card'"'"'s logic is"
+  echo "the real one; only the browser underneath it is simulated."
   echo
   for f in "${GITHUB_WORKSPACE}"/shots/*.png; do
     name=$(basename "$f" .png)

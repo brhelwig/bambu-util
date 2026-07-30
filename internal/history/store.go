@@ -108,9 +108,10 @@ func (s *Store) Range() (oldest, newest *int64, err error) {
 	return oldest, newest, nil
 }
 
-// KeptJobs is how many finished prints keep their footage past the cutoff, so a
-// recent timelapse stays watchable after the rolling buffer has moved on.
-const KeptJobs = 5
+// DefaultKeptJobs is how many finished prints keep their footage past the
+// cutoff when nothing says otherwise, so a recent timelapse stays watchable
+// after the rolling buffer has moved on. The running value is a setting.
+const DefaultKeptJobs = 5
 
 // ThinInterval is the spacing, in seconds, that kept footage is reduced to once
 // it ages past the cutoff. Keeping five whole prints at the recording rate would
@@ -129,11 +130,11 @@ const MaxOpenJobSpan = 48 * 60 * 60
 
 // Prune enforces the retention policy. Frames older than cutoff are deleted
 // unless they belong to a kept print — the job still in progress, or one of the
-// KeptJobs most recently finished — whose footage is instead thinned to one
+// keptJobs most recently finished — whose footage is instead thinned to one
 // frame per ThinInterval. Job rows go only once they are both older than cutoff
 // and no longer among the kept ones.
-func (s *Store) Prune(cutoff int64) error {
-	kept, err := s.keptWindows(cutoff)
+func (s *Store) Prune(cutoff int64, keptJobs int) error {
+	kept, err := s.keptWindows(cutoff, keptJobs)
 	if err != nil {
 		return err
 	}
@@ -151,7 +152,7 @@ func (s *Store) Prune(cutoff int64) error {
 		  AND id NOT IN (
 		    SELECT id FROM jobs WHERE end_ts IS NOT NULL
 		    ORDER BY start_ts DESC, id DESC LIMIT ?
-		  )`, cutoff, KeptJobs)
+		  )`, cutoff, keptJobs)
 	return err
 }
 
@@ -162,7 +163,7 @@ type window struct {
 	end   *int64
 }
 
-func (s *Store) keptWindows(cutoff int64) ([]window, error) {
+func (s *Store) keptWindows(cutoff int64, keptJobs int) ([]window, error) {
 	rows, err := s.db.Query(`
 		SELECT start_ts, end_ts FROM (
 		  SELECT start_ts, end_ts FROM jobs WHERE end_ts IS NULL
@@ -172,7 +173,7 @@ func (s *Store) keptWindows(cutoff int64) ([]window, error) {
 		SELECT start_ts, end_ts FROM (
 		  SELECT start_ts, end_ts FROM jobs WHERE end_ts IS NOT NULL
 		  ORDER BY start_ts DESC, id DESC LIMIT ?
-		)`, KeptJobs)
+		)`, keptJobs)
 	if err != nil {
 		return nil, err
 	}

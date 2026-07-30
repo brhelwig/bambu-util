@@ -60,6 +60,8 @@
   .setrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
   .setrow label { color: #9aa0a6; }
   .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 72px; text-align: right; }
+  #settingsSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; }
+  #settingsSave:not(:disabled) { background: #7a4a12; }
   .notifybtns { display: flex; gap: 10px; }
   .notifybtns button { flex: 1; }
   .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
@@ -196,6 +198,8 @@
   <h2>Timings</h2>
   <div class="setrow"><label for="setRetention">Camera history</label>
     <span><input type="number" id="setRetention" min="1" max="720" step="1"> hours</span></div>
+  <div class="setrow"><label for="setKeptJobs">Prints kept</label>
+    <span><input type="number" id="setKeptJobs" min="0" max="50" step="1"> jobs</span></div>
   <div class="setrow"><label for="setBedOff">Bed auto-off</label>
     <span><input type="number" id="setBedOff" min="1" max="168" step="1"> hours</span></div>
   <div class="setrow"><label for="setNozzleOff">Nozzle auto-off</label>
@@ -203,7 +207,10 @@
   <div class="setrow"><label for="setLampOff">Lamp off after idle</label>
     <span><input type="number" id="setLampOff" min="1" max="168" step="1"> hours</span></div>
   <div class="notifywhat">The camera history window is also how far back the scrub
-    bar reaches. Auto-off countdowns already running keep the window they started with.</div>
+    bar reaches. Prints kept hold their footage past that window, thinned to one frame
+    every 10 seconds. Auto-off countdowns already running keep the window they started with.</div>
+  <button id="settingsSave" disabled>Save</button>
+  <div id="settingsMsg" class="notifywhat" style="margin:8px 0 0"></div>
 </div>
 </div>
 <div id="log"></div>
@@ -1083,41 +1090,59 @@ $("settingsBack").addEventListener("click", () => showScreen(false));
 // shown and the field put back to what is actually stored.
 const SETTINGS = [
   { id: "setRetention", name: "retention", perUnit: 3600 },
+  { id: "setKeptJobs", name: "kept-jobs", perUnit: 1 },
   { id: "setBedOff", name: "bed-off-after", perUnit: 3600 },
   { id: "setNozzleOff", name: "nozzle-off-after", perUnit: 60 },
   { id: "setLampOff", name: "lamp-off-after", perUnit: 3600 },
 ];
 
+// What the server last told us, so Save knows what actually changed and a
+// refusal can put the field back to what is really stored.
+let savedSettings = {};
+
+function settingsDirty() {
+  return SETTINGS.some(s => Number($(s.id).value) * s.perUnit !== savedSettings[s.name]);
+}
+
+function markSettingsDirty() {
+  $("settingsSave").disabled = !settingsDirty();
+}
+
 async function refreshSettings() {
   if (DEMO) return;
-  let values;
   try {
     const r = await fetch("/api/settings");
     if (!r.ok) return;
-    values = await r.json();
+    savedSettings = await r.json();
   } catch {
     return; // leave whatever is on screen
   }
-  for (const s of SETTINGS) $(s.id).value = Math.round(values[s.name] / s.perUnit);
+  for (const s of SETTINGS) $(s.id).value = Math.round(savedSettings[s.name] / s.perUnit);
+  $("settingsMsg").textContent = "";
+  markSettingsDirty();
 }
 
-for (const s of SETTINGS) {
-  $(s.id).addEventListener("change", async () => {
-    const seconds = Math.round(Number($(s.id).value) * s.perUnit);
+for (const s of SETTINGS) $(s.id).addEventListener("input", markSettingsDirty);
+
+$("settingsSave").addEventListener("click", async () => {
+  $("settingsSave").disabled = true;
+  $("settingsMsg").textContent = "Saving…";
+  const failures = [];
+  for (const s of SETTINGS) {
+    const value = Math.round(Number($(s.id).value) * s.perUnit);
+    if (value === savedSettings[s.name]) continue;
     try {
-      const r = await fetch(`/api/settings/${s.name}?seconds=${seconds}`, { method: "POST" });
-      if (!r.ok) {
-        $("log").textContent = (await r.text()).trim();
-        await refreshSettings();
-        return;
-      }
-      $("log").textContent = "saved";
+      const r = await fetch(`/api/settings/${s.name}?value=${value}`, { method: "POST" });
+      if (!r.ok) failures.push((await r.text()).trim());
     } catch (e) {
-      $("log").textContent = `could not save: ${e.message || e}`;
-      await refreshSettings();
+      failures.push(e.message || String(e));
     }
-  });
-}
+  }
+  // Read back rather than assume: whatever the server kept is the truth, and a
+  // field the server refused goes back to the value actually in force.
+  await refreshSettings();
+  $("settingsMsg").textContent = failures.length ? failures.join(" · ") : "Saved.";
+});
 
 </script>
 </body>
