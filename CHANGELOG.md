@@ -93,6 +93,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- The filament load path — `POST /api/actions/load` and the command behind it.
+  Filament handling became unload-only two releases ago and the page has not
+  called it since, but it stayed reachable to anyone who knew the URL and it
+  commanded the printer to feed filament.
 - Chamber temperature. The P1S reports a value that does not track the
   chamber (5°C mid-print, with the bed at 55°C), and there is no way to make
   it meaningful. The chamber *fan* speed is unaffected.
