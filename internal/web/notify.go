@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/brhelwig/bambu-util/internal/push"
 )
@@ -90,4 +91,58 @@ func (s *Server) pushTest(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+// preferencesRequest is what the settings screen sends when a device changes
+// what it wants to hear about.
+type preferencesRequest struct {
+	Endpoint    string   `json:"endpoint"`
+	Kinds       []string `json:"kinds"`
+	BedInterval int      `json:"bedInterval"` // seconds; 0 is never
+}
+
+// pushPreferences reports what one device asked for. The endpoint identifies
+// the device, and only that device knows its own.
+func (s *Server) pushPreferences(w http.ResponseWriter, r *http.Request) {
+	endpoint := r.URL.Query().Get("endpoint")
+	if endpoint == "" {
+		http.Error(w, "no endpoint", http.StatusBadRequest)
+		return
+	}
+	sub, ok, err := s.notify.Preferences(endpoint)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "not subscribed", http.StatusNotFound)
+		return
+	}
+	// A device that has chosen nothing is told about everything, so report the
+	// full set rather than an empty one it would show as all-off.
+	kinds := sub.Kinds
+	if len(kinds) == 0 {
+		kinds = push.Kinds
+	}
+	writeJSON(w, map[string]any{
+		"available":   push.Kinds,
+		"kinds":       kinds,
+		"bedInterval": int(sub.BedInterval.Seconds()),
+	})
+}
+
+func (s *Server) setPushPreferences(w http.ResponseWriter, r *http.Request) {
+	var req preferencesRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Endpoint == "" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.Kinds == nil {
+		req.Kinds = []string{}
+	}
+	if err := s.notify.SetPreferences(req.Endpoint, req.Kinds, time.Duration(req.BedInterval)*time.Second); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

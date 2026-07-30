@@ -199,7 +199,7 @@ async function main() {
     { name: "09-settings", title: "Settings", permission: "default", subscribed: false,
       note: "Its own screen behind the gear, not more cards under the printer status." },
     { name: "10-notifications-on", title: "Notifications on", permission: "granted", subscribed: true,
-      note: "Once a phone has subscribed, with the test that proves delivery before anything rides on it." },
+      note: "Once a phone has subscribed: which notifications this device wants, how often to be reminded the bed is on, and the test that proves delivery before anything rides on it." },
   ];
   for (const shot of settingsShots) {
     const page = await context.newPage();
@@ -212,7 +212,7 @@ async function main() {
       break;
     }
     await page.click("#settingsBtn");
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(700);
     const file = `${OUT}/${shot.name}.png`;
     await page.screenshot({ path: file, fullPage: true });
     shots.push({ ...shot, file });

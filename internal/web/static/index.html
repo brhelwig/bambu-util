@@ -62,6 +62,10 @@
   .setrow { display: grid; grid-template-columns: 1fr 72px 4.5em; align-items: center; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
   .setrow label { color: #9aa0a6; }
   .setrow .unit { color: #9aa0a6; }
+  .setrow select { grid-column: 2 / -1; width: 100%; }
+  .kindrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
+  .kindrow label { color: #e8eaed; }
+  .kindrow input { width: 20px; height: 20px; accent-color: #c98a2b; }
   .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 100%; text-align: right; }
   #settingsSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; }
   #settingsSave:not(:disabled) { background: #7a4a12; }
@@ -189,8 +193,20 @@
 <div class="card">
   <h2>Notifications</h2>
   <div class="row"><span id="notifyState">…</span></div>
-  <div class="notifywhat">When a print starts, finishes or stops, when the printer
-    raises an error, and how long the bed has been on with no print running.</div>
+  <div class="notifywhat">Chosen per device, so this phone and anything else you
+    use can want different things.</div>
+  <div id="notifyPrefs" style="display:none">
+    <div id="notifyKinds"></div>
+    <div class="setrow"><label for="notifyBedInterval">Bed on reminder</label>
+      <select id="notifyBedInterval">
+        <option value="0">Never</option>
+        <option value="3600">Every hour</option>
+        <option value="14400">Every 4 hours</option>
+        <option value="28800">Every 8 hours</option>
+        <option value="43200">Every 12 hours</option>
+        <option value="86400">Every 24 hours</option>
+      </select></div>
+  </div>
   <div class="notifybtns">
     <button id="notifyBtn" style="display:none">Turn on</button>
     <button id="notifyTestBtn" style="display:none">Send a test</button>
@@ -956,6 +972,71 @@ function bytesToB64(buf) {
   return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// What each kind is called on screen. The names on the wire outlive any
+// release, so they are mapped here rather than shown raw.
+const KIND_LABELS = {
+  "print-started": "Print started",
+  "print-finished": "Print finished",
+  "print-ended": "Print ended without finishing",
+  "printer-error": "Printer error",
+  "heater-off": "Heater turned off automatically",
+};
+
+// Saved as soon as they are changed: each is one choice on its own, unlike the
+// timings where a half-typed number would be a bad setting.
+async function savePrefs() {
+  if (!pushSub) return;
+  const kinds = [...document.querySelectorAll("#notifyKinds input:checked")].map(i => i.value);
+  try {
+    const r = await fetch("/api/push/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: pushSub.endpoint,
+        kinds,
+        bedInterval: Number($("notifyBedInterval").value),
+      }),
+    });
+    $("settingsMsg").textContent = r.ok ? "Saved." : (await r.text()).trim();
+  } catch (e) {
+    $("settingsMsg").textContent = `could not save: ${e.message || e}`;
+  }
+}
+
+async function loadPrefs() {
+  $("notifyPrefs").style.display = pushSub ? "" : "none";
+  if (!pushSub) return;
+  let prefs;
+  try {
+    const r = await fetch(`/api/push/preferences?endpoint=${encodeURIComponent(pushSub.endpoint)}`);
+    if (!r.ok) return;
+    prefs = await r.json();
+  } catch {
+    return;
+  }
+  const rows = document.createElement("div");
+  for (const kind of prefs.available) {
+    const row = document.createElement("div");
+    row.className = "kindrow";
+    const label = document.createElement("label");
+    label.textContent = KIND_LABELS[kind] || kind;
+    label.htmlFor = `kind-${kind}`;
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = `kind-${kind}`;
+    box.value = kind;
+    box.checked = prefs.kinds.includes(kind);
+    box.addEventListener("change", savePrefs);
+    row.append(label, box);
+    rows.appendChild(row);
+  }
+  $("notifyKinds").innerHTML = "";
+  $("notifyKinds").appendChild(rows);
+  $("notifyBedInterval").value = String(prefs.bedInterval);
+}
+
+$("notifyBedInterval").addEventListener("change", savePrefs);
+
 function renderNotify() {
   const on = Boolean(pushSub);
   const blocked = Notification.permission === "denied";
@@ -966,6 +1047,7 @@ function renderNotify() {
   $("notifyTestBtn").style.display = on ? "" : "none";
   $("notifyHint").style.display = blocked ? "" : "none";
   if (blocked) $("notifyHint").textContent = "Allow notifications for this site in your browser settings, then reload.";
+  loadPrefs();
 }
 
 function unsupportedNotify() {

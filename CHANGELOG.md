@@ -20,6 +20,14 @@ follow [Semantic Versioning](https://semver.org/).
   never becomes the shut-off window.
   `RECORDING_RETENTION` is gone — the same setting now lives on the page.
 
+- Each subscribed device chooses which notifications it receives — print
+  started, finished, ended without finishing, printer errors, heaters turned
+  off automatically — and how often to be reminded the bed is on, from never
+  to every 24 hours. The choices are stored against that device's own
+  subscription, so a phone and a tablet can want different things, and each
+  keeps its own place in its own reminder schedule. A device that has never
+  chosen is told about everything. The bed reminder replaces the fixed ladder
+  of 1, 8, 16 and 24 hours with a repeating interval.
 - Notifications to the phone, so the page does not have to be open. Turn
   them on from the Notifications card; a test button proves the path before
   anything is riding on it. Subscriptions are stored under `DATA_DIR`

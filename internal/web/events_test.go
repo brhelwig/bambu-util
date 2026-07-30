@@ -175,106 +175,51 @@ func TestErrorsPresentAtStartupAreNotAnnounced(t *testing.T) {
 	expectSilence(t, f.events.poll(true, "IDLE", "", 0, hms("0300-8000-0003-0002")))
 }
 
-func TestBedOnRemindersFireOnSchedule(t *testing.T) {
+// The reminders themselves are per device now, so all this side has to do is
+// know when the bed came on with no print running.
+func TestTheBedOnClockStartsAndStops(t *testing.T) {
 	f := newEventsFixture()
-	expectSilence(t, f.events.poll(true, "IDLE", "", 0, nil))
-	expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil)) // the bed goes hot
+	f.events.poll(true, "IDLE", "", 0, nil)
+	if got := f.events.bedOnSince(); !got.IsZero() {
+		t.Errorf("a cold bed reports a start time: %v", got)
+	}
 
-	for _, after := range BedOnReminders {
-		f.now = f.now.Add(time.Minute) // just short of the next mark
-		expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
+	f.events.poll(true, "IDLE", "", 60, nil)
+	if got := f.events.bedOnSince(); !got.Equal(f.now) {
+		t.Errorf("bed on since = %v, want %v", got, f.now)
+	}
 
-		f.now = f.now.Add(after - time.Minute)
-		got := onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for "+roundHours(after))
-		if !strings.Contains(got.Body, "60") {
-			t.Errorf("body %q does not say what the bed is holding", got.Body)
-		}
-		// Only once per mark.
-		expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
-		f.now = f.now.Add(-after) // measure the next mark from the same origin
+	// The clock keeps running rather than restarting on each look.
+	started := f.events.bedOnSince()
+	f.now = f.now.Add(3 * time.Hour)
+	f.events.poll(true, "IDLE", "", 60, nil)
+	if got := f.events.bedOnSince(); !got.Equal(started) {
+		t.Errorf("the clock restarted: %v, want %v", got, started)
+	}
+
+	f.events.poll(true, "IDLE", "", 0, nil)
+	if got := f.events.bedOnSince(); !got.IsZero() {
+		t.Errorf("turning the bed off left a start time: %v", got)
 	}
 }
 
-// A hot bed during a print is the printer doing its job.
-func TestNoHotBedReminderWhilePrinting(t *testing.T) {
+// A hot bed during a print is the printer doing its job, not something to
+// measure.
+func TestTheBedOnClockIgnoresAPrint(t *testing.T) {
 	f := newEventsFixture()
 	f.events.poll(true, "IDLE", "", 0, nil)
 	f.events.poll(true, "RUNNING", "benchy.gcode", 60, nil)
-	f.now = f.now.Add(30 * time.Hour)
-	expectSilence(t, f.events.poll(true, "RUNNING", "benchy.gcode", 60, nil))
-}
-
-// The clock starts when the bed is left hot and idle, not when it was heated —
-// a print that finishes hot should not immediately claim the bed has been
-// sitting for hours.
-func TestTheReminderClockStartsWhenThePrintEnds(t *testing.T) {
-	f := newEventsFixture()
-	f.events.poll(true, "IDLE", "", 0, nil)
-	f.events.poll(true, "RUNNING", "benchy.gcode", 60, nil)
-	f.now = f.now.Add(20 * time.Hour)
-	f.events.poll(true, "FINISH", "benchy.gcode", 60, nil) // still hot, print over
-
-	f.now = f.now.Add(59 * time.Minute)
-	expectSilence(t, f.events.poll(true, "FINISH", "", 60, nil))
-	f.now = f.now.Add(2 * time.Minute)
-	onlyTitle(t, f.events.poll(true, "FINISH", "", 60, nil), "Bed on for 1 hour")
-}
-
-// Turning the bed off ends the reminders, and heating it again starts over
-// rather than resuming a spent schedule.
-func TestCoolingTheBedResetsTheReminders(t *testing.T) {
-	f := newEventsFixture()
-	f.events.poll(true, "IDLE", "", 0, nil)
-	f.events.poll(true, "IDLE", "", 60, nil)
-	f.now = f.now.Add(2 * time.Hour)
-	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for 1 hour")
-
-	f.events.poll(true, "IDLE", "", 0, nil) // bed off
-	f.now = f.now.Add(2 * time.Hour)
-	expectSilence(t, f.events.poll(true, "IDLE", "", 0, nil))
-
-	f.events.poll(true, "IDLE", "", 60, nil) // hot again
-	f.now = f.now.Add(59 * time.Minute)
-	expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
-	f.now = f.now.Add(2 * time.Minute)
-	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for 1 hour")
-}
-
-// A bed already hot at start-up gets its reminders late rather than invented:
-// how long it had been sitting cannot be known.
-func TestABedAlreadyHotAtStartupIsTimedFromNow(t *testing.T) {
-	f := newEventsFixture()
-	expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
-	f.now = f.now.Add(59 * time.Minute)
-	expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
-	f.now = f.now.Add(2 * time.Minute)
-	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for 1 hour")
-}
-
-// Reminders about one condition replace each other on the phone instead of
-// stacking into a column.
-func TestRemindersShareATag(t *testing.T) {
-	f := newEventsFixture()
-	f.events.poll(true, "IDLE", "", 0, nil)
-	f.events.poll(true, "IDLE", "", 60, nil)
-	var tags []string
-	for _, after := range BedOnReminders {
-		f.now = f.now.Add(after)
-		for _, n := range f.events.poll(true, "IDLE", "", 60, nil) {
-			tags = append(tags, n.Tag)
-		}
-		f.now = f.now.Add(-after)
+	if got := f.events.bedOnSince(); !got.IsZero() {
+		t.Errorf("a bed hot mid-print started the clock: %v", got)
 	}
-	for _, tag := range tags {
-		if tag != tagBed {
-			t.Errorf("tag = %q, want every hot-bed reminder to share %q", tag, tagBed)
-		}
+
+	// It starts once the print is over and the bed is still on.
+	f.events.poll(true, "FINISH", "benchy.gcode", 60, nil)
+	if got := f.events.bedOnSince(); got.IsZero() {
+		t.Error("the clock did not start when the print ended with the bed still on")
 	}
 }
 
-// The decision logic being right is not the same as a phone being told. This
-// runs the server's own poll against a subscribed browser and a stand-in push
-// service.
 func TestAFinishedPrintReachesASubscribedPhone(t *testing.T) {
 	var mu sync.Mutex
 	var delivered int

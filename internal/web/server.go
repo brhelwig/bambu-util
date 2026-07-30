@@ -96,6 +96,7 @@ func (s *Server) pollAutoOff() {
 			Title: "Bed turned off",
 			Body:  "It had been on since it was last set here.",
 			Tag:   tagBed,
+			Kind:  push.KindHeaterOff,
 		})
 	}
 	if nozzle {
@@ -104,6 +105,7 @@ func (s *Server) pollAutoOff() {
 			Title: "Nozzle turned off",
 			Body:  "It had been on since it was last set here.",
 			Tag:   tagBed,
+			Kind:  push.KindHeaterOff,
 		})
 	}
 }
@@ -129,6 +131,16 @@ func (s *Server) pollEvents() {
 	jobName, _ := p1s.JobName(fields).(string)
 	for _, n := range s.events.poll(connected, p1s.GcodeState(fields), jobName, bedTarget, p1s.HMSErrors(fields)) {
 		s.send(n)
+	}
+
+	// Each device asked for its own reminder interval, so the schedule cannot
+	// live with the events above — it belongs beside the subscriptions.
+	if since := s.events.bedOnSince(); since.IsZero() {
+		if err := s.notify.ForgetBedReminders(); err != nil {
+			log.Printf("notify: clearing bed reminders: %v", err)
+		}
+	} else if err := s.notify.RemindBedOn(context.Background(), since, bedTarget); err != nil {
+		log.Printf("notify: bed reminders: %v", err)
 	}
 }
 
@@ -199,6 +211,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/push/subscribe", s.pushSubscribe)
 	mux.HandleFunc("POST /api/push/unsubscribe", s.pushUnsubscribe)
 	mux.HandleFunc("POST /api/push/test", s.pushTest)
+	mux.HandleFunc("GET /api/push/preferences", s.pushPreferences)
+	mux.HandleFunc("POST /api/push/preferences", s.setPushPreferences)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})

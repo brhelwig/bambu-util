@@ -127,7 +127,7 @@ func TestTheLampCountdownSurvivesARestart(t *testing.T) {
 	}
 }
 
-func TestTheBedReminderClockSurvivesARestart(t *testing.T) {
+func TestTheBedOnClockSurvivesARestart(t *testing.T) {
 	store := openTestTimers(t)
 	now := time.Unix(1_000_000, 0)
 
@@ -135,47 +135,18 @@ func TestTheBedReminderClockSurvivesARestart(t *testing.T) {
 	before.now = func() time.Time { return now }
 	before.poll(true, "IDLE", "", 0, nil)
 	before.poll(true, "IDLE", "", 60, nil) // the bed comes on
+	started := before.bedOnSince()
 
 	now = now.Add(90 * time.Minute)
-	got := before.poll(true, "IDLE", "", 60, nil)
-	if len(got) != 1 || got[0].Title != "Bed on for 1 hour" {
-		t.Fatalf("before the restart: %v", titles(got))
-	}
-
-	// Restart. The bed has now been on for 90 minutes, so the next reminder is
-	// still the 8-hour one, and it is due 8 hours after the bed came on.
 	after := newPrintEvents(store)
 	after.now = func() time.Time { return now }
-	expectSilence(t, after.poll(true, "IDLE", "", 60, nil))
-
-	now = now.Add(6*time.Hour + 31*time.Minute) // 8h01m since the bed came on
-	got = after.poll(true, "IDLE", "", 60, nil)
-	if len(got) != 1 || got[0].Title != "Bed on for 8 hours" {
-		t.Fatalf("after the restart: %v, want the 8-hour reminder timed from when the bed came on", titles(got))
+	after.poll(true, "IDLE", "", 60, nil)
+	if got := after.bedOnSince(); !got.Equal(started) {
+		t.Errorf("after a restart the bed came on at %v, want %v — the count restarted", got, started)
 	}
 }
 
-// Without persistence the count restarts, and a bed on for eight hours across
-// an update reports one hour again.
-func TestARestartDoesNotRepeatAReminderAlreadySent(t *testing.T) {
-	store := openTestTimers(t)
-	now := time.Unix(1_000_000, 0)
-
-	before := newPrintEvents(store)
-	before.now = func() time.Time { return now }
-	before.poll(true, "IDLE", "", 0, nil)
-	before.poll(true, "IDLE", "", 60, nil)
-	now = now.Add(time.Hour + time.Minute)
-	onlyTitle(t, before.poll(true, "IDLE", "", 60, nil), "Bed on for 1 hour")
-
-	for range 3 { // restarted repeatedly, as a run of deployments would
-		e := newPrintEvents(store)
-		e.now = func() time.Time { return now }
-		expectSilence(t, e.poll(true, "IDLE", "", 60, nil))
-	}
-}
-
-func TestTurningTheBedOffForgetsTheReminderClock(t *testing.T) {
+func TestTurningTheBedOffForgetsTheClock(t *testing.T) {
 	store := openTestTimers(t)
 	now := time.Unix(1_000_000, 0)
 
@@ -189,10 +160,8 @@ func TestTurningTheBedOffForgetsTheReminderClock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("All: %v", err)
 	}
-	for _, name := range []string{deadlines.BedOnSince, deadlines.BedOnNext} {
-		if at, ok := pending[name]; ok {
-			t.Errorf("%s is still stored (%v) after the bed was turned off", name, at)
-		}
+	if at, ok := pending[deadlines.BedOnSince]; ok {
+		t.Errorf("%s is still stored (%v) after the bed was turned off", deadlines.BedOnSince, at)
 	}
 }
 
