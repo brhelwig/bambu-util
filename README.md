@@ -28,7 +28,8 @@ Features:
   scrub bar drags back through earlier footage. While the printer is idle
   the bar reaches back 24 hours; during a print it starts five minutes
   before the print did, so the whole job is one drag and nothing earlier is
-  in the way. An icon button jumps back to the tail
+  in the way. A `● LIVE` badge on the image shows whether the view is following
+  the tail, and tapping it returns there
 - Recent print jobs are listed under the camera, each with its start time so
   two runs of the same file can be told apart. Pick one to play its
   footage as a timelapse at 60x, 300x, or 600x. The five most recently

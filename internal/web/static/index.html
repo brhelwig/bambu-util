@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#111418">
 <link rel="manifest" href="/manifest.webmanifest">
-<title>P1S bed control</title>
+<title>P1S Bridge</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -61,12 +61,24 @@
   .camctls { display: flex; align-items: center; gap: 8px; }
   .camctl { padding: 8px 12px; display: inline-flex; }
   .camctl svg { width: 18px; height: 18px; display: block; }
-  .camctl.on { color: #c98a2b; }
   .cam-job-time { display: block; color: #9aa0a6; font-size: 0.75rem; }
+  /* Live is a mode, not a transport control, so it sits on the image the way
+     every camera UI marks a live feed — not beside play and speed, which only
+     ever act on recorded footage. */
+  .cam-frame { position: relative; }
+  .cam-live {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 10px 5px 8px; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    background: rgba(0, 0, 0, 0.55); color: #9aa0a6;
+  }
+  .cam-live .dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa0a6; }
+  .cam-live.on { color: #fff; }
+  .cam-live.on .dot { background: #ff3b30; }
 </style>
 </head>
 <body>
-<h1 id="title">P1S bed control</h1>
 <div class="card" id="jobCard">
   <h2>Job status</h2>
   <div class="row" id="jobEmpty" style="color:#9aa0a6">No active print</div>
@@ -107,12 +119,13 @@
 <div class="card" id="camCard">
   <div id="camEmpty" style="color:#9aa0a6">No recordings yet</div>
   <div id="camControls" style="display:none">
-    <img id="camImg" alt="printer camera">
+    <div class="cam-frame">
+      <img id="camImg" alt="printer camera">
+      <button class="cam-live" id="camLiveBtn"><span class="dot"></span>LIVE</button>
+    </div>
     <input type="range" id="camSlider" min="0" max="1" step="1" value="0">
     <div class="row"><span id="camTime">…</span>
       <span class="camctls">
-        <button class="camctl" id="camLiveBtn" aria-label="Jump to live">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 5l10 7-10 7z"/><rect x="16" y="5" width="3" height="14" rx="1.5"/></svg></button>
         <button class="camctl" id="camPlayBtn" aria-label="Play timelapse"></button>
         <select id="camSpeedSelect">
           <option value="60" selected>60x</option>
@@ -472,7 +485,11 @@ function demoStatus() {
     progress: null, jobName: null,
     printActions: { pause: false, resume: false, stop: false } };
 }
-if (DEMO) $("title").textContent += DEMO_PRINT ? " · demo (printing)" : " · demo (idle)";
+if (DEMO) {
+  const mode = DEMO_PRINT ? "printing" : "idle";
+  document.title += ` · demo (${mode})`;
+  $("log").textContent = `demo (${mode}) — no printer connected`;
+}
 
 async function refresh() {
   try {
@@ -687,11 +704,16 @@ function setCamBounds(min, max) {
   $("camSlider").max = max;
 }
 
-// The Live button doubles as the indicator of whether the view is following the
-// tail — it is the only control whose state isn't otherwise visible.
+// The LIVE badge doubles as the indicator of whether the view is following the
+// tail: lit with a red dot while it is, dimmed when the view has been scrubbed
+// back into recorded footage.
 function setFollowing(on) {
   camFollowing = on;
-  $("camLiveBtn").classList.toggle("on", on);
+  const btn = $("camLiveBtn");
+  btn.classList.toggle("on", on);
+  // The badge is both the live indicator and the way back to it, so the label
+  // has to say which of the two applies right now.
+  btn.setAttribute("aria-label", on ? "Live view" : "Jump to live view");
 }
 
 function setCamPlayIcon(playing) {

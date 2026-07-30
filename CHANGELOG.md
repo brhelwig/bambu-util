@@ -47,8 +47,13 @@ follow [Semantic Versioning](https://semver.org/).
   retention indefinitely.
 - Recent jobs show each print's start time, so two runs of the same file can
   be told apart.
-- **Live** and **Play** are icon buttons; Live also lights up while the view
-  is following the tail.
+- **Play** is an icon button, and live is a `● LIVE` badge on the camera image
+  itself — lit red while the view follows the tail, dimmed once it has been
+  scrubbed back, and tapping it returns to live. It used to be a skip-to-end
+  glyph sitting between play and the speed selector, which read as "next track"
+  and grouped a mode with the controls that only ever act on recorded footage.
+- The page no longer carries a "P1S bed control" heading; the name lives in the
+  document title, matching the web manifest.
 - **Eject** is now called **Unload**, matching what it does.
 - Time remaining reads as hours and minutes (`2h 15m`) once over an hour.
 - AMS desiccant dryness is shown as Bambu Studio's letter grade (A driest)
