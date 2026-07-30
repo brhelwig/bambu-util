@@ -681,6 +681,29 @@ func TestHistoryRangeAndFrame(t *testing.T) {
 	}
 }
 
+func TestHistoryFrameReportsWhenTheFrameWasTaken(t *testing.T) {
+	ts, store := seekTestServer("IDLE", 200)
+	defer ts.Close()
+	store.InsertFrame(100, []byte{0xFF, 0xD8, 0xFF, 0xD9})
+	store.InsertFrame(5000, []byte{0xFF, 0xD8, 0x01, 0xFF, 0xD9})
+
+	// ts=200 lands in the gap; the frame served is the one from 5000, and the
+	// caption has to say 5000, not 200.
+	resp, err := ts.Client().Get(ts.URL + "/camera/history/frame?ts=200")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.Header.Get(FrameTimestampHeader); got != "5000" {
+		t.Fatalf("%s = %q, want \"5000\" (the frame actually served)", FrameTimestampHeader, got)
+	}
+
+	// An exact hit reports itself.
+	resp2, _ := ts.Client().Get(ts.URL + "/camera/history/frame?ts=100")
+	if got := resp2.Header.Get(FrameTimestampHeader); got != "100" {
+		t.Fatalf("%s = %q, want \"100\"", FrameTimestampHeader, got)
+	}
+}
+
 func TestHistoryFrameNotFound(t *testing.T) {
 	ts, _, _ := buildTestServer(true, "IDLE")
 	defer ts.Close()

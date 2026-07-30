@@ -62,6 +62,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The scrub bar's caption reports when the displayed frame was actually taken,
+  not the time it was dragged to. The frame endpoint returns the first frame at
+  or after the requested time, so with retention leaving gaps between kept
+  prints the two could be hours apart and the picture was misdated.
 - A print no longer appears in the recent-jobs list more than once. Pausing
   closed the job and resuming opened a second one, and a restart mid-print
   opened another while leaving the first open forever; a paused print now

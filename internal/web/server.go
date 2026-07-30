@@ -462,13 +462,17 @@ func (s *Server) seekStart() int64 {
 	return s.now().Add(-s.seekWindow).Unix()
 }
 
+// FrameTimestampHeader carries the unix second a served frame was actually
+// captured, which is the first at or after the one requested.
+const FrameTimestampHeader = "X-Frame-Timestamp"
+
 func (s *Server) historyFrame(w http.ResponseWriter, r *http.Request) {
 	ts, err := strconv.ParseInt(r.URL.Query().Get("ts"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid ts", http.StatusBadRequest)
 		return
 	}
-	jpeg, _, err := s.store.FrameAtOrAfter(ts)
+	jpeg, gotTs, err := s.store.FrameAtOrAfter(ts)
 	if errors.Is(err, history.ErrNoFrame) {
 		http.Error(w, "no frame at or after ts", http.StatusNotFound)
 		return
@@ -477,6 +481,10 @@ func (s *Server) historyFrame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "frame query failed", http.StatusInternalServerError)
 		return
 	}
+	// Retention leaves real gaps between kept prints, so the frame returned can
+	// be much later than the one asked for. Report when it was actually taken —
+	// captioning a frame with the time it was requested at reads as a lie.
+	w.Header().Set(FrameTimestampHeader, strconv.FormatInt(gotTs, 10))
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Write(jpeg)
 }
