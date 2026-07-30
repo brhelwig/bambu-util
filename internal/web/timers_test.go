@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/deadlines"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/settings"
@@ -172,10 +173,10 @@ func TestTheStatusCountdownSurvivesARestart(t *testing.T) {
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
 
-	first := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil, testPrinter())
+	first := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil, testPrinter(), activity.New(50))
 	first.autoOff.setBed(60)
 
-	second := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil, testPrinter())
+	second := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil, testPrinter(), activity.New(50))
 	bed, _ := second.autoOff.remaining()
 	if bed <= 0 {
 		t.Errorf("bed countdown after a restart = %d, want the remaining time", bed)

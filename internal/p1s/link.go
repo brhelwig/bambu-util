@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"github.com/brhelwig/bambu-util/internal/activity"
 )
 
 // Config is what it takes to reach one printer.
@@ -35,12 +37,15 @@ var ErrUnconfigured = errors.New("p1s: no printer configured")
 type Link struct {
 	mu           sync.Mutex
 	cache        *StateCache
+	log          *activity.Log
 	conf         Config
 	client       *Client
 	cancelStream context.CancelFunc
 }
 
-func NewLink(cache *StateCache) *Link { return &Link{cache: cache} }
+func NewLink(cache *StateCache, log *activity.Log) *Link {
+	return &Link{cache: cache, log: log}
+}
 
 // Config returns the printer currently configured.
 func (l *Link) Config() Config {
@@ -58,7 +63,7 @@ func (l *Link) Configure(conf Config) {
 	l.conf = conf
 	l.client = nil
 	if conf.Complete() {
-		l.client = NewClient(conf.IP, conf.Serial, conf.AccessCode, l.cache)
+		l.client = NewClient(conf.IP, conf.Serial, conf.AccessCode, l.cache, l.log)
 	}
 	client := l.client
 	l.mu.Unlock()

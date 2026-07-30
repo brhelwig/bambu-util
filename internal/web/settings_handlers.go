@@ -123,3 +123,14 @@ func (s *Server) setPrinter(w http.ResponseWriter, r *http.Request) {
 	s.printer.Configure(conf)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// events reports what has recently gone to the printer, come back from it, or
+// been sent to a phone — newest first, because that is what is being looked
+// for.
+func (s *Server) getEvents(w http.ResponseWriter, _ *http.Request) {
+	entries := s.activity.Entries()
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	writeJSON(w, map[string]any{"events": entries})
+}

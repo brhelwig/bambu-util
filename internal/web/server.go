@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
@@ -47,6 +48,7 @@ type Server struct {
 	settings      current
 	writeSettings settingsWriter
 	printer       printerConfigurer
+	activity      *activity.Log
 	now           func() time.Time
 }
 
@@ -54,9 +56,9 @@ type Server struct {
 // moment they are consulted, so an edit takes effect without a restart. timers
 // persists the countdowns across a restart; pass nil to keep them in memory
 // only.
-func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, cur current, write settingsWriter, printer printerConfigurer) *Server {
+func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, cur current, write settingsWriter, printer printerConfigurer, events *activity.Log) *Server {
 	return &Server{
-		cache: cache, cmd: cmd, store: store, notify: notify, printer: printer,
+		cache: cache, cmd: cmd, store: store, notify: notify, printer: printer, activity: events,
 		events:  newPrintEvents(timers),
 		autoOff: newAutoOff(timers, cur), lamp: newLampAuto(timers, cur),
 		settings: cur, writeSettings: write, now: time.Now,
@@ -206,6 +208,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /camera/history/range", s.historyRange)
 	mux.HandleFunc("GET /camera/history/frame", s.historyFrame)
 	mux.HandleFunc("GET /camera/history/jobs", s.historyJobs)
+	mux.HandleFunc("GET /api/events", s.getEvents)
 	mux.HandleFunc("GET /api/printer", s.getPrinter)
 	mux.HandleFunc("POST /api/printer", s.setPrinter)
 	mux.HandleFunc("GET /api/settings", s.getSettings)

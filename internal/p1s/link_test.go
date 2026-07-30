@@ -3,12 +3,13 @@ package p1s
 import (
 	"context"
 	"errors"
+	"github.com/brhelwig/bambu-util/internal/activity"
 	"testing"
 	"time"
 )
 
 func TestAnUnconfiguredLinkRefusesToStream(t *testing.T) {
-	l := NewLink(NewStateCache())
+	l := NewLink(NewStateCache(), activity.New(50))
 	err := l.Stream(context.Background(), func([]byte) {})
 	if !errors.Is(err, ErrUnconfigured) {
 		t.Errorf("Stream = %v, want ErrUnconfigured so the camera loop keeps asking", err)
@@ -19,7 +20,7 @@ func TestAnUnconfiguredLinkRefusesToStream(t *testing.T) {
 // refuse them first, but a printer removed between the guard and the send would
 // otherwise reach here.
 func TestAnUnconfiguredLinkSwallowsCommands(t *testing.T) {
-	l := NewLink(NewStateCache())
+	l := NewLink(NewStateCache(), activity.New(50))
 	l.LowerBed()
 	l.Home()
 	l.Extrude()
@@ -43,7 +44,7 @@ func TestConfiguringADifferentPrinterForgetsTheOldOne(t *testing.T) {
 	cache.Merge(map[string]any{"gcode_state": "RUNNING", "bed_temper": 60.0})
 	cache.SetConnected(true)
 
-	l := NewLink(cache)
+	l := NewLink(cache, activity.New(50))
 	l.Configure(Config{IP: "127.0.0.1", Serial: "A", AccessCode: "x"})
 	defer l.Stop()
 
@@ -62,7 +63,7 @@ func TestConfiguringADifferentPrinterForgetsTheOldOne(t *testing.T) {
 // A camera attempt against the old printer has to be dropped, or the recording
 // keeps following a printer nobody is pointed at any more.
 func TestConfiguringInterruptsTheCameraAttempt(t *testing.T) {
-	l := NewLink(NewStateCache())
+	l := NewLink(NewStateCache(), activity.New(50))
 	// An address nothing answers on, so the dial blocks until it is cancelled.
 	l.Configure(Config{IP: "192.0.2.1", Serial: "A", AccessCode: "x"})
 	defer l.Stop()

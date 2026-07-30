@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/settings"
 )
@@ -21,7 +22,7 @@ func settingsTestServer(t *testing.T) (*httptest.Server, *settings.Store) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, testPrinter())
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, testPrinter(), activity.New(50))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, config
@@ -133,7 +134,7 @@ func TestBadSettingWritesAreRefused(t *testing.T) {
 func TestAServerWithNoWritableSettingsSaysSo(t *testing.T) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter())
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -150,7 +151,7 @@ func printerTestServer(t *testing.T) (*httptest.Server, *settings.Store, *fakePr
 	config := openTestSettings(t)
 	printer := &fakePrinter{}
 	cache := p1s.NewStateCache()
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, printer)
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, printer, activity.New(50))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, config, printer

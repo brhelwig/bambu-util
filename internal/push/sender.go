@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/brhelwig/bambu-util/internal/activity"
 )
 
 // deliveryTTL is how long a push service holds a message for a phone that is
@@ -55,8 +57,13 @@ type Sender struct {
 	store  *Store
 	key    *Key
 	client *http.Client
+	log    *activity.Log
 	now    func() time.Time
 }
+
+// Watch records what is sent out, so a notification can be seen leaving
+// alongside the printer traffic that prompted it.
+func (s *Sender) Watch(log *activity.Log) { s.log = log }
 
 // NewSender loads the server identity, creating one on first use.
 func NewSender(store *Store) (*Sender, error) {
@@ -96,10 +103,12 @@ func (s *Sender) Send(ctx context.Context, n Notification) (delivered int, err e
 	if err != nil {
 		return 0, err
 	}
+	wanted := 0
 	for _, sub := range subs {
 		if n.Kind != "" && !sub.Wants(n.Kind) {
 			continue
 		}
+		wanted++
 		gone, err := s.deliver(ctx, sub, payload)
 		switch {
 		case gone:
@@ -111,6 +120,13 @@ func (s *Sender) Send(ctx context.Context, n Notification) (delivered int, err e
 		default:
 			delivered++
 		}
+	}
+	entry := s.log.Record(activity.Notification,
+		fmt.Sprintf("%s → %d of %d devices", n.Title, delivered, wanted), n.Body)
+	if delivered < wanted {
+		s.log.Acknowledge(entry, time.Time{}, fmt.Errorf("%d not delivered", wanted-delivered))
+	} else {
+		s.log.Acknowledge(entry, s.now(), nil)
 	}
 	return delivered, nil
 }

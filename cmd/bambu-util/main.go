@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/deadlines"
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
@@ -42,7 +43,9 @@ func main() {
 	}
 
 	cache := p1s.NewStateCache()
-	link := p1s.NewLink(cache)
+	// Enough to see the last few minutes of traffic, which is what this is for.
+	events := activity.New(400)
+	link := p1s.NewLink(cache, events)
 	defer link.Stop()
 
 	db, err := sqlitedb.Open(filepath.Join(dataDir, "bambu-util.db"))
@@ -66,6 +69,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load notification identity: %v", err)
 	}
+	notifier.Watch(events)
 
 	timers, err := deadlines.New(db)
 	if err != nil {
@@ -83,7 +87,7 @@ func main() {
 
 	// The scrub bar reaches back exactly as far as frames are kept, so raising
 	// retention doesn't record footage that can't be scrubbed to.
-	srv := web.NewServer(cache, link, store, notifier, timers, config.Values, config, link)
+	srv := web.NewServer(cache, link, store, notifier, timers, config.Values, config, link, events)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Start(ctx)
