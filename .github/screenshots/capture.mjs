@@ -157,14 +157,22 @@ async function main() {
     window.PushManager = class {};
     // The subscription has to carry the server's own key, or the page correctly
     // treats it as bound to an identity that is gone and resets itself to Off.
+    const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const standIn = async () => {
       const { key } = await (await fetch("/api/push/key")).json();
       const raw = atob(key.replace(/-/g, "+").replace(/_/g, "/"));
+      // Real keys, because the server stores the subscription before the
+      // settings it belongs to can be shown, and it refuses a malformed one.
+      const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+      const p256dh = b64(await crypto.subtle.exportKey("raw", pair.publicKey));
+      const auth = b64(crypto.getRandomValues(new Uint8Array(16)));
+      const endpoint = "https://push.example.net/stand-in";
       return {
-        endpoint: "https://push.example.net/stand-in",
+        endpoint,
         options: { applicationServerKey: Uint8Array.from(raw, c => c.charCodeAt(0)).buffer },
         unsubscribe: async () => true,
-        toJSON: () => ({ endpoint: "https://push.example.net/stand-in", keys: {} }),
+        toJSON: () => ({ endpoint, keys: { p256dh, auth } }),
       };
     };
     Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {
