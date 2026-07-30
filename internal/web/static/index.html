@@ -51,6 +51,8 @@
   .iconbtn.danger { background: #6e2222; }
   .iconbtn.danger.armed { background: #b02a2a; }
   .ams-editor { background: #141922; border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
+  .notifybtns { display: flex; gap: 10px; }
+  .notifybtns button { flex: 1; }
   .ams-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem; }
   .ams-edit-row label { color: #9aa0a6; }
   .ams-editor input[type=text], .ams-editor input[type=number] { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.85rem; }
@@ -153,6 +155,15 @@
 <div class="card" id="amsCard" style="display:none">
   <h2>Filament (AMS)</h2>
   <div id="amsSlots"></div>
+</div>
+<div class="card" id="notifyCard">
+  <h2>Notifications</h2>
+  <div class="row"><span id="notifyState">…</span></div>
+  <div class="notifybtns">
+    <button id="notifyBtn" style="display:none">Turn on</button>
+    <button id="notifyTestBtn" style="display:none">Send a test</button>
+  </div>
+  <div id="notifyHint" style="display:none; color:#9aa0a6; font-size:0.8rem; margin-top:8px"></div>
 </div>
 <div id="log"></div>
 <script>
@@ -871,6 +882,145 @@ if (!DEMO) {
   setInterval(refreshCamRange, 1000); // ~1fps, matches the camera's capture rate
   setInterval(refreshCamJobs, 30000);
 }
+
+// --- Notifications ----------------------------------------------------------
+// Push needs a service worker on a secure origin. On iPhone it additionally
+// needs the page installed to the Home Screen — nothing here can do that for
+// the user, so an unsupported browser is told why rather than left guessing.
+const PUSH_READY = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const INSTALLED = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
+
+let swReg = null;
+let pushSub = null;
+
+function b64ToBytes(s) {
+  const raw = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+function bytesToB64(buf) {
+  const raw = String.fromCharCode(...new Uint8Array(buf));
+  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function renderNotify() {
+  const on = Boolean(pushSub);
+  const blocked = Notification.permission === "denied";
+  $("notifyState").textContent = on ? "On for this device" : blocked ? "Blocked in browser settings" : "Off";
+  $("notifyBtn").style.display = blocked ? "none" : "";
+  $("notifyBtn").textContent = on ? "Turn off" : "Turn on";
+  $("notifyBtn").disabled = false;
+  $("notifyTestBtn").style.display = on ? "" : "none";
+  $("notifyHint").style.display = blocked ? "" : "none";
+  if (blocked) $("notifyHint").textContent = "Allow notifications for this site in your browser settings, then reload.";
+}
+
+function unsupportedNotify() {
+  $("notifyState").textContent = "Not available here";
+  $("notifyHint").style.display = "";
+  $("notifyHint").textContent = INSTALLED
+    ? "This browser cannot receive notifications."
+    : "On iPhone, add this page to the Home Screen (Share → Add to Home Screen) and open it from there.";
+}
+
+async function serverKey() {
+  const r = await fetch("/api/push/key");
+  if (!r.ok) throw new Error("no key");
+  return (await r.json()).key;
+}
+
+async function sendSubscription(sub) {
+  await fetch("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(sub),
+  });
+}
+
+async function initNotifications() {
+  if (DEMO) {
+    $("notifyState").textContent = "demo: no notifications";
+    return;
+  }
+  if (!PUSH_READY) {
+    unsupportedNotify();
+    return;
+  }
+  try {
+    swReg = await navigator.serviceWorker.register("/sw.js");
+    pushSub = await swReg.pushManager.getSubscription();
+    if (pushSub) {
+      // A subscription is bound to the server's identity, and the server may
+      // have forgotten it (or minted a new identity) since. Re-send it every
+      // load, and start over if it is bound to an identity that is gone —
+      // otherwise notifications stay silently dead with the button reading On.
+      const key = await serverKey();
+      if (bytesToB64(pushSub.options.applicationServerKey) === key) {
+        await sendSubscription(pushSub);
+      } else {
+        await pushSub.unsubscribe();
+        pushSub = null;
+      }
+    }
+  } catch {
+    $("notifyState").textContent = "Could not start notifications";
+    return;
+  }
+  renderNotify();
+}
+
+async function enableNotifications() {
+  // Must be the first thing after the tap: iOS only shows the prompt when the
+  // request comes straight out of a user action.
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    renderNotify();
+    return;
+  }
+  pushSub = await swReg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: b64ToBytes(await serverKey()),
+  });
+  await sendSubscription(pushSub);
+}
+
+async function disableNotifications() {
+  const endpoint = pushSub.endpoint;
+  await pushSub.unsubscribe();
+  pushSub = null;
+  await fetch("/api/push/unsubscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+$("notifyBtn").addEventListener("click", async () => {
+  $("notifyBtn").disabled = true;
+  try {
+    if (pushSub) await disableNotifications();
+    else await enableNotifications();
+  } catch (e) {
+    $("log").textContent = `notifications: ${e.message || e}`;
+  }
+  renderNotify();
+});
+
+$("notifyTestBtn").addEventListener("click", async () => {
+  $("notifyTestBtn").disabled = true;
+  try {
+    const r = await fetch("/api/push/test", { method: "POST" });
+    const { delivered } = await r.json();
+    $("log").textContent = delivered
+      ? `test sent to ${delivered} device${delivered === 1 ? "" : "s"}`
+      : "test reached no device";
+  } catch (e) {
+    $("log").textContent = `test failed: ${e.message || e}`;
+  }
+  $("notifyTestBtn").disabled = false;
+});
+
+initNotifications();
 </script>
 </body>
 </html>

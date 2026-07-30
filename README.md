@@ -49,6 +49,12 @@ Features:
   overridden — automation only ever acts on the active/idle transitions
   themselves
 - iOS "Add to Home Screen" gives an app-like full-screen page
+- Notifications to the phone, so the page does not have to be open. Turn them
+  on from the Notifications card; a test button confirms the whole path
+  before waiting on the printer. Requires the app to be served over HTTPS.
+  On iPhone and iPad it additionally requires iOS 16.4 or later **and the app
+  added to the Home Screen** — a Safari tab cannot receive notifications, and
+  the page says so rather than failing quietly
 
 ### Configuration
 
@@ -60,7 +66,7 @@ Environment variables only — no config files:
 | `PRINTER_SERIAL` | yes | Printer serial (Settings → Device) |
 | `PRINTER_ACCESS_CODE` | yes | LAN access code (Settings → WLAN) |
 | `LISTEN_ADDR` | no | Listen address, default `:8081` |
-| `DATA_DIR` | no | Directory for the recording database, default `./data`. Mount a volume here so the history buffer survives restarts. |
+| `DATA_DIR` | no | Directory for the recording and notification databases, default `./data`. Mount a volume here so the history buffer survives restarts — and so notification subscriptions do, since losing the server's identity silently unsubscribes every phone. |
 | `RECORDING_RETENTION` | no | How long to keep recorded frames, as a Go duration (`12h`, `48h`, ...), default `24h`. Also how far back the scrub bar reaches when no print is running |
 
 ### Run

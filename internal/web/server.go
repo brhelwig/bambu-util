@@ -14,6 +14,7 @@ import (
 
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
+	"github.com/brhelwig/bambu-util/internal/push"
 )
 
 //go:embed static
@@ -39,6 +40,7 @@ type Server struct {
 	cache      *p1s.StateCache
 	cmd        Commander
 	store      *history.Store
+	notify     *push.Sender
 	autoOff    *autoOff
 	lamp       *lampAuto
 	seekWindow time.Duration
@@ -49,9 +51,9 @@ type Server struct {
 // bar reaches while the printer is idle: pass the recording retention, so the bar
 // spans exactly the footage the rolling buffer still holds and none is recorded
 // that cannot be scrubbed to.
-func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, seekWindow time.Duration) *Server {
+func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, seekWindow time.Duration) *Server {
 	return &Server{
-		cache: cache, cmd: cmd, store: store,
+		cache: cache, cmd: cmd, store: store, notify: notify,
 		autoOff: newAutoOff(), lamp: newLampAuto(),
 		seekWindow: seekWindow, now: time.Now,
 	}
@@ -132,6 +134,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /camera/history/range", s.historyRange)
 	mux.HandleFunc("GET /camera/history/frame", s.historyFrame)
 	mux.HandleFunc("GET /camera/history/jobs", s.historyJobs)
+	mux.HandleFunc("GET /api/push/key", s.pushKey)
+	mux.HandleFunc("POST /api/push/subscribe", s.pushSubscribe)
+	mux.HandleFunc("POST /api/push/unsubscribe", s.pushUnsubscribe)
+	mux.HandleFunc("POST /api/push/test", s.pushTest)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})

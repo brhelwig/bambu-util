@@ -21,7 +21,7 @@ const LampInactiveOffAfter = 8 * time.Hour
 type lampAuto struct {
 	mu          sync.Mutex
 	now         func() time.Time
-	hasObserved bool      // false until the first poll — see poll's "first" handling
+	hasObserved bool // false until the first poll — see poll's "first" handling
 	wasActive   bool
 	offAt       time.Time // zero = no pending forced-off
 }
