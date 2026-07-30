@@ -146,6 +146,10 @@ async function main() {
     deviceScaleFactor: 2,
     colorScheme: "dark",
   });
+  // Headless Chromium refuses notifications by default, which would show the
+  // card reading "Blocked in browser settings" — an artefact of the harness,
+  // not anything a person would see on their own phone.
+  await context.grantPermissions(["notifications"], { origin: BASE });
 
   const shots = [];
   for (const state of states) {
