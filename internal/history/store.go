@@ -7,7 +7,7 @@ import (
 	"errors"
 	"math"
 
-	_ "modernc.org/sqlite"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -28,30 +28,41 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 // Store persists camera frames and job boundaries in a SQLite database.
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	owned bool
 }
 
-// Open opens (creating if needed) the SQLite database at path. Use
-// ":memory:" for a throwaway in-process database, e.g. in tests.
+// Open makes a store over a database of its own at path, which Close then
+// closes. The app shares one database across stores and calls New instead.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlitedb.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	// modernc.org/sqlite serializes writes at the connection level; capping
-	// the pool at one connection avoids "database is locked" errors under
-	// concurrent access and gives :memory: a single, consistent database
-	// instead of a fresh one per connection.
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	store, err := New(db)
+	if err != nil {
 		db.Close()
+		return nil, err
+	}
+	store.owned = true
+	return store, nil
+}
+
+// New returns a store over db, creating its tables if needed. The caller keeps
+// ownership of db.
+func New(db *sql.DB) (*Store, error) {
+	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
 }
 
-// Close closes the underlying database.
+// Close closes the database, unless it belongs to whoever passed it in —
+// closing a shared handle would take every other store down with it.
 func (s *Store) Close() error {
+	if !s.owned {
+		return nil
+	}
 	return s.db.Close()
 }
 

@@ -13,20 +13,20 @@ import (
 )
 
 // deliveryTTL is how long a push service holds a message for a phone that is
-// off or out of range. Four hours keeps overnight news — a print that finished
-// while you slept — without delivering something a day stale.
+// off. Long enough to survive a night's sleep, short enough that nothing
+// arrives a day stale.
 const deliveryTTL = 4 * time.Hour
 
-// Notification is what shows up on the phone. Tag groups messages: a second
-// notification with the same tag replaces the first rather than stacking, so
-// repeated reminders about the same condition stay one line.
+// Notification is what shows up on the phone. A second one carrying the same
+// Tag replaces the first rather than stacking, so repeated reminders about one
+// condition stay a single line.
 type Notification struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Tag   string `json:"tag,omitempty"`
 }
 
-// Sender delivers notifications to every stored subscription.
+// Sender delivers notifications to every subscribed browser.
 type Sender struct {
 	store  *Store
 	key    *Key
@@ -34,7 +34,7 @@ type Sender struct {
 	now    func() time.Time
 }
 
-// NewSender loads (or creates) the server identity and returns a sender.
+// NewSender loads the server identity, creating one on first use.
 func NewSender(store *Store) (*Sender, error) {
 	key, err := store.Key()
 	if err != nil {
@@ -60,10 +60,9 @@ func (s *Sender) Unsubscribe(endpoint string) error { return s.store.Delete(endp
 // Count reports how many browsers are subscribed.
 func (s *Sender) Count() (int, error) { return s.store.Count() }
 
-// Send delivers one notification to every subscription and reports how many
-// were reached. Subscriptions the push service says are gone are deleted;
-// everything else is left alone, since a timeout or a server error is
-// temporary and the phone behind it is still real.
+// Send delivers to every subscription and reports how many were reached. Only
+// a subscription the push service calls gone is forgotten: a timeout or a
+// server error is temporary, and the phone behind it is still real.
 func (s *Sender) Send(ctx context.Context, n Notification) (delivered int, err error) {
 	subs, err := s.store.All()
 	if err != nil {
@@ -89,9 +88,6 @@ func (s *Sender) Send(ctx context.Context, n Notification) (delivered int, err e
 	return delivered, nil
 }
 
-// deliver posts one message. gone reports that the push service says this
-// subscription no longer exists, which is the only case where forgetting it is
-// the right response.
 func (s *Sender) deliver(ctx context.Context, sub Subscription, payload []byte) (gone bool, err error) {
 	body, err := encryptRandom(sub.P256dh, sub.Auth, payload)
 	if err != nil {
@@ -115,8 +111,7 @@ func (s *Sender) deliver(ctx context.Context, sub Subscription, payload []byte) 
 		return false, fmt.Errorf("post to %s: %w", sub.Endpoint, err)
 	}
 	defer resp.Body.Close()
-	// Read enough of the response to report why a rejection happened; push
-	// services explain themselves in the body.
+	// Push services explain a rejection in the body.
 	detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {

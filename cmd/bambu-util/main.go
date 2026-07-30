@@ -16,6 +16,7 @@ import (
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 	"github.com/brhelwig/bambu-util/internal/web"
 )
 
@@ -67,21 +68,25 @@ func main() {
 	client.Start()
 	defer client.Stop()
 
-	store, err := history.Open(filepath.Join(dataDir, "bambu-util.db"))
+	db, err := sqlitedb.Open(filepath.Join(dataDir, "bambu-util.db"))
+	if err != nil {
+		log.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	store, err := history.New(db)
 	if err != nil {
 		log.Fatalf("open history store: %v", err)
 	}
-	defer store.Close()
 
 	hub := web.NewHub(func(ctx context.Context, yield func([]byte)) error {
 		return p1s.StreamFrames(ctx, net.JoinHostPort(ip, "6000"), "bblp", accessCode, yield)
 	}, store)
 
-	notifyStore, err := push.Open(filepath.Join(dataDir, "push.db"))
+	notifyStore, err := push.New(db)
 	if err != nil {
 		log.Fatalf("open notification store: %v", err)
 	}
-	defer notifyStore.Close()
 	notifier, err := push.NewSender(notifyStore)
 	if err != nil {
 		log.Fatalf("load notification identity: %v", err)

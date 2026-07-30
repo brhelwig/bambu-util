@@ -9,7 +9,7 @@ import (
 	"github.com/brhelwig/bambu-util/internal/push"
 )
 
-// subscribeRequest is the shape a browser's PushSubscription serializes to.
+// subscribeRequest is what a browser's PushSubscription serializes to.
 type subscribeRequest struct {
 	Endpoint string `json:"endpoint"`
 	Keys     struct {
@@ -18,7 +18,6 @@ type subscribeRequest struct {
 	} `json:"keys"`
 }
 
-// pushKey hands the browser the identity it must subscribe against.
 func (s *Server) pushKey(w http.ResponseWriter, _ *http.Request) {
 	count, err := s.notify.Count()
 	if err != nil {
@@ -46,8 +45,6 @@ func (s *Server) pushSubscribe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// The browser sends its keys base64url-encoded without padding, the same form
-// the Push API hands out.
 func parseSubscription(req subscribeRequest) (push.Subscription, error) {
 	p256dh, err := base64.RawURLEncoding.DecodeString(req.Keys.P256dh)
 	if err != nil {
@@ -75,8 +72,8 @@ func (s *Server) pushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pushTest proves the whole path — this server, the push service, the phone —
-// without waiting for the printer to do something.
+// pushTest proves the path — server, push service, phone — without waiting on
+// the printer.
 func (s *Server) pushTest(w http.ResponseWriter, r *http.Request) {
 	delivered, err := s.notify.Send(r.Context(), push.Notification{
 		Title: "P1S Bridge",

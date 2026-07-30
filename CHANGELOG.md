@@ -10,9 +10,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Notifications to the phone, so the page does not have to be open. Turn
   them on from the Notifications card; a test button proves the path before
-  anything is riding on it. Subscriptions live in their own database under
-  `DATA_DIR`, alongside the server identity browsers bind to — losing that
-  directory silently unsubscribes every phone, so it belongs on a volume.
+  anything is riding on it. Subscriptions are stored under `DATA_DIR`
+  alongside the server identity browsers bind to — losing that directory
+  silently unsubscribes every phone, so it belongs on a volume.
   Requires HTTPS, and on iPhone and iPad iOS 16.4 or later with the app
   added to the Home Screen. Only the test message exists so far; printer
   events follow.
@@ -33,6 +33,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Notification subscriptions moved into the existing database, having briefly
+  had a `push.db` of their own. An installation tracking `main` that already
+  turned notifications on will mint a fresh identity on the next start, and
+  those phones stop receiving until notifications are turned on again — the
+  page notices and resets itself to Off. Delete the orphaned
+  `DATA_DIR/push.db`; nothing reads it any more. No released version is
+  affected.
 - The camera connection is now held continuously so it can record, instead
   of only while a viewer is on the page. Bambu Studio's own camera view will
   not work while bambu-util is running.

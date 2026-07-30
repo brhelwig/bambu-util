@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	_ "modernc.org/sqlite"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -32,34 +32,44 @@ type Subscription struct {
 }
 
 // Store holds subscriptions and this server's identity.
-//
-// It keeps its own database file rather than sharing the camera history's: that
-// one takes a frame every second and is pruned constantly, and its writes are
-// serialized on a single connection. Subscriptions are written a few times a
-// year and must not queue behind a prune.
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	owned bool
 }
 
-// Open opens (creating if needed) the database at path. Use ":memory:" for a
-// throwaway in-process database, e.g. in tests.
+// Open makes a store over a database of its own at path, which Close then
+// closes. The app shares one database across stores and calls New instead.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlitedb.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	// Same reasoning as the history store: this driver serializes writes per
-	// connection, and a single connection also gives ":memory:" one consistent
-	// database instead of a fresh one per connection.
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	store, err := New(db)
+	if err != nil {
 		db.Close()
+		return nil, err
+	}
+	store.owned = true
+	return store, nil
+}
+
+// New returns a store over db, creating its tables if needed. The caller keeps
+// ownership of db.
+func New(db *sql.DB) (*Store, error) {
+	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+// Close closes the database, unless it belongs to whoever passed it in —
+// closing a shared handle would take every other store down with it.
+func (s *Store) Close() error {
+	if !s.owned {
+		return nil
+	}
+	return s.db.Close()
+}
 
 // Key returns this server's identity, generating and storing one the first time
 // it is asked. The key is persistent because browsers bind their subscription
