@@ -33,7 +33,7 @@ Features:
   is following the tail, and tapping it returns there
 - Recent print jobs are listed under the camera, each with its start time so
   two runs of the same file can be told apart. Pick one to play its
-  footage as a timelapse at 60x, 300x, or 600x. The five most recently
+  footage as a timelapse at 30x, 60x, 300x, or 600x. The five most recently
   finished prints keep their footage regardless of the retention window,
   thinned to one frame every 10 seconds once it ages out — enough for a
   timelapse without holding whole prints at the full recording rate

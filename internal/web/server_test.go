@@ -512,8 +512,8 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	if _, ok := s["chamberTemp"]; ok {
 		t.Errorf("chamberTemp is still reported: %v", s["chamberTemp"])
 	}
-	if s["wifiSignal"] != "-45dBm" {
-		t.Errorf("wifiSignal = %v", s["wifiSignal"])
+	if _, ok := s["wifiSignal"]; ok {
+		t.Errorf("wifiSignal is still reported: %v", s["wifiSignal"])
 	}
 	fans, ok := s["fans"].(map[string]any)
 	if !ok || fans["cooling"] != float64(15) || fans["aux"] != float64(0) || fans["chamber"] != float64(8) {
