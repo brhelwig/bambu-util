@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#111418">
 <link rel="manifest" href="/manifest.webmanifest">
-<title>P1S bed control</title>
+<title>P1S Bridge</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -61,12 +61,24 @@
   .camctls { display: flex; align-items: center; gap: 8px; }
   .camctl { padding: 8px 12px; display: inline-flex; }
   .camctl svg { width: 18px; height: 18px; display: block; }
-  .camctl.on { color: #c98a2b; }
   .cam-job-time { display: block; color: #9aa0a6; font-size: 0.75rem; }
+  /* Live is a mode, not a transport control, so it sits on the image the way
+     every camera UI marks a live feed — not beside play and speed, which only
+     ever act on recorded footage. */
+  .cam-frame { position: relative; }
+  .cam-live {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 10px 5px 8px; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    background: rgba(0, 0, 0, 0.55); color: #9aa0a6;
+  }
+  .cam-live .dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa0a6; }
+  .cam-live.on { color: #fff; }
+  .cam-live.on .dot { background: #ff3b30; }
 </style>
 </head>
 <body>
-<h1 id="title">P1S bed control</h1>
 <div class="card" id="jobCard">
   <h2>Job status</h2>
   <div class="row" id="jobEmpty" style="color:#9aa0a6">No active print</div>
@@ -107,12 +119,13 @@
 <div class="card" id="camCard">
   <div id="camEmpty" style="color:#9aa0a6">No recordings yet</div>
   <div id="camControls" style="display:none">
-    <img id="camImg" alt="printer camera">
+    <div class="cam-frame">
+      <img id="camImg" alt="printer camera">
+      <button class="cam-live" id="camLiveBtn"><span class="dot"></span>LIVE</button>
+    </div>
     <input type="range" id="camSlider" min="0" max="1" step="1" value="0">
     <div class="row"><span id="camTime">…</span>
       <span class="camctls">
-        <button class="camctl" id="camLiveBtn" aria-label="Jump to live">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 5l10 7-10 7z"/><rect x="16" y="5" width="3" height="14" rx="1.5"/></svg></button>
         <button class="camctl" id="camPlayBtn" aria-label="Play timelapse"></button>
         <select id="camSpeedSelect">
           <option value="60" selected>60x</option>
@@ -472,7 +485,11 @@ function demoStatus() {
     progress: null, jobName: null,
     printActions: { pause: false, resume: false, stop: false } };
 }
-if (DEMO) $("title").textContent += DEMO_PRINT ? " · demo (printing)" : " · demo (idle)";
+if (DEMO) {
+  const mode = DEMO_PRINT ? "printing" : "idle";
+  document.title += ` · demo (${mode})`;
+  $("log").textContent = `demo (${mode}) — no printer connected`;
+}
 
 async function refresh() {
   try {
@@ -687,11 +704,16 @@ function setCamBounds(min, max) {
   $("camSlider").max = max;
 }
 
-// The Live button doubles as the indicator of whether the view is following the
-// tail — it is the only control whose state isn't otherwise visible.
+// The LIVE badge doubles as the indicator of whether the view is following the
+// tail: lit with a red dot while it is, dimmed when the view has been scrubbed
+// back into recorded footage.
 function setFollowing(on) {
   camFollowing = on;
-  $("camLiveBtn").classList.toggle("on", on);
+  const btn = $("camLiveBtn");
+  btn.classList.toggle("on", on);
+  // The badge is both the live indicator and the way back to it, so the label
+  // has to say which of the two applies right now.
+  btn.setAttribute("aria-label", on ? "Live view" : "Jump to live view");
 }
 
 function setCamPlayIcon(playing) {
@@ -699,20 +721,24 @@ function setCamPlayIcon(playing) {
   $("camPlayBtn").setAttribute("aria-label", playing ? "Pause timelapse" : "Play timelapse");
 }
 
+// stopCamPlayback only stops advancing. The job being watched — camBoundEnd and
+// camJobSpan — outlives it, because pausing is not leaving the job: clearing the
+// cap here let a resumed timelapse run past its job's end and on to the live
+// tail, with the thumb stuck at the end of the bar. Only Live leaves a job.
 function stopCamPlayback() {
   camPlaying = false;
-  camBoundEnd = null;
   setCamPlayIcon(false);
   if (camPlayTimer) { clearInterval(camPlayTimer); camPlayTimer = null; }
 }
 
 function startCamPlayback() {
+  const cap = camBoundEnd ?? (camRange && camRange.newest);
+  if (cap == null) return; // nothing to play towards yet
   setFollowing(false);
   camPlaying = true;
   setCamPlayIcon(true);
   const step = Number($("camSpeedSelect").value) * (CAM_TICK_MS / 1000);
   camPlayTimer = setInterval(() => {
-    const cap = camBoundEnd ?? camRange.newest;
     if (camPos + step >= cap) {
       seekTo(cap);
       stopCamPlayback();
@@ -725,6 +751,11 @@ function startCamPlayback() {
 $("camPlayBtn").addEventListener("click", () => {
   if (camPlaying) stopCamPlayback();
   else startCamPlayback();
+});
+// The speed is read when playback starts, so a change mid-timelapse only takes
+// effect by restarting the timer.
+$("camSpeedSelect").addEventListener("change", () => {
+  if (camPlaying) { stopCamPlayback(); startCamPlayback(); }
 });
 setCamPlayIcon(false);
 setFollowing(camFollowing);
@@ -739,6 +770,7 @@ $("camSlider").addEventListener("input", () => {
 $("camLiveBtn").addEventListener("click", () => {
   stopCamPlayback();
   camJobSpan = null;
+  camBoundEnd = null;
   setFollowing(true);
   if (camRange && camRange.newest != null) {
     setCamBounds(camRange.oldest, camRange.newest);
@@ -747,10 +779,14 @@ $("camLiveBtn").addEventListener("click", () => {
 });
 
 function playJob(job) {
+  // An in-progress job is capped by the live tail, so without a known range
+  // there is no end to play towards and no valid upper bound for the bar.
+  const end = job.end || (camRange && camRange.newest);
+  if (end == null) return;
   stopCamPlayback();
   setFollowing(false);
-  camBoundEnd = job.end || (camRange && camRange.newest);
-  camJobSpan = { min: job.start, max: camBoundEnd };
+  camBoundEnd = end;
+  camJobSpan = { min: job.start, max: end };
   setCamBounds(camJobSpan.min, camJobSpan.max);
   seekTo(job.start);
   startCamPlayback();

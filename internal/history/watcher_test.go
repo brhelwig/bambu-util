@@ -122,6 +122,47 @@ func TestJobWatcherClosesRowsStrandedByTheOldRestartBug(t *testing.T) {
 	}
 }
 
+func TestJobWatcherStartsAFreshRowWhenADifferentPrintIsRunning(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	first := NewJobWatcher(s)
+	first.now = func() time.Time { return time.Unix(1000, 0) }
+	first.Poll("RUNNING", "a.3mf")
+
+	// The service was down while a.3mf finished and b.3mf started, so the row it
+	// adopts belongs to a print that is no longer the one running.
+	restarted := NewJobWatcher(s)
+	restarted.now = func() time.Time { return time.Unix(5000, 0) }
+	restarted.Poll("RUNNING", "b.3mf")
+
+	jobs, _ := s.RecentJobs() // newest first
+	if len(jobs) != 2 {
+		t.Fatalf("want a row per print, got %+v", jobs)
+	}
+	if jobs[0].Name != "b.3mf" || jobs[0].End != nil {
+		t.Fatalf("newest row should be b.3mf, still running: %+v", jobs[0])
+	}
+	if jobs[1].Name != "a.3mf" || jobs[1].End == nil {
+		t.Fatalf("a.3mf should have been closed, not left to swallow b's footage: %+v", jobs[1])
+	}
+}
+
+func TestJobWatcherKeepsTheOpenRowWhenTheNameIsMissing(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	w := NewJobWatcher(s)
+	w.Poll("RUNNING", "a.3mf")
+
+	// A report that carries no job name says nothing about which print is
+	// running, so it must not split the row.
+	w.Poll("RUNNING", "")
+
+	jobs, _ := s.RecentJobs()
+	if len(jobs) != 1 || jobs[0].End != nil {
+		t.Fatalf("a nameless report split the print: %+v", jobs)
+	}
+}
+
 func TestJobWatcherIgnoresUnknownState(t *testing.T) {
 	s, _ := Open(":memory:")
 	defer s.Close()

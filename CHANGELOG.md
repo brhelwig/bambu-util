@@ -32,19 +32,29 @@ follow [Semantic Versioning](https://semver.org/).
   toggle — every view now sources frames from the recording buffer, so
   there's no separate "live" connection to toggle.
 - The scrub bar is bounded rather than spanning the whole stored buffer: it
-  reaches back 24h while the printer is idle, and starts 5 minutes before the
-  print began while one is running, so a job is one drag of the bar. Older
-  footage is still reachable by picking a job from the list.
+  reaches back one `RECORDING_RETENTION` window (24h by default) while the
+  printer is idle, and starts 5 minutes before the print began while one is
+  running, so a job is one drag of the bar. Older footage — the kept prints'
+  thinned timelapses — is still reachable by picking a job from the list.
 - Timelapse speeds are 60x, 300x, and 600x, and play back at 4 frames per
   second instead of 1 — the old 1x-20x speeds were slower than the recording
   rate they were replaying.
 - The five most recently finished prints keep their footage regardless of
   `RECORDING_RETENTION`, thinned to one frame every 10 seconds once past the
-  cutoff. Whole prints at the full recording rate would add gigabytes.
+  cutoff. Whole prints at the full recording rate would add gigabytes. The
+  in-progress print is protected too, so a print longer than the retention
+  window still yields a whole timelapse — but only back 48h, so a job row left
+  open by a printer that vanished mid-print cannot exempt footage from
+  retention indefinitely.
 - Recent jobs show each print's start time, so two runs of the same file can
   be told apart.
-- **Live** and **Play** are icon buttons; Live also lights up while the view
-  is following the tail.
+- **Play** is an icon button, and live is a `● LIVE` badge on the camera image
+  itself — lit red while the view follows the tail, dimmed once it has been
+  scrubbed back, and tapping it returns to live. It used to be a skip-to-end
+  glyph sitting between play and the speed selector, which read as "next track"
+  and grouped a mode with the controls that only ever act on recorded footage.
+- The page no longer carries a "P1S bed control" heading; the name lives in the
+  document title, matching the web manifest.
 - **Eject** is now called **Unload**, matching what it does.
 - Time remaining reads as hours and minutes (`2h 15m`) once over an hour.
 - AMS desiccant dryness is shown as Bambu Studio's letter grade (A driest)
@@ -58,6 +68,9 @@ follow [Semantic Versioning](https://semver.org/).
   counts as the same job, and a restart adopts the row already open. Printer
   states that mean neither running nor finished — `PREPARE`, or `unknown`
   before the first status report — no longer end a job that is still going.
+  A print running under a different name than the adopted row starts its own
+  row, so a job boundary crossed while the service was down no longer files
+  one print's footage under the previous print's name.
 
 ### Removed
 

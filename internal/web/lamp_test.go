@@ -134,7 +134,7 @@ func TestPollLampForcesOnWhenJobRunning(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store)
+	s := NewServer(cache, cmd, store, testSeekWindow)
 
 	s.pollLamp()
 
@@ -149,7 +149,7 @@ func TestPollLampDoesNothingWhenDisconnected(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store)
+	s := NewServer(cache, cmd, store, testSeekWindow)
 
 	s.pollLamp()
 
@@ -165,7 +165,7 @@ func TestStatusExposesLampOffCountdown(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store)
+	s := NewServer(cache, cmd, store, testSeekWindow)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
