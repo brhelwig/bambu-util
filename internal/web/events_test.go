@@ -175,19 +175,19 @@ func TestErrorsPresentAtStartupAreNotAnnounced(t *testing.T) {
 	expectSilence(t, f.events.poll(true, "IDLE", "", 0, hms("0300-8000-0003-0002")))
 }
 
-func TestHotBedRemindersFireOnSchedule(t *testing.T) {
+func TestBedOnRemindersFireOnSchedule(t *testing.T) {
 	f := newEventsFixture()
 	expectSilence(t, f.events.poll(true, "IDLE", "", 0, nil))
 	expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil)) // the bed goes hot
 
-	for _, after := range HotBedReminders {
+	for _, after := range BedOnReminders {
 		f.now = f.now.Add(time.Minute) // just short of the next mark
 		expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
 
 		f.now = f.now.Add(after - time.Minute)
-		got := onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed still hot")
-		if !strings.Contains(got.Body, roundHours(after)) {
-			t.Errorf("body %q does not say how long (%s)", got.Body, roundHours(after))
+		got := onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for "+roundHours(after))
+		if !strings.Contains(got.Body, "60") {
+			t.Errorf("body %q does not say what the bed is holding", got.Body)
 		}
 		// Only once per mark.
 		expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
@@ -217,7 +217,7 @@ func TestTheReminderClockStartsWhenThePrintEnds(t *testing.T) {
 	f.now = f.now.Add(59 * time.Minute)
 	expectSilence(t, f.events.poll(true, "FINISH", "", 60, nil))
 	f.now = f.now.Add(2 * time.Minute)
-	onlyTitle(t, f.events.poll(true, "FINISH", "", 60, nil), "Bed still hot")
+	onlyTitle(t, f.events.poll(true, "FINISH", "", 60, nil), "Bed on for 1 hour")
 }
 
 // Turning the bed off ends the reminders, and heating it again starts over
@@ -227,7 +227,7 @@ func TestCoolingTheBedResetsTheReminders(t *testing.T) {
 	f.events.poll(true, "IDLE", "", 0, nil)
 	f.events.poll(true, "IDLE", "", 60, nil)
 	f.now = f.now.Add(2 * time.Hour)
-	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed still hot")
+	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for 1 hour")
 
 	f.events.poll(true, "IDLE", "", 0, nil) // bed off
 	f.now = f.now.Add(2 * time.Hour)
@@ -237,7 +237,7 @@ func TestCoolingTheBedResetsTheReminders(t *testing.T) {
 	f.now = f.now.Add(59 * time.Minute)
 	expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
 	f.now = f.now.Add(2 * time.Minute)
-	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed still hot")
+	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for 1 hour")
 }
 
 // A bed already hot at start-up gets its reminders late rather than invented:
@@ -248,7 +248,7 @@ func TestABedAlreadyHotAtStartupIsTimedFromNow(t *testing.T) {
 	f.now = f.now.Add(59 * time.Minute)
 	expectSilence(t, f.events.poll(true, "IDLE", "", 60, nil))
 	f.now = f.now.Add(2 * time.Minute)
-	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed still hot")
+	onlyTitle(t, f.events.poll(true, "IDLE", "", 60, nil), "Bed on for 1 hour")
 }
 
 // Reminders about one condition replace each other on the phone instead of
@@ -258,7 +258,7 @@ func TestRemindersShareATag(t *testing.T) {
 	f.events.poll(true, "IDLE", "", 0, nil)
 	f.events.poll(true, "IDLE", "", 60, nil)
 	var tags []string
-	for _, after := range HotBedReminders {
+	for _, after := range BedOnReminders {
 		f.now = f.now.Add(after)
 		for _, n := range f.events.poll(true, "IDLE", "", 60, nil) {
 			tags = append(tags, n.Tag)
@@ -266,8 +266,8 @@ func TestRemindersShareATag(t *testing.T) {
 		f.now = f.now.Add(-after)
 	}
 	for _, tag := range tags {
-		if tag != tagHotBed {
-			t.Errorf("tag = %q, want every hot-bed reminder to share %q", tag, tagHotBed)
+		if tag != tagBed {
+			t.Errorf("tag = %q, want every hot-bed reminder to share %q", tag, tagBed)
 		}
 	}
 }

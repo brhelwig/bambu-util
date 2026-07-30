@@ -93,16 +93,16 @@ func (s *Server) pollAutoOff() {
 		s.cmd.SetBedTemp(0)
 		s.send(push.Notification{
 			Title: "Bed turned off",
-			Body:  "The bed had been hot since it was last set here.",
-			Tag:   tagHotBed,
+			Body:  "It had been on since it was last set here.",
+			Tag:   tagBed,
 		})
 	}
 	if nozzle {
 		s.cmd.SetNozzleTemp(0)
 		s.send(push.Notification{
 			Title: "Nozzle turned off",
-			Body:  "The nozzle had been hot since it was last set here.",
-			Tag:   tagHotBed,
+			Body:  "It had been on since it was last set here.",
+			Tag:   tagBed,
 		})
 	}
 }

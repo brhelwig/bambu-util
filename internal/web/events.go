@@ -9,18 +9,18 @@ import (
 	"github.com/brhelwig/bambu-util/internal/push"
 )
 
-// HotBedReminders are how long the bed can sit hot with no print running before
-// each reminder goes out. The last one only reaches a bed this app did not heat:
-// heat set through the app is shut off automatically at 24h (BedOffAfter), so by
-// then the bed is cold and the reminder is skipped.
-var HotBedReminders = []time.Duration{time.Hour, 8 * time.Hour, 16 * time.Hour, 24 * time.Hour}
+// BedOnReminders are how long the bed target can be above zero with no print
+// running before each reminder goes out. The last one only reaches a bed this
+// app did not heat: heat set here is shut off at 24h (BedOffAfter), so by then
+// the target is zero and the reminder is skipped on its own.
+var BedOnReminders = []time.Duration{time.Hour, 8 * time.Hour, 16 * time.Hour, 24 * time.Hour}
 
 // Notification tags. A second notification carrying the same tag replaces the
 // first on the phone rather than stacking beneath it.
 const (
-	tagJob    = "job"
-	tagError  = "error"
-	tagHotBed = "hot-bed"
+	tagJob   = "job"
+	tagError = "error"
+	tagBed   = "bed"
 )
 
 // printEvents turns the printer's reported state into the handful of changes
@@ -37,7 +37,7 @@ type printEvents struct {
 	observed bool
 	wasBusy  bool
 	hmsSeen  map[string]bool
-	hotSince time.Time // zero while the bed is not sitting hot and unused
+	onSince  time.Time // zero while the bed is off, or a print is running
 	sent     map[time.Duration]bool
 }
 
@@ -64,7 +64,7 @@ func (e *printEvents) poll(connected bool, gs, jobName string, bedTarget float64
 		out = append(out, e.jobChange(busy, gs, jobName)...)
 	}
 	out = append(out, e.newErrors(hms, first)...)
-	out = append(out, e.hotBed(busy, bedTarget, first)...)
+	out = append(out, e.bedOn(busy, bedTarget, first)...)
 	e.wasBusy = busy
 	return out
 }
@@ -106,31 +106,32 @@ func (e *printEvents) newErrors(hms []p1s.HMSEntry, first bool) []push.Notificat
 	return out
 }
 
-func (e *printEvents) hotBed(busy bool, bedTarget float64, first bool) []push.Notification {
-	hot := bedTarget > 0 && !busy
-	if !hot {
-		e.hotSince = time.Time{}
+// bedOn reports how long the bed target has been above zero with no print
+// running.
+func (e *printEvents) bedOn(busy bool, bedTarget float64, first bool) []push.Notification {
+	if bedTarget <= 0 || busy {
+		e.onSince = time.Time{}
 		clear(e.sent)
 		return nil
 	}
-	if e.hotSince.IsZero() {
-		// On the first observation the bed may already have been hot for hours,
-		// which cannot be known — the clock starts now and the reminders are
-		// late rather than invented.
-		e.hotSince = e.now()
+	if e.onSince.IsZero() {
+		// At start-up the bed may already have been on for hours, which cannot
+		// be known — so the clock starts now and a reminder comes late rather
+		// than invented.
+		e.onSince = e.now()
 		clear(e.sent)
 		if first {
 			return nil
 		}
 	}
-	elapsed := e.now().Sub(e.hotSince)
-	for _, after := range HotBedReminders {
+	elapsed := e.now().Sub(e.onSince)
+	for _, after := range BedOnReminders {
 		if elapsed >= after && !e.sent[after] {
 			e.sent[after] = true
 			return []push.Notification{{
-				Title: "Bed still hot",
-				Body:  fmt.Sprintf("On for %s with no print running.", roundHours(after)),
-				Tag:   tagHotBed,
+				Title: fmt.Sprintf("Bed on for %s", roundHours(after)),
+				Body:  fmt.Sprintf("Holding %.0f°C.", bedTarget),
+				Tag:   tagBed,
 			}}
 		}
 	}
