@@ -16,7 +16,6 @@ follow [Semantic Versioning](https://semver.org/).
   Requires HTTPS, and on iPhone and iPad iOS 16.4 or later with the app
   added to the Home Screen. Only the test message exists so far; printer
   events follow.
-
 - Always-on camera recording into a rolling history buffer (default 24h,
   configurable via `RECORDING_RETENTION`), stored in SQLite under `DATA_DIR`.
 - One camera view: follows the live tail of the recording buffer by
