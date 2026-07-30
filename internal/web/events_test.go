@@ -21,7 +21,7 @@ type eventsFixture struct {
 }
 
 func newEventsFixture() *eventsFixture {
-	f := &eventsFixture{events: newPrintEvents(), now: time.Unix(1_000_000, 0)}
+	f := &eventsFixture{events: newPrintEvents(nil), now: time.Unix(1_000_000, 0)}
 	f.events.now = func() time.Time { return f.now }
 	return f
 }
@@ -292,7 +292,7 @@ func TestAFinishedPrintReachesASubscribedPhone(t *testing.T) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	notifier := openTestNotifier()
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), notifier, testSeekWindow)
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSeekWindow)
 
 	key, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {

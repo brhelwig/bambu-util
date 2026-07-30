@@ -84,6 +84,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Pending countdowns survive a restart. The heater shut-offs, the lamp's
+  eight-hour delay and the bed reminder clock were held in memory only, so
+  every restart cancelled them silently — and since the deployment picks up a
+  new image by restarting, that was every update. Setting the bed hot and
+  deploying an hour later left the 24-hour safety shut-off simply gone. They
+  are now stored under `DATA_DIR`, and one that came due while the process was
+  down fires on the first poll rather than being written off as stale.
+
 - Pause, resume, stop and unload are now sent so the printer's broker has to
   acknowledge them, and retries until it does. Every command was previously
   sent unacknowledged, so a dropped **Stop** was silent — the page reported it

@@ -52,11 +52,13 @@ type Server struct {
 // bar reaches while the printer is idle: pass the recording retention, so the bar
 // spans exactly the footage the rolling buffer still holds and none is recorded
 // that cannot be scrubbed to.
-func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, seekWindow time.Duration) *Server {
+// timers persists the countdowns across a restart; pass nil to keep them in
+// memory only.
+func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, seekWindow time.Duration) *Server {
 	return &Server{
 		cache: cache, cmd: cmd, store: store, notify: notify,
-		events:  newPrintEvents(),
-		autoOff: newAutoOff(), lamp: newLampAuto(),
+		events:  newPrintEvents(timers),
+		autoOff: newAutoOff(timers), lamp: newLampAuto(timers),
 		seekWindow: seekWindow, now: time.Now,
 	}
 }

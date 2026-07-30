@@ -3,6 +3,8 @@ package web
 import (
 	"sync"
 	"time"
+
+	"github.com/brhelwig/bambu-util/internal/deadlines"
 )
 
 // LampInactiveOffAfter is how long the chamber lamp stays on after the
@@ -21,12 +23,25 @@ const LampInactiveOffAfter = 8 * time.Hour
 type lampAuto struct {
 	mu          sync.Mutex
 	now         func() time.Time
+	timers      timers
 	hasObserved bool // false until the first poll — see poll's "first" handling
 	wasActive   bool
 	offAt       time.Time // zero = no pending forced-off
 }
 
-func newLampAuto() *lampAuto { return &lampAuto{now: time.Now} }
+// newLampAuto resumes a pending forced-off from before the last restart, so an
+// update part-way through the 8h grace period does not start it over.
+func newLampAuto(store timerStore) *lampAuto {
+	l := &lampAuto{now: time.Now, timers: timers{store: store}}
+	if at, ok := l.timers.load()[deadlines.LampOff]; ok {
+		l.offAt = at
+		// A pending forced-off means the printer was idle when it was armed,
+		// which is also what the first poll would have concluded. Saying so
+		// here keeps that poll from re-arming and losing the elapsed time.
+		l.hasObserved = true
+	}
+	return l
+}
 
 // poll reports what the lamp should do this tick. forceOn is true exactly
 // once, on the inactive->active transition. forceOff is true exactly once,
@@ -44,6 +59,9 @@ func (l *lampAuto) poll(active bool) (forceOn, forceOff bool) {
 	l.hasObserved = true
 
 	if active {
+		if !l.offAt.IsZero() {
+			l.timers.clear(deadlines.LampOff)
+		}
 		l.offAt = time.Time{}
 		if first || !l.wasActive {
 			l.wasActive = true
@@ -54,9 +72,11 @@ func (l *lampAuto) poll(active bool) (forceOn, forceOff bool) {
 	if first || l.wasActive {
 		l.offAt = l.now().Add(LampInactiveOffAfter)
 		l.wasActive = false
+		l.timers.set(deadlines.LampOff, l.offAt)
 	}
 	if !l.offAt.IsZero() && !l.now().Before(l.offAt) {
 		l.offAt = time.Time{}
+		l.timers.clear(deadlines.LampOff)
 		return false, true
 	}
 	return false, false
