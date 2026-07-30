@@ -19,6 +19,9 @@ follow [Semantic Versioning](https://semver.org/).
   Fires only on those transitions, so a manual toggle in between is never
   overridden. Shown as a countdown in the status card, same as the
   bed/nozzle auto-off timers.
+- Released container images are tagged `vX.Y.Z`, so a deployment can pin a
+  version or roll back to one. The version tag names the same manifest the
+  `main` build produced rather than a rebuild of the tagged commit.
 
 ### Changed
 
