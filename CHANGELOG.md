@@ -77,6 +77,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Pause, resume, stop and unload are now sent so the printer's broker has to
+  acknowledge them, and retries until it does. Every command was previously
+  sent unacknowledged, so a dropped **Stop** was silent — the page reported it
+  sent and the print carried on. Commands that are unsafe to repeat, such as
+  extrude, deliberately stay unacknowledged.
 - The scrub bar's caption reports when the displayed frame was actually taken,
   not the time it was dragged to. The frame endpoint returns the first frame at
   or after the requested time, so with retention leaving gaps between kept
