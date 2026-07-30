@@ -1,0 +1,68 @@
+name: screenshots
+
+on:
+  pull_request:
+
+# Screenshots are pushed to an orphan branch and linked from the comment.
+# GitHub has no public way to attach an image to a comment, so the image has to
+# be reachable by URL before it can be shown; the orphan branch keeps them out
+# of the history of anything that ships.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: screenshots-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    # A pull request from a fork gets a read-only token, so it could capture but
+    # never publish. Skip rather than fail.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the browser
+        working-directory: .github/screenshots
+        run: |
+          npm install --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+
+      - name: Run the app
+        run: |
+          go build -o /tmp/bambu-util ./cmd/bambu-util
+          mkdir -p /tmp/shot-data
+          # No printer here. The app serves the page regardless, and the status
+          # endpoint is answered by the browser, so nothing depends on one.
+          PRINTER_IP=127.0.0.1 PRINTER_SERIAL=CI PRINTER_ACCESS_CODE=CI \
+          LISTEN_ADDR=127.0.0.1:8081 DATA_DIR=/tmp/shot-data \
+            /tmp/bambu-util &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8081/healthz >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8081/healthz
+
+      - name: Capture
+        working-directory: .github/screenshots
+        env:
+          BASE: http://127.0.0.1:8081
+          OUT: ${{ github.workspace }}/shots
+        run: node capture.mjs
+
+      - name: Publish and comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/screenshots/publish.sh
