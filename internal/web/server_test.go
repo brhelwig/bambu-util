@@ -74,7 +74,7 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 	}
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store).Handler()), cmd, store
+	return httptest.NewServer(NewServer(cache, cmd, store, testSeekWindow).Handler()), cmd, store
 }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
@@ -283,7 +283,7 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store).Handler()), cmd
+	return httptest.NewServer(NewServer(cache, cmd, store, testSeekWindow).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -493,7 +493,7 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, testSeekWindow).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -538,7 +538,7 @@ func TestStatusHMSPopulated(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, testSeekWindow).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -566,14 +566,21 @@ func TestHistoryRangeEmpty(t *testing.T) {
 	}
 }
 
-// seekTestServer builds a server whose clock is pinned to now (unix seconds), so
-// the scrub-bar window is deterministic.
+// testSeekWindow is the scrub-bar reach for tests that don't exercise it.
+const testSeekWindow = 24 * time.Hour
+
+// seekWindowUnderTest is deliberately not 24h, so a server that ignored its
+// configured window and fell back to the old hardcoded value would fail.
+const seekWindowUnderTest = 6 * time.Hour
+
+// seekTestServer builds a server whose clock is pinned to now (unix seconds) and
+// whose scrub-bar reach is seekWindowUnderTest, so the window is deterministic.
 func seekTestServer(state string, now int64) (*httptest.Server, *history.Store) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": state})
 	store := openTestStore()
-	srv := NewServer(cache, &fakeCommander{}, store)
+	srv := NewServer(cache, &fakeCommander{}, store, seekWindowUnderTest)
 	srv.now = func() time.Time { return time.Unix(now, 0) }
 	return httptest.NewServer(srv.Handler()), store
 }
@@ -599,7 +606,7 @@ func TestHistoryRangeClampsToSeekWindowWhenIdle(t *testing.T) {
 	store.InsertFrame(now-3600, []byte{2})
 
 	r := seekRange(t, ts)
-	if want := float64(now - int64(SeekWindow.Seconds())); r["oldest"] != want {
+	if want := float64(now - int64(seekWindowUnderTest.Seconds())); r["oldest"] != want {
 		t.Fatalf("oldest = %v, want %v (clamped to the seek window)", r["oldest"], want)
 	}
 	if r["newest"] != float64(now-3600) {
@@ -631,7 +638,7 @@ func TestHistoryRangeUsesSeekWindowWhenAnOpenRowIsStale(t *testing.T) {
 	store.InsertFrame(now-60, []byte{2})
 
 	r := seekRange(t, ts)
-	if want := float64(now - int64(SeekWindow.Seconds())); r["oldest"] != want {
+	if want := float64(now - int64(seekWindowUnderTest.Seconds())); r["oldest"] != want {
 		t.Fatalf("oldest = %v, want %v — an open row must not widen the window while idle", r["oldest"], want)
 	}
 }

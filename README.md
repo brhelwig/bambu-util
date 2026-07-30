@@ -26,10 +26,11 @@ Features:
   running (the printer only serves one camera client at a time). One view
   shows it all: it follows the live tail of the buffer by default, and a
   scrub bar drags back through earlier footage. While the printer is idle
-  the bar reaches back 24 hours; during a print it starts five minutes
-  before the print did, so the whole job is one drag and nothing earlier is
-  in the way. A `● LIVE` badge on the image shows whether the view is following
-  the tail, and tapping it returns there
+  the bar reaches back exactly as far as `RECORDING_RETENTION` keeps frames,
+  so nothing is recorded that can't be scrubbed to; during a print it starts
+  five minutes before the print did, so the whole job is one drag and nothing
+  earlier is in the way. A `● LIVE` badge on the image shows whether the view
+  is following the tail, and tapping it returns there
 - Recent print jobs are listed under the camera, each with its start time so
   two runs of the same file can be told apart. Pick one to play its
   footage as a timelapse at 60x, 300x, or 600x. The five most recently
@@ -60,7 +61,7 @@ Environment variables only — no config files:
 | `PRINTER_ACCESS_CODE` | yes | LAN access code (Settings → WLAN) |
 | `LISTEN_ADDR` | no | Listen address, default `:8081` |
 | `DATA_DIR` | no | Directory for the recording database, default `./data`. Mount a volume here so the history buffer survives restarts. |
-| `RECORDING_RETENTION` | no | How long to keep recorded frames, as a Go duration (`12h`, `48h`, ...), default `24h` |
+| `RECORDING_RETENTION` | no | How long to keep recorded frames, as a Go duration (`12h`, `48h`, ...), default `24h`. Also how far back the scrub bar reaches when no print is running |
 
 ### Run
 

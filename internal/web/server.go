@@ -36,16 +36,25 @@ type Commander interface {
 }
 
 type Server struct {
-	cache   *p1s.StateCache
-	cmd     Commander
-	store   *history.Store
-	autoOff *autoOff
-	lamp    *lampAuto
-	now     func() time.Time
+	cache      *p1s.StateCache
+	cmd        Commander
+	store      *history.Store
+	autoOff    *autoOff
+	lamp       *lampAuto
+	seekWindow time.Duration
+	now        func() time.Time
 }
 
-func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store) *Server {
-	return &Server{cache: cache, cmd: cmd, store: store, autoOff: newAutoOff(), lamp: newLampAuto(), now: time.Now}
+// NewServer builds the HTTP layer. seekWindow is how far back the camera scrub
+// bar reaches while the printer is idle: pass the recording retention, so the bar
+// spans exactly the footage the rolling buffer still holds and none is recorded
+// that cannot be scrubbed to.
+func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, seekWindow time.Duration) *Server {
+	return &Server{
+		cache: cache, cmd: cmd, store: store,
+		autoOff: newAutoOff(), lamp: newLampAuto(),
+		seekWindow: seekWindow, now: time.Now,
+	}
 }
 
 // EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
@@ -415,19 +424,9 @@ func normalizeColor(raw string) (string, error) {
 	return up, nil
 }
 
-// How far back the camera scrub bar reaches. Idle it is a flat window into the
-// rolling buffer; during a print it starts just before the print did, so the
-// whole job is one drag of the bar and nothing that came before is in the way.
-// Footage older than this is still reachable, but only by picking a job from the
-// recent-jobs list.
-//
-// SeekWindow is fixed rather than derived from RECORDING_RETENTION: raising
-// retention past 24h records footage the bar cannot reach, which is only
-// reachable through the jobs list.
-const (
-	SeekWindow = 24 * time.Hour
-	JobLeadIn  = 5 * time.Minute
-)
+// JobLeadIn is how far before a running print's start the scrub bar begins, so
+// the whole job is one drag of the bar with nothing earlier in the way.
+const JobLeadIn = 5 * time.Minute
 
 func (s *Server) historyRange(w http.ResponseWriter, _ *http.Request) {
 	oldest, newest, err := s.store.Range()
@@ -449,7 +448,10 @@ func (s *Server) historyRange(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"oldest": oldest, "newest": newest})
 }
 
-// seekStart is the earliest timestamp the scrub bar should reach.
+// seekStart is the earliest timestamp the scrub bar should reach: just before the
+// running print, or one retention window back when the printer is idle. Footage
+// held beyond that — the kept prints' thinned timelapses — is reachable only by
+// picking a job from the recent-jobs list.
 func (s *Server) seekStart() int64 {
 	fields, _ := s.cache.Snapshot()
 	if p1s.JobActive(p1s.GcodeState(fields)) {
@@ -457,7 +459,7 @@ func (s *Server) seekStart() int64 {
 			return job.Start - int64(JobLeadIn.Seconds())
 		}
 	}
-	return s.now().Add(-SeekWindow).Unix()
+	return s.now().Add(-s.seekWindow).Unix()
 }
 
 func (s *Server) historyFrame(w http.ResponseWriter, r *http.Request) {

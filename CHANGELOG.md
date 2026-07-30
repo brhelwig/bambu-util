@@ -32,9 +32,10 @@ follow [Semantic Versioning](https://semver.org/).
   toggle — every view now sources frames from the recording buffer, so
   there's no separate "live" connection to toggle.
 - The scrub bar is bounded rather than spanning the whole stored buffer: it
-  reaches back 24h while the printer is idle, and starts 5 minutes before the
-  print began while one is running, so a job is one drag of the bar. Older
-  footage is still reachable by picking a job from the list.
+  reaches back one `RECORDING_RETENTION` window (24h by default) while the
+  printer is idle, and starts 5 minutes before the print began while one is
+  running, so a job is one drag of the bar. Older footage — the kept prints'
+  thinned timelapses — is still reachable by picking a job from the list.
 - Timelapse speeds are 60x, 300x, and 600x, and play back at 4 frames per
   second instead of 1 — the old 1x-20x speeds were slower than the recording
   rate they were replaying.

@@ -76,7 +76,9 @@ func main() {
 		return p1s.StreamFrames(ctx, net.JoinHostPort(ip, "6000"), "bblp", accessCode, yield)
 	}, store)
 
-	srv := web.NewServer(cache, client, store)
+	// The scrub bar reaches back exactly as far as frames are kept, so raising
+	// retention doesn't record footage that can't be scrubbed to.
+	srv := web.NewServer(cache, client, store, retention)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Start(ctx)
