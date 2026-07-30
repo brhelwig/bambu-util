@@ -53,6 +53,9 @@ Features:
   chamber lamp. It is a separate screen, not more cards below the status, so
   the printer controls stay at the top of the page. The values are stored in
   the database and take effect as soon as they are saved
+- An Events screen shows what was sent to the printer and whether the printer
+  acknowledged it, what the printer reported back, and what notifications went
+  out — each with its raw message, for working out why something did not happen
 - iOS "Add to Home Screen" gives an app-like full-screen page
 - Notifications to the phone, so the page does not have to be open: a print
   starting, finishing or ending without finishing; any error the printer

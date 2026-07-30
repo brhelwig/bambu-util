@@ -3,12 +3,16 @@ package p1s
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+
+	"github.com/brhelwig/bambu-util/internal/activity"
 )
 
 const (
@@ -31,11 +35,12 @@ type Client struct {
 	cache  *StateCache
 	mqtt   mqtt.Client
 	pub    publisher
+	log    *activity.Log
 	seq    atomic.Int64
 }
 
-func NewClient(ip, serial, accessCode string, cache *StateCache) *Client {
-	c := &Client{serial: serial, cache: cache}
+func NewClient(ip, serial, accessCode string, cache *StateCache, log *activity.Log) *Client {
+	c := &Client{serial: serial, cache: cache, log: log}
 	opts := mqtt.NewClientOptions().
 		AddBroker(fmt.Sprintf("ssl://%s:8883", ip)).
 		SetUsername("bblp").
@@ -49,6 +54,7 @@ func NewClient(ip, serial, accessCode string, cache *StateCache) *Client {
 	opts.OnConnect = func(m mqtt.Client) {
 		cache.SetConnected(true)
 		m.Subscribe(fmt.Sprintf("device/%s/report", serial), 0, func(_ mqtt.Client, msg mqtt.Message) {
+			log.Record(activity.Report, "report", string(msg.Payload()))
 			HandleReport(cache, msg.Payload())
 		})
 		c.publish(`{"pushing":{"sequence_id":"0","command":"pushall"}}`)
@@ -90,7 +96,48 @@ func (c *Client) publish(payload string) {
 }
 
 func (c *Client) publishAt(qos byte, payload string) mqtt.Token {
-	return c.pub.Publish(fmt.Sprintf("device/%s/request", c.serial), qos, false, payload)
+	entry := c.log.Record(activity.Command, summarize(payload), payload)
+	token := c.pub.Publish(fmt.Sprintf("device/%s/request", c.serial), qos, false, payload)
+	// Waiting here would make every command block on the printer answering, so
+	// the answer is recorded as it arrives and the entry fills in behind it.
+	go func() {
+		if !token.WaitTimeout(ackTimeout) {
+			c.log.Acknowledge(entry, time.Time{}, errNoAcknowledgement)
+			return
+		}
+		c.log.Acknowledge(entry, time.Now(), token.Error())
+	}()
+	return token
+}
+
+// ackTimeout is how long to wait for the printer's broker to confirm before
+// recording that it never did. Nothing is retried here — the broker does that
+// itself for the commands worth repeating.
+const ackTimeout = 30 * time.Second
+
+var errNoAcknowledgement = errors.New("no acknowledgement")
+
+// summarize names a command from its payload, so the log reads as a list of
+// what was asked for rather than a wall of JSON.
+func summarize(payload string) string {
+	var msg struct {
+		Print  map[string]any `json:"print"`
+		System map[string]any `json:"system"`
+	}
+	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+		return "command"
+	}
+	for _, section := range []map[string]any{msg.Print, msg.System} {
+		if name, ok := section["command"].(string); ok {
+			if name == "gcode_line" {
+				if line, ok := section["param"].(string); ok {
+					return "gcode " + strings.TrimSpace(strings.ReplaceAll(line, "\n", " "))
+				}
+			}
+			return name
+		}
+	}
+	return "command"
 }
 
 func (c *Client) SendGcode(gcode string) {

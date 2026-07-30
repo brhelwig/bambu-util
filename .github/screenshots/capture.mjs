@@ -231,6 +231,44 @@ async function main() {
     await page.close();
   }
 
+  // The events screen, with a spread of traffic: a command still waiting, one
+  // acknowledged, one that never was, a raw printer report, and a notification.
+  {
+    const t = (mins) => new Date(Date.parse("2026-07-30T14:00:00Z") - mins * 60000).toISOString();
+    const events = [
+      { id: 5, at: t(0), kind: "notification", summary: "Print finished → 2 of 2 devices",
+        payload: "Minimalist_Pencil_Holder.3mf", acked: t(0) },
+      { id: 4, at: t(1), kind: "command", summary: "stop",
+        payload: '{"print":{"sequence_id":"7","command":"stop"}}' },
+      { id: 3, at: t(2), kind: "command", summary: "gcode M140 S60",
+        payload: '{"print":{"sequence_id":"6","command":"gcode_line","param":"M140 S60\\n"}}',
+        acked: t(2) },
+      { id: 2, at: t(3), kind: "command", summary: "pause",
+        payload: '{"print":{"sequence_id":"5","command":"pause"}}', error: "no acknowledgement" },
+      { id: 1, at: t(4), kind: "report", summary: "report",
+        payload: '{"print":{"gcode_state":"RUNNING","bed_temper":59.8,"mc_percent":47}}' },
+    ];
+    const page = await context.newPage();
+    await page.route("**/api/status", route => route.fulfill({ json: { ...idle, ams } }));
+    await page.route("**/api/events", route => route.fulfill({ json: { events } }));
+    await page.goto(BASE + "/", { waitUntil: "networkidle" });
+    if (await page.locator("#eventsBtn").count()) {
+      await page.click("#eventsBtn");
+      // Open the raw view on the waiting command, since being able to read the
+      // message is the point of keeping it.
+      await page.locator(".event details").first().evaluate(d => d.open = true);
+      await page.waitForTimeout(400);
+      const file = `${OUT}/11-events.png`;
+      await page.screenshot({ path: file, fullPage: true });
+      shots.push({
+        name: "11-events", title: "Events", file,
+        note: "What went to the printer, what came back, and what was sent to a phone — with the raw message behind each.",
+      });
+      console.log("captured Events");
+    }
+    await page.close();
+  }
+
   await browser.close();
   console.log(JSON.stringify(shots.map(s => ({ name: s.name, title: s.title, note: s.note })), null, 2));
 }

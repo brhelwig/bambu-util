@@ -1,11 +1,14 @@
 package p1s
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+
+	"github.com/brhelwig/bambu-util/internal/activity"
 )
 
 func TestHandleReportMergesPrintFields(t *testing.T) {
@@ -139,5 +142,65 @@ func TestEachCommandCarriesItsOwnSequenceNumber(t *testing.T) {
 	}
 	if len(pub.sent) != 3 {
 		t.Errorf("sent %d messages, want 3", len(pub.sent))
+	}
+}
+
+func TestACommandIsLoggedAndThenAcknowledged(t *testing.T) {
+	log := activity.New(20)
+	c, _ := testClient()
+	c.log = log
+	c.StopPrint()
+
+	entries := log.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("logged %d entries, want 1", len(entries))
+	}
+	if entries[0].Kind != activity.Command || entries[0].Summary != "stop" {
+		t.Errorf("logged %s %q, want a command named stop", entries[0].Kind, entries[0].Summary)
+	}
+	if !strings.Contains(entries[0].Payload, `"command":"stop"`) {
+		t.Errorf("payload = %q, want the raw message", entries[0].Payload)
+	}
+
+	// The acknowledgement arrives on its own goroutine, so the entry fills in
+	// behind the call rather than the call waiting for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := log.Entries()[0]; got.Acked != nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Error("the command was never marked acknowledged")
+}
+
+// The log should read as a list of what was asked for, not a wall of JSON.
+func TestCommandsAreNamedInTheLog(t *testing.T) {
+	for _, tc := range []struct{ payload, want string }{
+		{`{"print":{"command":"pause"}}`, "pause"},
+		{`{"system":{"command":"ledctrl"}}`, "ledctrl"},
+		{`{"print":{"command":"gcode_line","param":"G28\n"}}`, "gcode G28"},
+		{`not json`, "command"},
+		{`{"print":{}}`, "command"},
+	} {
+		if got := summarize(tc.payload); got != tc.want {
+			t.Errorf("summarize(%s) = %q, want %q", tc.payload, got, tc.want)
+		}
+	}
+}
+
+func TestAPrinterReportIsLogged(t *testing.T) {
+	log := activity.New(20)
+	cache := NewStateCache()
+	payload := `{"print":{"gcode_state":"RUNNING"}}`
+	log.Record(activity.Report, "report", payload)
+	HandleReport(cache, []byte(payload))
+
+	entries := log.Entries()
+	if len(entries) != 1 || entries[0].Kind != activity.Report {
+		t.Fatalf("entries = %+v, want one report", entries)
+	}
+	if entries[0].Payload != payload {
+		t.Errorf("payload = %q, want it kept raw for reading", entries[0].Payload)
 	}
 }

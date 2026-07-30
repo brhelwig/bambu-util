@@ -66,6 +66,17 @@
   .kindrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
   .kindrow label { color: #e8eaed; }
   .kindrow input { width: 20px; height: 20px; accent-color: #c98a2b; }
+  .event { background: #1b2027; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 0.85rem; }
+  .event .head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .event .what { font-weight: 600; overflow-wrap: anywhere; }
+  .event .when { color: #9aa0a6; font-size: 0.75rem; white-space: nowrap; }
+  .event .ack { font-size: 0.75rem; margin-top: 3px; }
+  .event .ack.yes { color: #7bd88f; }
+  .event .ack.no { color: #c98a2b; }
+  .event .ack.bad { color: #ff6e6e; }
+  .event pre { margin: 6px 0 0; padding: 8px; background: #141922; border-radius: 6px; color: #9aa0a6;
+    font-size: 0.7rem; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; }
+  .event summary { color: #9aa0a6; font-size: 0.75rem; cursor: pointer; margin-top: 4px; }
   .setrow input { background: #2a313b; border: 0; border-radius: 6px; color: #e8eaed; padding: 6px 8px; font-size: 0.9rem; width: 100%; text-align: right; }
   .setrow input[type=text], .setrow input[type=password] { grid-column: 2 / -1; }
   #printerSave { width: 100%; margin-top: 10px; padding: 12px; font-size: 0.95rem; background: #7a4a12; }
@@ -104,6 +115,9 @@
 <div id="mainScreen">
 <div class="topbar">
   <span class="screentitle">Bambu Util</span>
+  <button class="topicon" id="eventsBtn" aria-label="Events">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
+  </button>
   <button class="topicon" id="settingsBtn" aria-label="Settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 5 8.9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9.5a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9.5a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
   </button>
@@ -183,6 +197,24 @@
   <h2>Filament (AMS)</h2>
   <div id="amsSlots"></div>
 </div>
+</div>
+
+<div id="eventsScreen" style="display:none">
+<div class="topbar">
+  <button class="topicon" id="eventsBack" aria-label="Back">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  </button>
+  <span class="screentitle">Events</span>
+  <button class="topicon" id="eventsRefresh" aria-label="Refresh">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+  </button>
+</div>
+<div class="card">
+  <div class="kindrow"><label for="eventsCommands">Commands sent</label><input type="checkbox" id="eventsCommands" checked></div>
+  <div class="kindrow"><label for="eventsReports">Printer reports</label><input type="checkbox" id="eventsReports"></div>
+  <div class="kindrow"><label for="eventsNotifications">Notifications sent</label><input type="checkbox" id="eventsNotifications" checked></div>
+</div>
+<div id="eventsList"></div>
 </div>
 
 <div id="settingsScreen" style="display:none">
@@ -1174,16 +1206,110 @@ initNotifications();
 // --- Screens ----------------------------------------------------------------
 // Settings is its own screen rather than more cards under the status: nothing
 // on it is worth scrolling past to reach the printer controls.
-function showScreen(settings) {
-  $("mainScreen").style.display = settings ? "none" : "";
-  $("settingsScreen").style.display = settings ? "" : "none";
+function showScreen(which) {
+  for (const name of ["mainScreen", "settingsScreen", "eventsScreen"]) {
+    $(name).style.display = name === which ? "" : "none";
+  }
   $("log").textContent = "";
   window.scrollTo(0, 0);
-  if (settings) { refreshSettings(); refreshPrinter(); }
+  if (which === "settingsScreen") { refreshSettings(); refreshPrinter(); }
+  if (which === "eventsScreen") refreshEvents();
 }
 
-$("settingsBtn").addEventListener("click", () => showScreen(true));
-$("settingsBack").addEventListener("click", () => showScreen(false));
+$("settingsBtn").addEventListener("click", () => showScreen("settingsScreen"));
+$("settingsBack").addEventListener("click", () => showScreen("mainScreen"));
+$("eventsBtn").addEventListener("click", () => showScreen("eventsScreen"));
+$("eventsBack").addEventListener("click", () => showScreen("mainScreen"));
+$("eventsRefresh").addEventListener("click", refreshEvents);
+
+// --- Events -----------------------------------------------------------------
+// What went to the printer, what came back, and what was sent to a phone. The
+// raw message is there to be read when a summary is not enough, which is the
+// whole reason for keeping it.
+const EVENT_FILTERS = {
+  command: "eventsCommands",
+  report: "eventsReports",
+  notification: "eventsNotifications",
+};
+
+let lastEvents = [];
+
+function eventWanted(e) {
+  const box = EVENT_FILTERS[e.kind];
+  return box ? $(box).checked : true;
+}
+
+function renderEvents() {
+  const list = $("eventsList");
+  list.innerHTML = "";
+  const shown = lastEvents.filter(eventWanted);
+  if (!shown.length) {
+    const empty = document.createElement("div");
+    empty.className = "event";
+    empty.textContent = lastEvents.length ? "Nothing of the kinds selected." : "Nothing yet.";
+    list.appendChild(empty);
+    return;
+  }
+  for (const e of shown) {
+    const row = document.createElement("div");
+    row.className = "event";
+
+    const head = document.createElement("div");
+    head.className = "head";
+    const what = document.createElement("span");
+    what.className = "what";
+    what.textContent = e.summary;
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = new Date(e.at).toLocaleTimeString();
+    head.append(what, when);
+    row.appendChild(head);
+
+    // Only a command is waiting on the printer to answer; a report has already
+    // arrived, so saying it is unacknowledged would be nonsense.
+    if (e.kind !== "report") {
+      const ack = document.createElement("div");
+      if (e.error) {
+        ack.className = "ack bad";
+        ack.textContent = e.error;
+      } else if (e.acked) {
+        ack.className = "ack yes";
+        ack.textContent = `acknowledged ${new Date(e.acked).toLocaleTimeString()}`;
+      } else {
+        ack.className = "ack no";
+        ack.textContent = "waiting for acknowledgement";
+      }
+      row.appendChild(ack);
+    }
+
+    if (e.payload) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "raw";
+      const pre = document.createElement("pre");
+      pre.textContent = e.payload;
+      details.append(summary, pre);
+      row.appendChild(details);
+    }
+    list.appendChild(row);
+  }
+}
+
+async function refreshEvents() {
+  if (DEMO) return;
+  try {
+    const r = await fetch("/api/events");
+    if (!r.ok) return;
+    lastEvents = (await r.json()).events || [];
+  } catch {
+    return; // leave what is on screen
+  }
+  renderEvents();
+}
+
+for (const id of Object.values(EVENT_FILTERS)) {
+  $(id).addEventListener("change", renderEvents);
+}
 
 // --- Printer ----------------------------------------------------------------
 // The access code is never served back, so the field starts blank and blank

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
 )
@@ -24,7 +25,7 @@ func notifyTestServer(t *testing.T) (*httptest.Server, *push.Sender) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	notifier := openTestNotifier()
-	ts := httptest.NewServer(NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil, testPrinter()).Handler())
+	ts := httptest.NewServer(NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil, testPrinter(), activity.New(50)).Handler())
 	t.Cleanup(ts.Close)
 	return ts, notifier
 }

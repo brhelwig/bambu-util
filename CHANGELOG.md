@@ -8,6 +8,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- An Events screen, reached by the list icon in the top corner: what was sent to
+  the printer and whether it was acknowledged, what the printer reported back,
+  and what was sent to subscribed devices. Each entry keeps its raw message,
+  because a summary is not always what is needed when working out why something
+  did not happen. Tick boxes choose which kinds to show. It is held in memory
+  and bounded — this is for seeing what just happened, not a history worth
+  keeping across a restart.
+
 - A Settings screen, reached by the gear in the top corner, holding the camera
   history window and the three automatic-off delays (bed, nozzle, chamber
   lamp). It is a screen of its own rather than more cards under the printer
