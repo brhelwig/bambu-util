@@ -155,17 +155,22 @@ async function main() {
     window.Notification = { permission: ${JSON.stringify(permission)},
       requestPermission: async () => ${JSON.stringify(permission)} };
     window.PushManager = class {};
-    const key = new Uint8Array(65); key[0] = 4;
-    const subscription = {
-      endpoint: "https://push.example.net/stand-in",
-      options: { applicationServerKey: key.buffer },
-      unsubscribe: async () => true,
-      toJSON: () => ({ endpoint: "https://push.example.net/stand-in", keys: {} }),
+    // The subscription has to carry the server's own key, or the page correctly
+    // treats it as bound to an identity that is gone and resets itself to Off.
+    const standIn = async () => {
+      const { key } = await (await fetch("/api/push/key")).json();
+      const raw = atob(key.replace(/-/g, "+").replace(/_/g, "/"));
+      return {
+        endpoint: "https://push.example.net/stand-in",
+        options: { applicationServerKey: Uint8Array.from(raw, c => c.charCodeAt(0)).buffer },
+        unsubscribe: async () => true,
+        toJSON: () => ({ endpoint: "https://push.example.net/stand-in", keys: {} }),
+      };
     };
     Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {
       register: async () => ({ pushManager: {
-        getSubscription: async () => ${subscribed ? "subscription" : "null"},
-        subscribe: async () => subscription,
+        getSubscription: async () => ${subscribed ? "standIn()" : "null"},
+        subscribe: standIn,
       }}),
     }});
   `;
