@@ -37,6 +37,32 @@ func TestGcodeState(t *testing.T) {
 	}
 }
 
+func TestJobActiveAndJobEnded(t *testing.T) {
+	cases := []struct {
+		state  string
+		active bool
+		ended  bool
+	}{
+		{"RUNNING", true, false},
+		{"PAUSE", true, false}, // a paused print is still the same job
+		{"IDLE", false, true},
+		{"FINISH", false, true},
+		{"FAILED", false, true},
+		// Neither: no print is known to be running, but nothing says one ended.
+		{"PREPARE", false, false},
+		{"unknown", false, false},
+		{"", false, false},
+	}
+	for _, c := range cases {
+		if got := JobActive(c.state); got != c.active {
+			t.Errorf("JobActive(%q) = %v, want %v", c.state, got, c.active)
+		}
+		if got := JobEnded(c.state); got != c.ended {
+			t.Errorf("JobEnded(%q) = %v, want %v", c.state, got, c.ended)
+		}
+	}
+}
+
 func TestPrintActionAllowed(t *testing.T) {
 	cases := []struct {
 		connected bool
