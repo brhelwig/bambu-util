@@ -24,7 +24,7 @@ func notifyTestServer(t *testing.T) (*httptest.Server, *push.Sender) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	notifier := openTestNotifier()
-	ts := httptest.NewServer(NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil).Handler())
+	ts := httptest.NewServer(NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil, testPrinter()).Handler())
 	t.Cleanup(ts.Close)
 	return ts, notifier
 }

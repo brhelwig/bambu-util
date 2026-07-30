@@ -26,10 +26,32 @@ const (
 	KeyBedOffAfter    = "bed-off-after"
 	KeyNozzleOffAfter = "nozzle-off-after"
 	KeyLampOffAfter   = "lamp-off-after"
+
+	KeyPrinterIP         = "printer-ip"
+	KeyPrinterSerial     = "printer-serial"
+	KeyPrinterAccessCode = "printer-access-code"
 )
 
+// texts are the settings that hold words rather than numbers.
+var texts = map[string]bool{
+	KeyPrinterIP:         true,
+	KeyPrinterSerial:     true,
+	KeyPrinterAccessCode: true,
+}
+
+// Text reports whether a setting holds words.
+func Text(name string) bool { return texts[name] }
+
 // Values is one complete set of settings.
+//
+// AccessCode is a credential. It is here because the connection needs it, and
+// it must never reach the browser — see the settings endpoint, which reports
+// only whether one is set.
 type Values struct {
+	PrinterIP     string
+	PrinterSerial string
+	AccessCode    string
+
 	Retention      time.Duration
 	KeptJobs       int
 	BedOffAfter    time.Duration
@@ -150,6 +172,29 @@ func (s *Store) Set(name string, value int) error {
 	return s.reload()
 }
 
+// SetText stores one setting that holds words. An empty value clears it, which
+// is how a printer is forgotten.
+func (s *Store) SetText(name, value string) error {
+	if !texts[name] {
+		return fmt.Errorf("settings: %q does not hold text", name)
+	}
+	if len(value) > 128 {
+		return fmt.Errorf("%s is too long", name)
+	}
+	if value == "" {
+		if _, err := s.db.Exec(`DELETE FROM settings WHERE name = ?`, name); err != nil {
+			return err
+		}
+		return s.reload()
+	}
+	if _, err := s.db.Exec(`
+		INSERT INTO settings (name, value) VALUES (?, ?)
+		ON CONFLICT(name) DO UPDATE SET value = excluded.value`, name, value); err != nil {
+		return err
+	}
+	return s.reload()
+}
+
 // reload reads every setting back into memory. A value that cannot be read
 // falls back to its default rather than stopping the app: the settings table is
 // the obvious thing to edit by hand, and one bad row should cost that setting,
@@ -179,6 +224,9 @@ func (s *Store) reload() error {
 	v.NozzleOffAfter = readDuration(stored, KeyNozzleOffAfter, Defaults.NozzleOffAfter)
 	v.LampOffAfter = readDuration(stored, KeyLampOffAfter, Defaults.LampOffAfter)
 	v.KeptJobs = readInt(stored, KeyKeptJobs, Defaults.KeptJobs)
+	v.PrinterIP = stored[KeyPrinterIP]
+	v.PrinterSerial = stored[KeyPrinterSerial]
+	v.AccessCode = stored[KeyPrinterAccessCode]
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

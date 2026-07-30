@@ -97,7 +97,7 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 	}
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler()), cmd, store
+	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter()).Handler()), cmd, store
 }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
@@ -306,7 +306,7 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler()), cmd
+	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter()).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -474,7 +474,7 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter()).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -519,7 +519,7 @@ func TestStatusHMSPopulated(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter()).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -563,7 +563,7 @@ func seekTestServer(state string, now int64) (*httptest.Server, *history.Store) 
 		v.Retention = seekWindowUnderTest
 		return v
 	}
-	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, cur, nil)
+	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, cur, nil, testPrinter())
 	srv.now = func() time.Time { return time.Unix(now, 0) }
 	return httptest.NewServer(srv.Handler()), store
 }
@@ -720,4 +720,21 @@ func TestHistoryJobs(t *testing.T) {
 	if len(jobs) != 2 {
 		t.Fatalf("got %d jobs, want 2", len(jobs))
 	}
+}
+
+// fakePrinter stands in for the link: it remembers what it was pointed at
+// without opening a connection.
+type fakePrinter struct {
+	conf  p1s.Config
+	calls int
+}
+
+func (f *fakePrinter) Config() p1s.Config { return f.conf }
+func (f *fakePrinter) Configure(c p1s.Config) {
+	f.conf = c
+	f.calls++
+}
+
+func testPrinter() *fakePrinter {
+	return &fakePrinter{conf: p1s.Config{IP: "192.0.2.10", Serial: "01P00TEST", AccessCode: "secret"}}
 }
