@@ -57,7 +57,14 @@ PRINTER_IP=192.0.2.10 PRINTER_SERIAL=01P00XXXXXXXXXX PRINTER_ACCESS_CODE=xxxxxxx
   go run ./cmd/bambu-util
 ```
 
-Or the container image: `ghcr.io/brhelwig/bambu-util` (linux/arm64).
+Or the container image: `ghcr.io/brhelwig/bambu-util` (linux/arm64), tagged
+three ways:
+
+| Tag | Points at |
+|---|---|
+| `latest` | The newest `main` build. Deployments that follow it pick up new code by restarting. |
+| `vX.Y.Z` | A released version — the same manifest as the `main` build it was cut from, not a rebuild. Use it to pin or roll back. |
+| `<commit sha>` | One specific `main` build. |
 
 ### Printer prerequisites
 
