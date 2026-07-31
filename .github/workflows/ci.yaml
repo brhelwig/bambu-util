@@ -16,26 +16,82 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Format
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
       - run: go vet ./...
-      - run: go test ./...
+      # The race detector needs cgo, which the rest of the build deliberately
+      # does without.
+      - run: go test -race ./...
+        env:
+          CGO_ENABLED: 1
+
+  cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          # This job's build cache holds six targets, so it gets its own entry
+          # rather than fighting the test job for one key.
+          cache: false
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: cross-${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          restore-keys: cross-${{ runner.os }}-go-
+      # The same targets release.yaml builds, so a break in one is caught here
+      # rather than at tag time.
+      - name: Build every release target
+        run: |
+          for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            echo "building $platform"
+            CGO_ENABLED=0 GOOS=${platform%/*} GOARCH=${platform#*/} \
+              go build -trimpath -ldflags="-s -w" -o /dev/null ./cmd/bambu-util
+          done
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('.github/scripts/check-js.sh') }}
+      - run: .github/scripts/check-js.sh
 
   image:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Built on every pull request so a broken Dockerfile fails there rather
+      # than after it reaches main; only a push to main publishes the result.
       - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/arm64
-          push: true
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ghcr.io/brhelwig/bambu-util:${{ github.sha }}
             ghcr.io/brhelwig/bambu-util:latest
