@@ -50,6 +50,9 @@ type Server struct {
 	printer       printerConfigurer
 	activity      *activity.Log
 	now           func() time.Time
+	// tick overrides how often the background loops run; zero means
+	// defaultTick. Only a test sets it.
+	tick time.Duration
 }
 
 // NewServer builds the HTTP layer. cur answers what the settings are at the
@@ -65,20 +68,32 @@ func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notif
 	}
 }
 
-// EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
-// Call once (from main); the HTTP handlers do not need it to serve countdowns.
-func (s *Server) EnforceAutoOff(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+// defaultTick is how often the background loops look at the printer.
+const defaultTick = 10 * time.Second
+
+// every calls poll on every tick until ctx is cancelled. The three loops below
+// differ only in what they poll, so they share this rather than each carrying
+// its own copy of it.
+func (s *Server) every(ctx context.Context, poll func()) {
+	interval := s.tick
+	if interval <= 0 {
+		interval = defaultTick
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.pollAutoOff()
+			poll()
 		}
 	}
 }
+
+// EnforceAutoOff runs the heater safety shut-off loop until ctx is cancelled.
+// Call once (from main); the HTTP handlers do not need it to serve countdowns.
+func (s *Server) EnforceAutoOff(ctx context.Context) { s.every(ctx, s.pollAutoOff) }
 
 // pollAutoOff shuts a heater down once its deadline passes, but only while the
 // printer is idle: mid-print the printer owns its own temperatures, and cutting
@@ -115,18 +130,7 @@ func (s *Server) pollAutoOff() {
 
 // EnforceEventNotifications watches the printer and notifies on what changes.
 // Call once (from main).
-func (s *Server) EnforceEventNotifications(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.pollEvents()
-		}
-	}
-}
+func (s *Server) EnforceEventNotifications(ctx context.Context) { s.every(ctx, s.pollEvents) }
 
 func (s *Server) pollEvents() {
 	fields, connected := s.cache.Snapshot()
@@ -157,18 +161,7 @@ func (s *Server) send(n push.Notification) {
 
 // EnforceLampAutomation runs the chamber-lamp automation loop until ctx is
 // cancelled. Call once (from main).
-func (s *Server) EnforceLampAutomation(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.pollLamp()
-		}
-	}
-}
+func (s *Server) EnforceLampAutomation(ctx context.Context) { s.every(ctx, s.pollLamp) }
 
 func (s *Server) pollLamp() {
 	fields, connected := s.cache.Snapshot()
