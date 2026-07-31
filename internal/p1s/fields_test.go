@@ -20,3 +20,39 @@ func TestJobName(t *testing.T) {
 		}
 	}
 }
+
+func TestChamberLight(t *testing.T) {
+	on := func(b bool) *bool { return &b }
+	cases := []struct {
+		name   string
+		fields map[string]any
+		want   *bool
+	}{
+		{"on", map[string]any{"lights_report": []any{
+			map[string]any{"node": "chamber_light", "mode": "on"}}}, on(true)},
+		{"off", map[string]any{"lights_report": []any{
+			map[string]any{"node": "chamber_light", "mode": "off"}}}, on(false)},
+		{"picks the chamber out of several lights", map[string]any{"lights_report": []any{
+			map[string]any{"node": "work_light", "mode": "on"},
+			map[string]any{"node": "chamber_light", "mode": "off"}}}, on(false)},
+		{"unknown before the printer has reported", map[string]any{}, nil},
+		{"unknown when no chamber entry", map[string]any{"lights_report": []any{
+			map[string]any{"node": "work_light", "mode": "on"}}}, nil},
+		{"unknown when the report is not a list", map[string]any{"lights_report": "on"}, nil},
+		{"skips entries that are not objects", map[string]any{"lights_report": []any{
+			"nonsense", map[string]any{"node": "chamber_light", "mode": "on"}}}, on(true)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ChamberLight(c.fields)
+			switch {
+			case c.want == nil && got != nil:
+				t.Errorf("ChamberLight() = %v, want unknown", *got)
+			case c.want != nil && got == nil:
+				t.Errorf("ChamberLight() = unknown, want %v", *c.want)
+			case c.want != nil && *got != *c.want:
+				t.Errorf("ChamberLight() = %v, want %v", *got, *c.want)
+			}
+		})
+	}
+}
