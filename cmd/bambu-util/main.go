@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -29,67 +30,74 @@ func jobNameString(fields map[string]any) string {
 	return ""
 }
 
-func main() {
-	addr := os.Getenv("LISTEN_ADDR")
-	if addr == "" {
-		addr = ":8081"
-	}
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
-	}
+// app is the assembled program — everything below main, in one piece, so it can
+// be started without a process around it.
+type app struct {
+	handler  http.Handler
+	cache    *p1s.StateCache
+	describe func() string
+	close    func()
+}
+
+// newApp opens the database under dataDir and wires everything to it. The
+// background loops run until ctx is cancelled.
+func newApp(ctx context.Context, dataDir string) (*app, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		log.Fatalf("create data dir %s: %v", dataDir, err)
+		return nil, fmt.Errorf("create data dir %s: %w", dataDir, err)
 	}
 
 	cache := p1s.NewStateCache()
 	// Enough to see the last few minutes of traffic, which is what this is for.
 	events := activity.New(400)
 	link := p1s.NewLink(cache, events)
-	defer link.Stop()
 
 	db, err := sqlitedb.Open(filepath.Join(dataDir, "bambu-util.db"))
 	if err != nil {
-		log.Fatalf("open database: %v", err)
+		link.Stop()
+		return nil, fmt.Errorf("open database: %w", err)
 	}
-	defer db.Close()
+	closeAll := func() {
+		link.Stop()
+		db.Close()
+	}
 
 	store, err := history.New(db)
 	if err != nil {
-		log.Fatalf("open history store: %v", err)
+		closeAll()
+		return nil, fmt.Errorf("open history store: %w", err)
 	}
 
 	hub := web.NewHub(link.Stream, store)
 
 	notifyStore, err := push.New(db)
 	if err != nil {
-		log.Fatalf("open notification store: %v", err)
+		closeAll()
+		return nil, fmt.Errorf("open notification store: %w", err)
 	}
 	notifier, err := push.NewSender(notifyStore)
 	if err != nil {
-		log.Fatalf("load notification identity: %v", err)
+		closeAll()
+		return nil, fmt.Errorf("load notification identity: %w", err)
 	}
 	notifier.Watch(events)
 
 	timers, err := deadlines.New(db)
 	if err != nil {
-		log.Fatalf("open pending timers: %v", err)
+		closeAll()
+		return nil, fmt.Errorf("open pending timers: %w", err)
 	}
 
 	config, err := settings.New(db)
 	if err != nil {
-		log.Fatalf("open settings: %v", err)
+		closeAll()
+		return nil, fmt.Errorf("open settings: %w", err)
 	}
 	// Whatever printer was set up last time. With none, the app still serves the
 	// page — that is where one is entered.
 	v := config.Values()
 	link.Configure(p1s.Config{IP: v.PrinterIP, Serial: v.PrinterSerial, AccessCode: v.AccessCode})
 
-	// The scrub bar reaches back exactly as far as frames are kept, so raising
-	// retention doesn't record footage that can't be scrubbed to.
 	srv := web.NewServer(cache, link, store, notifier, timers, config.Values, config, link, events)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go hub.Start(ctx)
 	go srv.EnforceAutoOff(ctx)
 	go srv.EnforceLampAutomation(ctx)
@@ -103,6 +111,28 @@ func main() {
 		return p1s.GcodeState(fields), jobNameString(fields)
 	})
 
-	log.Printf("bambu-util listening on %s (%s)", addr, link.Describe())
-	log.Fatal(http.ListenAndServe(addr, srv.Handler()))
+	return &app{handler: srv.Handler(), cache: cache, describe: link.Describe, close: closeAll}, nil
+}
+
+func main() {
+	addr := os.Getenv("LISTEN_ADDR")
+	if addr == "" {
+		addr = ":8081"
+	}
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a, err := newApp(ctx, dataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer a.close()
+
+	log.Printf("bambu-util listening on %s (%s)", addr, a.describe())
+	log.Fatal(http.ListenAndServe(addr, a.handler))
 }
