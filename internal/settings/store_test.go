@@ -164,3 +164,50 @@ func TestSecondsSaysWhichSettingsAreLengthsOfTime(t *testing.T) {
 		t.Error("kept jobs is a count, not a length of time")
 	}
 }
+
+func TestTextReportsWhichSettingsHoldWords(t *testing.T) {
+	for _, name := range []string{KeyPrinterIP, KeyPrinterSerial, KeyPrinterAccessCode, KeyDashboard} {
+		if !Text(name) {
+			t.Errorf("Text(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{KeyRetention, KeyKeptJobs, KeyBedOffAfter, "nonsense"} {
+		if Text(name) {
+			t.Errorf("Text(%q) = true, want false", name)
+		}
+	}
+}
+
+func TestSetTextStoresAndClears(t *testing.T) {
+	store := openTest(t)
+
+	if err := store.SetText(KeyPrinterIP, "192.168.1.50"); err != nil {
+		t.Fatalf("SetText: %v", err)
+	}
+	if got := store.Values().PrinterIP; got != "192.168.1.50" {
+		t.Errorf("PrinterIP = %q, want it stored", got)
+	}
+
+	// Clearing is how a printer is forgotten, so empty has to delete rather
+	// than store an empty string.
+	if err := store.SetText(KeyPrinterIP, ""); err != nil {
+		t.Fatalf("SetText empty: %v", err)
+	}
+	if got := store.Values().PrinterIP; got != "" {
+		t.Errorf("PrinterIP = %q, want it forgotten", got)
+	}
+}
+
+func TestSetTextRejectsWhatItShould(t *testing.T) {
+	store := openTest(t)
+
+	if err := store.SetText(KeyRetention, "a while"); err == nil {
+		t.Error("SetText accepted a setting that does not hold text")
+	}
+	if err := store.SetText(KeyPrinterIP, strings.Repeat("x", 513)); err == nil {
+		t.Error("SetText accepted an over-long value")
+	}
+	if got := store.Values().PrinterIP; got != "" {
+		t.Errorf("PrinterIP = %q, want the rejected value not stored", got)
+	}
+}
