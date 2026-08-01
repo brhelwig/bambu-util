@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,10 +18,25 @@ import (
 )
 
 type fakeCommander struct {
+	// The background loops call these from their own goroutine, so a test
+	// watching for a command has to read behind the same lock.
+	mu          sync.Mutex
 	calls       []string
 	bedTemps    []int
 	nozzleTemps []int
 	filaments   []filamentCall
+}
+
+func (f *fakeCommander) record(call string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, call)
+}
+
+func (f *fakeCommander) sent() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
 }
 
 type filamentCall struct {
@@ -29,32 +45,38 @@ type filamentCall struct {
 	tempMin, tempMax        int
 }
 
-func (f *fakeCommander) LowerBed() { f.calls = append(f.calls, "lower-bed") }
-func (f *fakeCommander) Home()     { f.calls = append(f.calls, "home") }
+func (f *fakeCommander) LowerBed() { f.record("lower-bed") }
+func (f *fakeCommander) Home()     { f.record("home") }
 func (f *fakeCommander) SetBedTemp(t int) {
-	f.calls = append(f.calls, "bed-temp")
+	f.record("bed-temp")
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.bedTemps = append(f.bedTemps, t)
 }
 func (f *fakeCommander) SetNozzleTemp(t int) {
-	f.calls = append(f.calls, "nozzle-temp")
+	f.record("nozzle-temp")
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.nozzleTemps = append(f.nozzleTemps, t)
 }
-func (f *fakeCommander) Extrude()        { f.calls = append(f.calls, "extrude") }
-func (f *fakeCommander) UnloadFilament() { f.calls = append(f.calls, "unload") }
+func (f *fakeCommander) Extrude()        { f.record("extrude") }
+func (f *fakeCommander) UnloadFilament() { f.record("unload") }
 func (f *fakeCommander) SetAmsFilament(amsID, trayID int, trayInfoIdx, color, typ string, tempMin, tempMax int) {
-	f.calls = append(f.calls, "set-filament")
+	f.record("set-filament")
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.filaments = append(f.filaments, filamentCall{amsID, trayID, trayInfoIdx, color, typ, tempMin, tempMax})
 }
 func (f *fakeCommander) SetChamberLight(on bool) {
 	if on {
-		f.calls = append(f.calls, "lamp-on")
+		f.record("lamp-on")
 	} else {
-		f.calls = append(f.calls, "lamp-off")
+		f.record("lamp-off")
 	}
 }
-func (f *fakeCommander) PausePrint()  { f.calls = append(f.calls, "pause") }
-func (f *fakeCommander) ResumePrint() { f.calls = append(f.calls, "resume") }
-func (f *fakeCommander) StopPrint()   { f.calls = append(f.calls, "stop") }
+func (f *fakeCommander) PausePrint()  { f.record("pause") }
+func (f *fakeCommander) ResumePrint() { f.record("resume") }
+func (f *fakeCommander) StopPrint()   { f.record("stop") }
 
 func openTestStore() *history.Store {
 	store, err := history.Open(":memory:")
