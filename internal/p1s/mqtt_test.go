@@ -204,3 +204,122 @@ func TestAPrinterReportIsLogged(t *testing.T) {
 		t.Errorf("payload = %q, want it kept raw for reading", entries[0].Payload)
 	}
 }
+
+// These three payloads were taken from third-party documentation and have never
+// been confirmed against this printer, so what goes on the wire is pinned here:
+// checking only the delivery level would let a wrong field name through.
+func TestDocumentedPayloadsGoOutAsWritten(t *testing.T) {
+	cases := []struct {
+		name string
+		send func(*Client)
+		want string
+	}{
+		{
+			"unload",
+			(*Client).UnloadFilament,
+			`{"print":{"command":"unload_filament","sequence_id":"1"}}`,
+		},
+		{
+			"lamp on",
+			func(c *Client) { c.SetChamberLight(true) },
+			`{"system":{"command":"ledctrl","interval_time":1000,"led_mode":"on","led_node":"chamber_light","led_off_time":500,"led_on_time":500,"loop_times":1,"sequence_id":"1"}}`,
+		},
+		{
+			"lamp off",
+			func(c *Client) { c.SetChamberLight(false) },
+			`{"system":{"command":"ledctrl","interval_time":1000,"led_mode":"off","led_node":"chamber_light","led_off_time":500,"led_on_time":500,"loop_times":1,"sequence_id":"1"}}`,
+		},
+		{
+			"ams tray",
+			func(c *Client) { c.SetAmsFilament(0, 1, "GFA00", "FF6B35FF", "PLA", 190, 230) },
+			`{"print":{"ams_id":0,"command":"ams_filament_setting","nozzle_temp_max":230,"nozzle_temp_min":190,"sequence_id":"1","tray_color":"FF6B35FF","tray_id":1,"tray_info_idx":"GFA00","tray_type":"PLA"}}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client, pub := testClient()
+			c.send(client)
+			if got := pub.last().payload; got != c.want {
+				t.Errorf("sent\n %s\nwant\n %s", got, c.want)
+			}
+		})
+	}
+}
+
+// fakeSubscriber records what the connect callback subscribed to and keeps the
+// handler so a report can be delivered through it.
+type fakeSubscriber struct {
+	topic   string
+	qos     byte
+	handler mqtt.MessageHandler
+}
+
+func (s *fakeSubscriber) Subscribe(topic string, qos byte, callback mqtt.MessageHandler) mqtt.Token {
+	s.topic, s.qos, s.handler = topic, qos, callback
+	return newFakeToken()
+}
+
+// fakeMessage is the minimum of mqtt.Message needed to carry a payload.
+type fakeMessage struct{ payload []byte }
+
+func (m *fakeMessage) Duplicate() bool   { return false }
+func (m *fakeMessage) Qos() byte         { return 0 }
+func (m *fakeMessage) Retained() bool    { return false }
+func (m *fakeMessage) Topic() string     { return "" }
+func (m *fakeMessage) MessageID() uint16 { return 0 }
+func (m *fakeMessage) Payload() []byte   { return m.payload }
+func (m *fakeMessage) Ack()              {}
+
+// A fresh connection knows nothing until the printer reports, and the printer
+// only reports what changes — so connecting has to ask for everything.
+func TestConnectingSubscribesAndAsksForEverything(t *testing.T) {
+	c, pub := testClient()
+	sub := &fakeSubscriber{}
+
+	c.onConnect(sub)
+
+	if want := "device/SERIAL123/report"; sub.topic != want {
+		t.Errorf("subscribed to %q, want %q", sub.topic, want)
+	}
+	if _, connected := c.cache.Snapshot(); !connected {
+		t.Error("connecting left the cache disconnected")
+	}
+	want := `{"pushing":{"sequence_id":"0","command":"pushall"}}`
+	if got := pub.last().payload; got != want {
+		t.Errorf("sent %s, want %s", got, want)
+	}
+}
+
+func TestAReportOnTheSubscriptionReachesTheCache(t *testing.T) {
+	c, _ := testClient()
+	c.log = activity.New(20)
+	sub := &fakeSubscriber{}
+	c.onConnect(sub)
+
+	sub.handler(nil, &fakeMessage{payload: []byte(`{"print":{"gcode_state":"RUNNING"}}`)})
+
+	fields, _ := c.cache.Snapshot()
+	if fields["gcode_state"] != "RUNNING" {
+		t.Errorf("cache = %v, want the report merged in", fields)
+	}
+	var reports int
+	for _, e := range c.log.Entries() {
+		if e.Kind == activity.Report {
+			reports++
+		}
+	}
+	if reports != 1 {
+		t.Errorf("logged %d reports, want 1", reports)
+	}
+}
+
+func TestLosingTheConnectionClearsTheFlag(t *testing.T) {
+	c, _ := testClient()
+	c.onConnect(&fakeSubscriber{})
+
+	c.onConnectionLost()
+
+	if _, connected := c.cache.Snapshot(); connected {
+		t.Error("cache still reports connected after the connection dropped")
+	}
+}

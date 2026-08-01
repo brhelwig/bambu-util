@@ -28,6 +28,12 @@ type publisher interface {
 	Publish(topic string, qos byte, retained bool, payload any) mqtt.Token
 }
 
+// subscriber is the part of the MQTT client the connect callback needs, kept
+// narrow for the same reason.
+type subscriber interface {
+	Subscribe(topic string, qos byte, callback mqtt.MessageHandler) mqtt.Token
+}
+
 // Client is the MQTT link to the printer: cached merged state plus commands.
 // Port of the Python TUI's PrinterClient.
 type Client struct {
@@ -51,19 +57,26 @@ func NewClient(ip, serial, accessCode string, cache *StateCache, log *activity.L
 		SetMaxReconnectInterval(15 * time.Second).
 		SetConnectRetry(true).
 		SetConnectRetryInterval(5 * time.Second)
-	opts.OnConnect = func(m mqtt.Client) {
-		cache.SetConnected(true)
-		m.Subscribe(fmt.Sprintf("device/%s/report", serial), 0, func(_ mqtt.Client, msg mqtt.Message) {
-			log.Record(activity.Report, "report", string(msg.Payload()))
-			HandleReport(cache, msg.Payload())
-		})
-		c.publish(`{"pushing":{"sequence_id":"0","command":"pushall"}}`)
-	}
-	opts.OnConnectionLost = func(mqtt.Client, error) { cache.SetConnected(false) }
+	opts.OnConnect = func(m mqtt.Client) { c.onConnect(m) }
+	opts.OnConnectionLost = func(mqtt.Client, error) { c.onConnectionLost() }
 	c.mqtt = mqtt.NewClient(opts)
 	c.pub = c.mqtt
 	return c
 }
+
+// onConnect subscribes to the printer's reports and asks for a full state dump,
+// because the printer otherwise sends only what changes and a fresh connection
+// would know nothing until something did.
+func (c *Client) onConnect(sub subscriber) {
+	c.cache.SetConnected(true)
+	sub.Subscribe(fmt.Sprintf("device/%s/report", c.serial), 0, func(_ mqtt.Client, msg mqtt.Message) {
+		c.log.Record(activity.Report, "report", string(msg.Payload()))
+		HandleReport(c.cache, msg.Payload())
+	})
+	c.publish(`{"pushing":{"sequence_id":"0","command":"pushall"}}`)
+}
+
+func (c *Client) onConnectionLost() { c.cache.SetConnected(false) }
 
 func (c *Client) Start() { c.mqtt.Connect() }
 func (c *Client) Stop()  { c.mqtt.Disconnect(250) }
