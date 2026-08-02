@@ -421,9 +421,16 @@
     <input type="number" id="setNozzleOff" min="1" max="10080" step="1"><span class="unit">minutes</span></div>
   <div class="setrow"><label for="setLampOff">Lamp off after idle</label>
     <input type="number" id="setLampOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
+  <div class="setrow"><label for="setActivityLimit">Event log</label>
+    <input type="number" id="setActivityLimit" min="1" max="512" step="1"><span class="unit">MB</span></div>
   <div class="notifywhat">The camera history window is also how far back the scrub
     bar reaches. Prints kept hold their footage past that window, thinned to one frame
-    every 10 seconds. Auto-off countdowns already running keep the window they started with.</div>
+    every 10 seconds. Auto-off countdowns already running keep the window they started with.
+    The event log keeps the oldest entries only while it is under its size; printer reports
+    are much the largest part of it, so how far back it reaches depends on how much the
+    printer has to say. The figure counts what the log itself holds, not the size of the
+    database file, which also holds the camera buffer and does not shrink on disk when
+    entries go.</div>
   <button id="settingsSave" disabled>Save</button>
   <div id="settingsMsg" class="notifywhat" style="margin:8px 0 0"></div>
 </div>
@@ -1652,6 +1659,7 @@ const SETTINGS = [
   { id: "setBedOff", name: "bed-off-after", perUnit: 3600 },
   { id: "setNozzleOff", name: "nozzle-off-after", perUnit: 60 },
   { id: "setLampOff", name: "lamp-off-after", perUnit: 3600 },
+  { id: "setActivityLimit", name: "activity-limit", perUnit: 1 },
 ];
 
 // What the server last told us, so Save knows what actually changed and a

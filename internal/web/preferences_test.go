@@ -20,7 +20,7 @@ func serverWithNotifier(t *testing.T) (*httptest.Server, *push.Sender) {
 	t.Helper()
 	notify := openTestNotifier()
 	srv := NewServer(p1s.NewStateCache(), &fakeCommander{}, openTestStore(), notify,
-		nil, testSettings, nil, testPrinter(), activity.New(50))
+		nil, testSettings, nil, testPrinter(), openTestLog())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, notify
@@ -189,7 +189,7 @@ func TestSetPushPreferencesRejectsWhatItShould(t *testing.T) {
 // The log is read to find out what just happened, so the most recent thing has
 // to be at the top.
 func TestEventsAreReportedNewestFirst(t *testing.T) {
-	log := activity.New(50)
+	log := openTestLog()
 	srv := NewServer(p1s.NewStateCache(), &fakeCommander{}, openTestStore(), openTestNotifier(),
 		nil, testSettings, nil, testPrinter(), log)
 	ts := httptest.NewServer(srv.Handler())

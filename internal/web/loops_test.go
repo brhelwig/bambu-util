@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 )
 
@@ -21,7 +20,7 @@ func (e *printEvents) hasObserved() bool {
 func loopServer(connected bool, fields map[string]any) (*Server, *fakeCommander) {
 	cache := newStateCacheWith(connected, fields)
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
 	s.tick = time.Millisecond
 	return s, cmd
 }

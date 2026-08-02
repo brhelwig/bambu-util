@@ -100,6 +100,17 @@ func openTestSettings(t *testing.T) *settings.Store {
 	return store
 }
 
+// openTestLog gives a budget far above anything a test records, so trimming
+// never interferes with what is being checked. The tests that are about
+// trimming live in the activity package and set their own.
+func openTestLog() *activity.Log {
+	log, err := activity.Open(":memory:", func() int64 { return 1 << 20 })
+	if err != nil {
+		panic(err)
+	}
+	return log
+}
+
 func openTestNotifier() *push.Sender {
 	store, err := push.Open(":memory:")
 	if err != nil {
@@ -120,7 +131,7 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 	}
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50)).Handler()), cmd, store
+	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler()), cmd, store
 }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
@@ -329,7 +340,7 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50)).Handler()), cmd
+	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -497,7 +508,7 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50)).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -542,7 +553,7 @@ func TestStatusHMSPopulated(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50)).Handler())
+	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -586,7 +597,7 @@ func seekTestServer(state string, now int64) (*httptest.Server, *history.Store) 
 		v.Retention = seekWindowUnderTest
 		return v
 	}
-	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, cur, nil, testPrinter(), activity.New(50))
+	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, cur, nil, testPrinter(), openTestLog())
 	srv.now = func() time.Time { return time.Unix(now, 0) }
 	return httptest.NewServer(srv.Handler()), store
 }

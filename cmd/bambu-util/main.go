@@ -47,15 +47,26 @@ func newApp(ctx context.Context, dataDir string) (*app, error) {
 	}
 
 	cache := p1s.NewStateCache()
-	// Enough to see the last few minutes of traffic, which is what this is for.
-	events := activity.New(400)
-	link := p1s.NewLink(cache, events)
 
 	db, err := sqlitedb.Open(filepath.Join(dataDir, "bambu-util.db"))
 	if err != nil {
-		link.Stop()
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	config, err := settings.New(db)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open settings: %w", err)
+	}
+	// The log reads its budget on every entry, so changing it on the settings
+	// page takes hold without a restart.
+	events, err := activity.New(db, func() int64 { return config.Values().ActivityLimit })
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open event log: %w", err)
+	}
+
+	link := p1s.NewLink(cache, events)
 	closeAll := func() {
 		link.Stop()
 		db.Close()
@@ -87,11 +98,6 @@ func newApp(ctx context.Context, dataDir string) (*app, error) {
 		return nil, fmt.Errorf("open pending timers: %w", err)
 	}
 
-	config, err := settings.New(db)
-	if err != nil {
-		closeAll()
-		return nil, fmt.Errorf("open settings: %w", err)
-	}
 	// Whatever printer was set up last time. With none, the app still serves the
 	// page — that is where one is entered.
 	v := config.Values()

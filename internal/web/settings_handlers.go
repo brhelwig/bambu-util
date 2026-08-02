@@ -31,6 +31,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 		settings.KeyBedOffAfter:    int(v.BedOffAfter.Seconds()),
 		settings.KeyNozzleOffAfter: int(v.NozzleOffAfter.Seconds()),
 		settings.KeyLampOffAfter:   int(v.LampOffAfter.Seconds()),
+		settings.KeyActivityLimit:  int(v.ActivityLimit / settings.BytesPerMB),
 		settings.KeyDashboard:      v.Dashboard,
 	})
 }
@@ -145,13 +146,14 @@ func (s *Server) setPrinter(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// shownEvents is how many entries the Events screen is sent. The log itself is
+// bounded by a size and holds far more than a page can usefully draw, so this
+// is what one response is worth rather than what is kept.
+const shownEvents = 500
+
 // events reports what has recently gone to the printer, come back from it, or
 // been sent to a phone — newest first, because that is what is being looked
 // for.
 func (s *Server) getEvents(w http.ResponseWriter, _ *http.Request) {
-	entries := s.activity.Entries()
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
-	writeJSON(w, map[string]any{"events": entries})
+	writeJSON(w, map[string]any{"events": s.activity.Entries(shownEvents)})
 }

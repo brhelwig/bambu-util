@@ -7,6 +7,16 @@ import (
 	"github.com/brhelwig/bambu-util/internal/activity"
 )
 
+// openTestLog gives a budget far above anything a test records, so trimming
+// never interferes with what is being checked.
+func openTestLog() *activity.Log {
+	log, err := activity.Open(":memory:", func() int64 { return 1 << 20 })
+	if err != nil {
+		panic(err)
+	}
+	return log
+}
+
 func testSender(t *testing.T) *Sender {
 	t.Helper()
 	sender, err := NewSender(openTestStore(t))
@@ -100,7 +110,7 @@ func TestWatchSendsNotificationsToTheLog(t *testing.T) {
 		t.Fatal("a new sender should not be recording anywhere yet")
 	}
 
-	log := activity.New(20)
+	log := openTestLog()
 	s.Watch(log)
 
 	if s.log != log {
