@@ -353,3 +353,25 @@ func TestTheDatabaseCapIsServedInMegabytes(t *testing.T) {
 		t.Errorf("served %v after saving 1024, want 1024", got)
 	}
 }
+
+// How long a login lasts is a setting like the rest, so the page can change it
+// without a redeploy.
+func TestTheSessionLengthIsASetting(t *testing.T) {
+	ts, config := settingsTestServer(t)
+	want := float64(int(settings.Defaults.SessionLength.Seconds()))
+	if got := readSettings(t, ts)[settings.KeySessionLength]; got != want {
+		t.Errorf("session length = %v, want the default %v", got, want)
+	}
+
+	resp, err := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeySessionLength+"?value=604800", "", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	if got := config.Values().SessionLength; got != 7*24*time.Hour {
+		t.Errorf("stored %s, want 7 days", got)
+	}
+}

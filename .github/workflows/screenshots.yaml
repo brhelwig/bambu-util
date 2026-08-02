@@ -44,7 +44,9 @@ jobs:
           mkdir -p /tmp/shot-data
           # No printer here. The app serves the page regardless, and the status
           # endpoint is answered by the browser, so nothing depends on one.
-          LISTEN_ADDR=127.0.0.1:8081 DATA_DIR=/tmp/shot-data /tmp/bambu-util &
+          # No login either: the app refuses to start without being told one way
+          # or the other, and there is no provider to point these at.
+          LISTEN_ADDR=127.0.0.1:8081 DATA_DIR=/tmp/shot-data AUTH_DISABLED=true /tmp/bambu-util &
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8081/healthz >/dev/null && break
             sleep 1

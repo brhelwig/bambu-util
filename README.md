@@ -81,20 +81,40 @@ Features:
 
 ### Configuration
 
-Two environment variables, because the app cannot read from a database it has
-not been told how to find, or serve a page before it knows where to listen.
-Everything else — including the printer — is set on the Settings screen and
-kept in the database.
+The app cannot read from a database it has not been told how to find, serve a
+page before it knows where to listen, or put a login in front of itself using
+settings that are behind that login. Everything else — including the printer —
+is set on the Settings screen and kept in the database.
+
+**The app will not start until it is told what to do about authentication.**
+Either configure a provider or say expressly that you want none. There is no
+default, so an app that is running is one whose exposure was chosen rather than
+overlooked.
 
 | Variable | Required | Description |
 |---|---|---|
+| `OIDC_ISSUER` | to require a login | The provider's base URL, e.g. `https://id.example.com`. Its configuration is read from `/.well-known/openid-configuration` under this, at startup, so a wrong URL stops the app rather than surfacing at the first login |
+| `OIDC_CLIENT_ID` | to require a login | From the provider |
+| `OIDC_CLIENT_SECRET` | to require a login | From the provider. This is a server-side app, so it is a confidential client |
+| `PUBLIC_URL` | to require a login | Where the app is reached from a browser, e.g. `https://printer.example.com`. The redirect URI is this plus `/auth/callback`, and that exact URL is what the provider must have registered. It is given rather than worked out from the request, because a redirect built from a header the browser controls is how a login ends up being sent somewhere else |
+| `AUTH_DISABLED` | instead of the four above | Set to `true` to run with no login at all. Anything that can reach the port can then drive the printer and watch the camera |
 | `LISTEN_ADDR` | no | Listen address, default `:8081` |
 | `DATA_DIR` | no | Directory for the database, default `./data`. It also holds the pending heater and lamp countdowns, so they survive a restart. Mount a volume here so the history buffer survives restarts — and so notification subscriptions do, since losing the server's identity silently unsubscribes every phone. Write-ahead logging means the directory also holds `-wal` and `-shm` files; a backup taken while the app runs needs all three, not just the `.db`. |
+
+Any OpenID Connect provider works — nothing here is written against a
+particular one. It was built against [Pocket ID](https://pocket-id.org), where
+the client needs the redirect URI above and a client secret, and its "Restrict
+User Groups" decides who may log in. The app trusts the provider on that: a
+valid login for its client gets in, so access is managed in one place rather
+than two that can disagree.
+
+How long a login lasts is on the Settings screen, counted from the last time the
+page was used, and is 14 days by default.
 
 ### Run
 
 ```sh
-go run ./cmd/bambu-util
+AUTH_DISABLED=true go run ./cmd/bambu-util
 ```
 
 Then open the page, go to Settings, and enter the printer's address, serial and

@@ -6,7 +6,35 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: the app will not start until it is told what to do about
+  authentication.** Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
+  and `PUBLIC_URL` to require a login, or `AUTH_DISABLED=true` to run with none.
+  An existing deployment sets neither and will stop with a message naming what
+  to add. There is deliberately no default: until now anything that could reach
+  the port could drive the printer and watch the camera, and the failure mode of
+  a default is that nobody notices which one they got.
+
 ### Added
+
+- A login, over OpenID Connect. Any provider works — it is built on the standard
+  discovery document rather than anything provider-specific — and it was
+  developed against Pocket ID, whose per-client group restriction is what
+  decides who may in. The app trusts the provider on that rather than keeping a
+  second list that can disagree with it.
+
+  Authorization code flow with PKCE and a nonce. Sessions live in the database
+  and the cookie carries nothing but their id, marked `HttpOnly`, `SameSite=Lax`
+  and `Secure` when the request arrived over HTTPS. How long a login lasts is on
+  the Settings screen, counted from the last time the page was used, and is 14
+  days by default.
+
+  The health check and the few files a phone needs before it can log in stay
+  open; everything else needs a session. A page is sent to the provider, while
+  the page's own requests are refused outright, because a fetch that follows a
+  redirect and parses a login page as JSON fails in a way nobody can read.
+
 
 - A theme setting: light, dark, or follow the system, which is the default. The
   choice is kept on the device and applied before the page is drawn, so it never

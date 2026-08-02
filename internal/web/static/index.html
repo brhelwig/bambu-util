@@ -425,6 +425,8 @@
     <input type="number" id="setActivityLimit" min="1" max="512" step="1"><span class="unit">MB</span></div>
   <div class="setrow"><label for="setDatabaseLimit">Database cap</label>
     <input type="number" id="setDatabaseLimit" min="0" max="65536" step="1"><span class="unit">MB</span></div>
+  <div class="setrow"><label for="setSessionLength">Stay logged in</label>
+    <input type="number" id="setSessionLength" min="1" max="365" step="1"><span class="unit">days</span></div>
   <div class="notifywhat">The camera history window is also how far back the scrub
     bar reaches. Prints kept hold their footage past that window, thinned to one frame
     every 10 seconds. Auto-off countdowns already running keep the window they started with.
@@ -436,14 +438,66 @@
     with it set the oldest data goes — frames and log entries alike, whichever is older —
     until the file is under it. It overrules everything above, so it will delete footage
     that Prints kept was holding on to. It measures the database file, not the small
-    write-ahead file beside it.</div>
+    write-ahead file beside it. Staying logged in counts from the last time the page was
+    used, so a phone on the home screen only has to log in again after that long away
+    from it.</div>
   <button id="settingsSave" disabled>Save</button>
   <div id="settingsMsg" class="notifywhat" style="margin:8px 0 0"></div>
+</div>
+<div class="card" id="accountCard" style="display:none">
+  <h2>Account</h2>
+  <div class="notifywhat" id="accountWho"></div>
+  <button id="logout">Log out</button>
 </div>
 </div>
 <div id="log"></div>
 <script>
 const $ = id => document.getElementById(id);
+
+// --- Session ----------------------------------------------------------------
+// A session that has run out shows up as a 401 on whichever request happens
+// next, and every one of them would otherwise fail on its own in its own way.
+// Catching it in one place sends the browser to log in and come back here,
+// rather than leaving a page that quietly stops updating.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const response = await nativeFetch(...args);
+  if (response.status === 401) {
+    location.href = "/auth/login?next=" + encodeURIComponent(location.pathname + location.search);
+  }
+  return response;
+};
+
+// The Account card only means anything when there is a login to speak of: with
+// authentication switched off there is no /auth/me and nothing to show.
+async function refreshAccount() {
+  if (DEMO) return;
+  try {
+    const r = await nativeFetch("/auth/me");
+    if (!r.ok) return;
+    const who = await r.json();
+    $("accountWho").textContent = "Signed in as " + (who.name || who.subject);
+    $("accountCard").style.display = "";
+  } catch {
+    // No login configured, or nothing answering: leave the card hidden.
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  $("logout").addEventListener("click", async () => {
+    // The server reports where to go rather than redirecting, because a
+    // provider's log-out page answers no cross-origin request and following a
+    // redirect here would fail without the page ever moving.
+    let then = "/";
+    try {
+      const r = await nativeFetch("/auth/logout", { method: "POST" });
+      if (r.ok) then = (await r.json()).then || "/";
+    } catch {
+      // Logged out locally regardless; the worst case is staying on this page.
+    }
+    location.href = then;
+  });
+});
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
 
 // Icons that swap with state (the rest are inline in the markup).
@@ -1374,7 +1428,7 @@ function showScreen(which) {
   }
   $("log").textContent = "";
   window.scrollTo(0, 0);
-  if (which === "settingsScreen") { refreshSettings(); refreshPrinter(); loadTheme(); renderDashSettings(); }
+  if (which === "settingsScreen") { refreshSettings(); refreshPrinter(); loadTheme(); renderDashSettings(); refreshAccount(); }
   if (which === "eventsScreen") refreshEvents();
 }
 
@@ -1665,6 +1719,7 @@ const SETTINGS = [
   { id: "setBedOff", name: "bed-off-after", perUnit: 3600 },
   { id: "setNozzleOff", name: "nozzle-off-after", perUnit: 60 },
   { id: "setLampOff", name: "lamp-off-after", perUnit: 3600 },
+  { id: "setSessionLength", name: "session-length", perUnit: 86400 },
   { id: "setActivityLimit", name: "activity-limit", perUnit: 1 },
   { id: "setDatabaseLimit", name: "database-limit", perUnit: 1 },
 ];
