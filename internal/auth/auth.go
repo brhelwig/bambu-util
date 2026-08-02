@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -39,6 +40,10 @@ const loginWindow = 15 * time.Minute
 // cookieName is the session cookie. It carries the session's id and nothing
 // else — everything about who is logged in is in the database.
 const cookieName = "bambu_session"
+
+// stateCookieName carries the state of a login that is part-way through, so the
+// callback can tell it is finishing the login this browser started.
+const stateCookieName = "bambu_login"
 
 // Authenticator answers whether a request may proceed, and runs the login.
 type Authenticator struct {
@@ -123,9 +128,14 @@ func (a *Authenticator) guard(next http.Handler) http.Handler {
 			return
 		}
 		// Using the app keeps you logged in; the clock only runs out on a
-		// browser that has stopped coming back.
-		if err := a.store.Extend(session.ID, a.now().Add(a.sessionFor())); err != nil {
+		// browser that has stopped coming back. The cookie is re-issued as well
+		// as the row, because a browser throws its cookie away at the expiry it
+		// was given and would never come back to be extended again.
+		until := a.now().Add(a.sessionFor())
+		if err := a.store.Extend(session.ID, until); err != nil {
 			log.Printf("auth: extending a session: %v", err)
+		} else {
+			http.SetCookie(w, a.cookie(r, session.ID, until))
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -169,19 +179,58 @@ func (a *Authenticator) login(w http.ResponseWriter, r *http.Request) {
 	}
 	verifier := oauth2.GenerateVerifier()
 
-	// Only somewhere inside this app: a "next" pointing at another site would
-	// turn the login into an open redirect.
-	next := r.URL.Query().Get("next")
-	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
-		next = "/"
-	}
-	if err := a.store.StartLogin(state, verifier, nonce, next, a.now().Add(loginWindow)); err != nil {
+	if err := a.store.StartLogin(state, verifier, nonce,
+		safeNext(r.URL.Query().Get("next")), a.now().Add(loginWindow)); err != nil {
 		log.Printf("auth: starting a login: %v", err)
 		http.Error(w, "could not start the login", http.StatusInternalServerError)
 		return
 	}
+	// The state is also handed to the browser, so the callback can tell that the
+	// login it is finishing is the one this browser started. Without it, someone
+	// could start a login themselves and walk a victim through the callback,
+	// leaving that victim's browser holding a session that is not theirs.
+	http.SetCookie(w, &http.Cookie{
+		Name:     stateCookieName,
+		Value:    state,
+		Path:     "/auth",
+		Expires:  a.now().Add(loginWindow),
+		HttpOnly: true,
+		Secure:   overHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+	})
 	http.Redirect(w, r, a.oauth.AuthCodeURL(state,
 		oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)), http.StatusFound)
+}
+
+// safeNext keeps where a login returns to inside this app.
+//
+// Anything else makes the login an open redirect, and the test cannot simply be
+// "starts with a slash": browsers resolve a URL by the WHATWG rules, where a
+// backslash counts as a separator just like a slash, so "/\elsewhere.example"
+// reads to a browser as "//elsewhere.example" — another site. Go's own parser
+// escapes the backslash instead, so agreeing with Go here would not be enough.
+// Hence: one leading slash, no second separator of either kind, no backslash
+// anywhere, and nothing that parses as having a scheme or a host.
+func safeNext(next string) string {
+	const home = "/"
+	if !strings.HasPrefix(next, "/") || strings.Contains(next, `\`) {
+		return home
+	}
+	if strings.HasPrefix(next, "//") {
+		return home
+	}
+	parsed, err := url.Parse(next)
+	if err != nil || parsed.Scheme != "" || parsed.Host != "" {
+		return home
+	}
+	out := parsed.EscapedPath()
+	if parsed.RawQuery != "" {
+		out += "?" + parsed.RawQuery
+	}
+	if !strings.HasPrefix(out, "/") {
+		return home
+	}
+	return out
 }
 
 func (a *Authenticator) callback(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +239,22 @@ func (a *Authenticator) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the login provider refused: "+reason, http.StatusForbidden)
 		return
 	}
-	pending, err := a.store.TakeLogin(r.URL.Query().Get("state"), a.now())
+	state := r.URL.Query().Get("state")
+	// The browser has to show that it is the one that started this login. A
+	// callback walked through by somebody else arrives without the cookie.
+	started, err := r.Cookie(stateCookieName)
+	if err != nil || started.Value == "" || started.Value != state {
+		http.Error(w, "that login was not started here, start again", http.StatusBadRequest)
+		return
+	}
+	// Spent either way now, so it cannot be presented a second time.
+	http.SetCookie(w, &http.Cookie{
+		Name: stateCookieName, Value: "", Path: "/auth",
+		Expires: time.Unix(0, 0), HttpOnly: true,
+		Secure: overHTTPS(r), SameSite: http.SameSiteLaxMode,
+	})
+
+	pending, err := a.store.TakeLogin(state, a.now())
 	if err != nil {
 		// Either nothing is waiting on this state or it has already been used.
 		// Both mean the same thing here: do not trust it.
@@ -259,11 +323,16 @@ func (a *Authenticator) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	// An expiry in the past is how a cookie is taken back.
 	http.SetCookie(w, a.cookie(r, "", time.Unix(0, 0)))
+
+	// Where to go next is reported rather than redirected to. A redirect here
+	// would be followed by the page's own fetch, and the provider's end-session
+	// endpoint answers no cross-origin request, so the browser would refuse it
+	// and the page would sit there looking logged in.
+	to := "/"
 	if a.endSession != "" {
-		http.Redirect(w, r, a.endSession, http.StatusFound)
-		return
+		to = a.endSession
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, map[string]string{"then": to})
 }
 
 // me reports who is logged in, so the page can show it and offer to log out.
@@ -273,8 +342,17 @@ func (a *Authenticator) me(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not logged in", http.StatusUnauthorized)
 		return
 	}
+	writeJSON(w, map[string]string{"name": session.Name, "subject": session.Subject})
+}
+
+// writeJSON is how every answer here is written: encoded rather than assembled,
+// so a display name carrying anything unusual cannot produce a body the page
+// then fails to read.
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"name":%q,"subject":%q}`+"\n", session.Name, session.Subject)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("auth: writing a response: %v", err)
+	}
 }
 
 // cookie builds the session cookie. It is marked Secure only when the request

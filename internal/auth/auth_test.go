@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -156,30 +157,53 @@ func TestALoginReturnsToWhereItStarted(t *testing.T) {
 }
 
 // Sending someone to another site after logging in would make this an open
-// redirect, so anything that is not a path within the app is ignored.
+// redirect. Browsers resolve a URL by the WHATWG rules, where a backslash
+// separates just as a slash does, so the backslash forms have to go the same
+// way as the obvious ones.
 func TestALoginWillNotSendYouToAnotherSite(t *testing.T) {
+	away := []string{
+		"https://evil.example.com/",
+		"//evil.example.com/",
+		`/\evil.example.com/`,
+		`/\/evil.example.com/`,
+		`\\evil.example.com/`,
+		"http:/evil.example.com",
+	}
+	for _, next := range away {
+		if got := safeNext(next); got != "/" {
+			t.Errorf("a login for %q would return to %q, want the app's own root", next, got)
+		}
+	}
+	// And somewhere inside the app is still allowed through untouched.
+	for _, next := range []string{"/", "/api/status", "/camera/history/frame?ts=5"} {
+		if got := safeNext(next); got != next {
+			t.Errorf("safeNext(%q) = %q, want it kept", next, got)
+		}
+	}
+}
+
+// The whole path, not just the helper: what is stored is what the callback
+// will send the browser to.
+func TestABackslashDestinationIsNotStored(t *testing.T) {
 	app, _, _, store := setup(t)
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-
-	for _, away := range []string{"https://evil.example.com/", "//evil.example.com/"} {
-		resp, err := c.Get(app.URL + "/auth/login?next=" + url.QueryEscape(away))
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		to, err := url.Parse(resp.Header.Get("Location"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		pending, err := store.TakeLogin(to.Query().Get("state"), time.Now())
-		if err != nil {
-			t.Fatalf("no login was recorded: %v", err)
-		}
-		if pending.Next != "/" {
-			t.Errorf("a login for %q would return to %q, want the app's own root", away, pending.Next)
-		}
+	resp, err := c.Get(app.URL + `/auth/login?next=%2F%5Cevil.example.com%2F`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	to, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.TakeLogin(to.Query().Get("state"), time.Now())
+	if err != nil {
+		t.Fatalf("no login was recorded: %v", err)
+	}
+	if pending.Next != "/" {
+		t.Errorf("stored %q as where to return to, want the app's own root", pending.Next)
 	}
 }
 
@@ -361,5 +385,134 @@ func TestWithNoAuthenticatorEverythingIsServed(t *testing.T) {
 		if resp := get(t, client(t), app.URL+path); resp.StatusCode != http.StatusOK {
 			t.Errorf("%s = %d with authentication off, want 200", path, resp.StatusCode)
 		}
+	}
+}
+
+// Extending the row is not enough: a browser drops its cookie at the expiry it
+// was given, so a session that is only extended in the database still logs a
+// daily user out on the day it was first opened.
+func TestUsingTheAppReissuesTheCookie(t *testing.T) {
+	app, _, a, _ := setup(t)
+	c := client(t)
+	get(t, c, app.URL+"/auth/login")
+
+	later := time.Now().Add(24 * time.Hour)
+	a.now = func() time.Time { return later }
+
+	resp := get(t, c, app.URL+"/api/status")
+	var reissued *http.Cookie
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == cookieName {
+			reissued = cookie
+		}
+	}
+	if reissued == nil {
+		t.Fatal("using the app did not re-issue the session cookie, so the browser still drops it on the original schedule")
+	}
+	if !reissued.Expires.After(later) {
+		t.Errorf("the re-issued cookie expires at %s, want it pushed past %s", reissued.Expires, later)
+	}
+}
+
+// A login someone else started must not be completable in this browser.
+func TestACallbackFromABrowserThatDidNotStartTheLoginIsRefused(t *testing.T) {
+	app, _, _, _ := setup(t)
+
+	// One browser starts a login and gets as far as the callback URL.
+	starter := client(t)
+	var callback string
+	starter.CheckRedirect = func(r *http.Request, _ []*http.Request) error {
+		if strings.HasPrefix(r.URL.Path, CallbackPath) {
+			callback = r.URL.String()
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}
+	get(t, starter, app.URL+"/auth/login")
+	if callback == "" {
+		t.Fatal("the flow never reached the callback")
+	}
+
+	// A different browser — one that never started it — presents the callback.
+	victim := client(t)
+	resp := get(t, victim, callback)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status %d, want 400 for a login this browser did not start", resp.StatusCode)
+	}
+	if resp := get(t, victim, app.URL+"/api/status"); resp.StatusCode != http.StatusUnauthorized {
+		t.Error("a session was opened for a browser that did not start the login")
+	}
+}
+
+// Logging out reports where to go rather than redirecting, because a fetch
+// cannot follow a redirect to a provider that answers no cross-origin request.
+func TestLoggingOutReportsWhereToGoNext(t *testing.T) {
+	app, p, _, _ := setup(t)
+	c := client(t)
+	get(t, c, app.URL+"/auth/login")
+
+	resp, err := c.Post(app.URL+"/auth/logout", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200 with somewhere to go", resp.StatusCode)
+	}
+	var got struct {
+		Then string `json:"then"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// This provider advertises one, so that is where the page is sent.
+	if got.Then != p.URL+"/logout" {
+		t.Errorf("then = %q, want the provider's own log-out page", got.Then)
+	}
+}
+
+// A name the provider sends must not be able to produce a body the page cannot
+// read — which is what building JSON by hand allowed.
+func TestWhoIsLoggedInIsRealJSON(t *testing.T) {
+	app, p, _, _ := setup(t)
+	p.name = "Ada \"Lovelace\"\x7f \U0001f600"
+
+	c := client(t)
+	get(t, c, app.URL+"/auth/login")
+
+	resp := get(t, c, app.URL+"/auth/me")
+	var who struct {
+		Name    string `json:"name"`
+		Subject string `json:"subject"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&who); err != nil {
+		t.Fatalf("the page could not read who is logged in: %v", err)
+	}
+	if who.Name != p.name {
+		t.Errorf("name = %q, want %q", who.Name, p.name)
+	}
+}
+
+// Starting a login needs no login, so the table it writes to has to be bounded
+// or anything that can reach the port could grow the database — and the size
+// cap would answer by deleting camera footage instead.
+func TestPartWayLoginsAreBounded(t *testing.T) {
+	app, _, _, store := setup(t)
+	for range MaxPendingLogins + 50 {
+		c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}}
+		resp, err := c.Get(app.URL + "/auth/login")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	var held int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pending_logins`).Scan(&held); err != nil {
+		t.Fatal(err)
+	}
+	if held > MaxPendingLogins {
+		t.Errorf("holding %d part-way logins, over the %d bound", held, MaxPendingLogins)
 	}
 }

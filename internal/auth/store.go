@@ -153,9 +153,29 @@ type Pending struct {
 	Next     string
 }
 
+// MaxPendingLogins bounds how many part-way logins are held at once.
+//
+// Starting one needs no login, so without a bound anything that can reach the
+// port could sit in a loop on it and grow the database — and the size cap would
+// answer that by deleting camera footage and event-log entries, which is the
+// wrong thing losing out. Far above any real number of people logging in at the
+// same moment, so it only ever catches abuse.
+const MaxPendingLogins = 256
+
 // StartLogin records what the callback will need to check when the provider
-// sends the browser back.
+// sends the browser back. Lapsed rows and any excess beyond MaxPendingLogins go
+// at the same time, oldest first, so the table stays bounded between sweeps.
 func (s *Store) StartLogin(state, verifier, nonce, next string, expires time.Time) error {
+	now := expires.Add(-loginWindow)
+	if _, err := s.db.Exec(`DELETE FROM pending_logins WHERE expires <= ?`, now.Unix()); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`
+		DELETE FROM pending_logins WHERE state NOT IN (
+		  SELECT state FROM pending_logins ORDER BY expires DESC LIMIT ?
+		)`, MaxPendingLogins-1); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`INSERT INTO pending_logins (state, verifier, nonce, next, expires) VALUES (?, ?, ?, ?, ?)`,
 		state, verifier, nonce, next, expires.Unix())
 	return err

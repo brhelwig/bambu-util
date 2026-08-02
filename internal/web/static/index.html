@@ -485,8 +485,17 @@ async function refreshAccount() {
 
 document.addEventListener("DOMContentLoaded", () => {
   $("logout").addEventListener("click", async () => {
-    await nativeFetch("/auth/logout", { method: "POST" });
-    location.href = "/";
+    // The server reports where to go rather than redirecting, because a
+    // provider's log-out page answers no cross-origin request and following a
+    // redirect here would fail without the page ever moving.
+    let then = "/";
+    try {
+      const r = await nativeFetch("/auth/logout", { method: "POST" });
+      if (r.ok) then = (await r.json()).then || "/";
+    } catch {
+      // Logged out locally regardless; the worst case is staying on this page.
+    }
+    location.href = then;
   });
 });
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");

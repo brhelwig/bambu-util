@@ -140,11 +140,6 @@ func challengeFor(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
 func (p *provider) seen() (nonce, challenge, verifier string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
