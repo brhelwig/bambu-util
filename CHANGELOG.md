@@ -25,6 +25,20 @@ follow [Semantic Versioning](https://semver.org/).
   most wanted, since a log that empties itself when the app stops has nothing to
   show about why it stopped.
 
+- A cap on the size of the database file, off by default. The camera window and
+  the event log each bound their own data, but nothing bounded the file, so a
+  generous camera window could fill the disk and take the app down with it. With
+  a cap set, the oldest data goes — camera frames and event-log entries alike,
+  whichever is older — until the file is under it. It is deliberately absolute:
+  it will delete footage that "prints kept" was holding on to, because a promise
+  to keep a timelapse is not worth a full disk. Off by default for that reason.
+
+  Deleting rows does not shrink a SQLite file on its own, so the freed space is
+  returned to the disk explicitly, a few pages at a time rather than in one long
+  rebuild that would lock the camera and the page out for the duration. A
+  database made before this existed is converted once, the first time a cap is
+  actually exceeded, so anyone who never sets one never waits for it.
+
 - A setting for how much the event log may hold, in megabytes, alongside the
   camera history window. Once it is reached the oldest entries go. The bound is
   a size rather than a number of entries because one entry ranges from a few
