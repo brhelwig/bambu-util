@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/settings"
 )
@@ -136,7 +135,7 @@ func TestPollLampForcesOnWhenJobRunning(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
 
 	s.pollLamp()
 
@@ -151,7 +150,7 @@ func TestPollLampDoesNothingWhenDisconnected(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
 
 	s.pollLamp()
 
@@ -167,7 +166,7 @@ func TestStatusExposesLampOffCountdown(t *testing.T) {
 	cmd := &fakeCommander{}
 	store := openTestStore()
 	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
+	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 

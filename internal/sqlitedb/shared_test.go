@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/push"
 	"github.com/brhelwig/bambu-util/internal/sqlitedb"
@@ -30,6 +31,9 @@ func shared(t *testing.T, path string) (*sql.DB, *history.Store, *push.Store) {
 	subs, err := push.New(db)
 	if err != nil {
 		t.Fatalf("push store: %v", err)
+	}
+	if _, err := activity.New(db, func() int64 { return 1 << 20 }); err != nil {
+		t.Fatalf("event log: %v", err)
 	}
 	return db, frames, subs
 }
@@ -62,7 +66,7 @@ func TestBothStoresLiveInOneDatabase(t *testing.T) {
 		t.Fatalf("key: %v", err)
 	}
 
-	want := map[string]bool{"frames": true, "jobs": true, "subscriptions": true, "server_key": true}
+	want := map[string]bool{"frames": true, "jobs": true, "subscriptions": true, "server_key": true, "activity": true}
 	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table'`)
 	if err != nil {
 		t.Fatalf("list tables: %v", err)

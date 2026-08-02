@@ -26,6 +26,7 @@ const (
 	KeyBedOffAfter    = "bed-off-after"
 	KeyNozzleOffAfter = "nozzle-off-after"
 	KeyLampOffAfter   = "lamp-off-after"
+	KeyActivityLimit  = "activity-limit"
 
 	KeyPrinterIP         = "printer-ip"
 	KeyPrinterSerial     = "printer-serial"
@@ -63,7 +64,14 @@ type Values struct {
 	BedOffAfter    time.Duration
 	NozzleOffAfter time.Duration
 	LampOffAfter   time.Duration
+
+	// ActivityLimit is in bytes, converted from the megabytes stored, because
+	// every consultation of it is a comparison against a size in bytes.
+	ActivityLimit int64
 }
+
+// BytesPerMB converts the stored megabytes to the bytes the log counts in.
+const BytesPerMB = 1 << 20
 
 // Defaults are what an unconfigured app runs with, and what a value that cannot
 // be read falls back to.
@@ -73,38 +81,50 @@ var Defaults = Values{
 	BedOffAfter:    24 * time.Hour,
 	NozzleOffAfter: 15 * time.Minute,
 	LampOffAfter:   8 * time.Hour,
+	ActivityLimit:  64 * BytesPerMB,
 }
 
-// Every setting is stored as a whole number: seconds for a length of time, a
-// plain count otherwise. The bounds keep a value from being useless — a
-// recording window of a year fills the disk, a shut-off window of a year is not
-// a safety shut-off, and keeping every print ever made defeats the retention it
-// is meant to work alongside.
+// unit is how a setting's whole number should be read back.
+type unit int
+
+const (
+	count unit = iota
+	seconds
+	megabytes
+)
+
+// Every setting is stored as a whole number: seconds for a length of time,
+// megabytes for a size, a plain count otherwise. The bounds keep a value from
+// being useless — a recording window of a year fills the disk, a shut-off
+// window of a year is not a safety shut-off, and keeping every print ever made
+// defeats the retention it is meant to work alongside.
 type spec struct {
-	seconds  bool
+	unit     unit
 	min, max int
 }
 
 // show renders a bound the way the setting is written, so a refusal reads in
-// the units the field uses rather than in raw seconds.
+// the units the field uses rather than in raw seconds or bytes.
 func (s spec) show(value int) string {
-	if !s.seconds {
-		return strconv.Itoa(value)
+	switch s.unit {
+	case seconds:
+		return (time.Duration(value) * time.Second).String()
+	case megabytes:
+		return fmt.Sprintf("%d MB", value)
 	}
-	return (time.Duration(value) * time.Second).String()
+	return strconv.Itoa(value)
 }
 
+// The event log's ceiling is deliberately well short of a whole disk: this runs
+// on a Pi whose database also holds the camera buffer.
 var specs = map[string]spec{
-	KeyRetention:      {true, 3600, 30 * 24 * 3600},
-	KeyKeptJobs:       {false, 0, 50},
-	KeyBedOffAfter:    {true, 60, 7 * 24 * 3600},
-	KeyNozzleOffAfter: {true, 60, 7 * 24 * 3600},
-	KeyLampOffAfter:   {true, 60, 7 * 24 * 3600},
+	KeyRetention:      {seconds, 3600, 30 * 24 * 3600},
+	KeyKeptJobs:       {count, 0, 50},
+	KeyBedOffAfter:    {seconds, 60, 7 * 24 * 3600},
+	KeyNozzleOffAfter: {seconds, 60, 7 * 24 * 3600},
+	KeyLampOffAfter:   {seconds, 60, 7 * 24 * 3600},
+	KeyActivityLimit:  {megabytes, 1, 512},
 }
-
-// Seconds reports whether a setting is a length of time, so the page can label
-// it in the right units.
-func Seconds(name string) bool { return specs[name].seconds }
 
 // Store reads and writes the settings, keeping the current set in memory so the
 // hot paths that consult them are not querying the database every few seconds.
@@ -230,6 +250,7 @@ func (s *Store) reload() error {
 	v.NozzleOffAfter = readDuration(stored, KeyNozzleOffAfter, Defaults.NozzleOffAfter)
 	v.LampOffAfter = readDuration(stored, KeyLampOffAfter, Defaults.LampOffAfter)
 	v.KeptJobs = readInt(stored, KeyKeptJobs, Defaults.KeptJobs)
+	v.ActivityLimit = int64(readInt(stored, KeyActivityLimit, int(Defaults.ActivityLimit/BytesPerMB))) * BytesPerMB
 	v.PrinterIP = stored[KeyPrinterIP]
 	v.PrinterSerial = stored[KeyPrinterSerial]
 	v.AccessCode = stored[KeyPrinterAccessCode]

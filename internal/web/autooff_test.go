@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/settings"
 )
@@ -103,7 +102,7 @@ func autoOffServer(t *testing.T, connected bool, state string) (*Server, *fakeCo
 	cache.SetConnected(connected)
 	cache.Merge(map[string]any{"gcode_state": state})
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
 
 	now := time.Unix(1000, 0)
 	s.autoOff.now = fixedClock(&now)
@@ -134,7 +133,7 @@ func TestAutoOffStillFiresOnceThePrintIsOver(t *testing.T) {
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "RUNNING"})
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
+	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
 
 	now := time.Unix(1000, 0)
 	s.autoOff.now = fixedClock(&now)

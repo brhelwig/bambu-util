@@ -153,15 +153,44 @@ func TestJobRetentionIsASetting(t *testing.T) {
 	}
 }
 
-// A count is not seconds, and the page needs to know which it is to label it.
-func TestSecondsSaysWhichSettingsAreLengthsOfTime(t *testing.T) {
-	for _, name := range []string{KeyRetention, KeyBedOffAfter, KeyNozzleOffAfter, KeyLampOffAfter} {
-		if !Seconds(name) {
-			t.Errorf("%s should be a length of time", name)
+// A refusal has to read in the units the field uses, not in raw seconds or
+// bytes, or it describes a number nobody typed.
+func TestARefusalReadsInTheSettingsOwnUnits(t *testing.T) {
+	store := openTest(t)
+	for _, c := range []struct{ name, want string }{
+		{KeyRetention, "h"},
+		{KeyKeptJobs, "50"},
+		{KeyActivityLimit, "512 MB"},
+	} {
+		err := store.Set(c.name, 1_000_000_000)
+		if err == nil {
+			t.Errorf("%s: an absurd value was accepted", c.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s refused with %q, want it to mention %q", c.name, err, c.want)
 		}
 	}
-	if Seconds(KeyKeptJobs) {
-		t.Error("kept jobs is a count, not a length of time")
+}
+
+func TestTheEventLogSizeIsASetting(t *testing.T) {
+	store := openTest(t)
+	if got := store.Values().ActivityLimit; got != Defaults.ActivityLimit {
+		t.Errorf("event log limit = %d, want the default %d", got, Defaults.ActivityLimit)
+	}
+	// Stored in megabytes, read back in the bytes everything compares against.
+	if err := store.Set(KeyActivityLimit, 8); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got := store.Values().ActivityLimit; got != 8*BytesPerMB {
+		t.Errorf("event log limit = %d, want %d", got, 8*BytesPerMB)
+	}
+	// A log of no size is not a log, and a whole disk is not a bound.
+	if err := store.Set(KeyActivityLimit, 0); err == nil {
+		t.Error("a limit of nothing was accepted")
+	}
+	if err := store.Set(KeyActivityLimit, 5000); err == nil {
+		t.Error("a limit larger than the disk was accepted")
 	}
 }
 

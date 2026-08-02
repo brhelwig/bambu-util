@@ -146,12 +146,12 @@ func TestEachCommandCarriesItsOwnSequenceNumber(t *testing.T) {
 }
 
 func TestACommandIsLoggedAndThenAcknowledged(t *testing.T) {
-	log := activity.New(20)
+	log := openTestLog()
 	c, _ := testClient()
 	c.log = log
 	c.StopPrint()
 
-	entries := log.Entries()
+	entries := log.Entries(100)
 	if len(entries) != 1 {
 		t.Fatalf("logged %d entries, want 1", len(entries))
 	}
@@ -166,7 +166,7 @@ func TestACommandIsLoggedAndThenAcknowledged(t *testing.T) {
 	// behind the call rather than the call waiting for it.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if got := log.Entries()[0]; got.Acked != nil {
+		if got := log.Entries(100)[0]; got.Acked != nil {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -190,13 +190,13 @@ func TestCommandsAreNamedInTheLog(t *testing.T) {
 }
 
 func TestAPrinterReportIsLogged(t *testing.T) {
-	log := activity.New(20)
+	log := openTestLog()
 	cache := NewStateCache()
 	payload := `{"print":{"gcode_state":"RUNNING"}}`
 	log.Record(activity.Report, "report", payload)
 	HandleReport(cache, []byte(payload))
 
-	entries := log.Entries()
+	entries := log.Entries(100)
 	if len(entries) != 1 || entries[0].Kind != activity.Report {
 		t.Fatalf("entries = %+v, want one report", entries)
 	}
@@ -292,7 +292,7 @@ func TestConnectingSubscribesAndAsksForEverything(t *testing.T) {
 
 func TestAReportOnTheSubscriptionReachesTheCache(t *testing.T) {
 	c, _ := testClient()
-	c.log = activity.New(20)
+	c.log = openTestLog()
 	sub := &fakeSubscriber{}
 	c.onConnect(sub)
 
@@ -303,7 +303,7 @@ func TestAReportOnTheSubscriptionReachesTheCache(t *testing.T) {
 		t.Errorf("cache = %v, want the report merged in", fields)
 	}
 	var reports int
-	for _, e := range c.log.Entries() {
+	for _, e := range c.log.Entries(100) {
 		if e.Kind == activity.Report {
 			reports++
 		}

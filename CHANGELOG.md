@@ -20,9 +20,17 @@ follow [Semantic Versioning](https://semver.org/).
   the printer and whether it was acknowledged, what the printer reported back,
   and what was sent to subscribed devices. Each entry keeps its raw message,
   because a summary is not always what is needed when working out why something
-  did not happen. Tick boxes choose which kinds to show. It is held in memory
-  and bounded — this is for seeing what just happened, not a history worth
-  keeping across a restart.
+  did not happen. Tick boxes choose which kinds to show. It is kept in the
+  database rather than in memory, so it survives a restart — which is when it is
+  most wanted, since a log that empties itself when the app stops has nothing to
+  show about why it stopped.
+
+- A setting for how much the event log may hold, in megabytes, alongside the
+  camera history window. Once it is reached the oldest entries go. The bound is
+  a size rather than a number of entries because one entry ranges from a few
+  bytes to a whole printer state, so a count says very little about the disk it
+  costs. The figure counts what the log holds, not the size of the database file,
+  which also holds the camera buffer and does not shrink on disk when entries go.
 
 - A Settings screen, reached by the gear in the top corner, holding the camera
   history window and the three automatic-off delays (bed, nozzle, chamber

@@ -55,7 +55,10 @@ Features:
   the database and take effect as soon as they are saved
 - An Events screen shows what was sent to the printer and whether the printer
   acknowledged it, what the printer reported back, and what notifications went
-  out — each with its raw message, for working out why something did not happen
+  out — each with its raw message, for working out why something did not happen.
+  It is kept in the database, so it is still there after a restart, which is
+  when it is most wanted. How much it may hold is a size in megabytes set on the
+  Settings screen; the oldest entries go once it is reached
 - Light, dark, or follow-the-system theme, and the printer screen's sections
   can be hidden and reordered from Settings
 - iOS "Add to Home Screen" gives an app-like full-screen page

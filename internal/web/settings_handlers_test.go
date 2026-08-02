@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/settings"
 )
@@ -22,7 +21,7 @@ func settingsTestServer(t *testing.T) (*httptest.Server, *settings.Store) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, testPrinter(), activity.New(50))
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, testPrinter(), openTestLog())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, config
@@ -57,6 +56,31 @@ func TestSettingsAreServedAsSeconds(t *testing.T) {
 		if got[name] != float64(int(want.Seconds())) {
 			t.Errorf("%s = %v, want %d", name, got[name], int(want.Seconds()))
 		}
+	}
+}
+
+// The event log's bound is the one setting served in megabytes, because that is
+// the unit the field on the page is labelled in.
+func TestTheEventLogLimitIsServedInMegabytes(t *testing.T) {
+	ts, config := settingsTestServer(t)
+	want := float64(settings.Defaults.ActivityLimit / settings.BytesPerMB)
+	if got := readSettings(t, ts)[settings.KeyActivityLimit]; got != want {
+		t.Errorf("event log limit = %v, want %v", got, want)
+	}
+
+	resp, err := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyActivityLimit+"?value=8", "", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	if got := config.Values().ActivityLimit; got != 8*settings.BytesPerMB {
+		t.Errorf("stored %d bytes, want %d", got, 8*settings.BytesPerMB)
+	}
+	if got := readSettings(t, ts)[settings.KeyActivityLimit]; got != float64(8) {
+		t.Errorf("served %v after saving 8, want 8", got)
 	}
 }
 
@@ -134,7 +158,7 @@ func TestBadSettingWritesAreRefused(t *testing.T) {
 func TestAServerWithNoWritableSettingsSaysSo(t *testing.T) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), activity.New(50))
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -151,7 +175,7 @@ func printerTestServer(t *testing.T) (*httptest.Server, *settings.Store, *fakePr
 	config := openTestSettings(t)
 	printer := &fakePrinter{}
 	cache := p1s.NewStateCache()
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, printer, activity.New(50))
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, printer, openTestLog())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, config, printer

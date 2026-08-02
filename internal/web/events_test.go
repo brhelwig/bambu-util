@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brhelwig/bambu-util/internal/activity"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
 )
@@ -238,7 +237,7 @@ func TestAFinishedPrintReachesASubscribedPhone(t *testing.T) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	notifier := openTestNotifier()
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil, testPrinter(), activity.New(50))
+	srv := NewServer(cache, &fakeCommander{}, openTestStore(), notifier, nil, testSettings, nil, testPrinter(), openTestLog())
 
 	key, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
