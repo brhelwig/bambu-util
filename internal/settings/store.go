@@ -28,6 +28,7 @@ const (
 	KeyLampOffAfter   = "lamp-off-after"
 	KeyActivityLimit  = "activity-limit"
 	KeyDatabaseLimit  = "database-limit"
+	KeySessionLength  = "session-length"
 
 	KeyPrinterIP         = "printer-ip"
 	KeyPrinterSerial     = "printer-serial"
@@ -71,6 +72,9 @@ type Values struct {
 	// in bytes. DatabaseLimit is zero when the cap is switched off.
 	ActivityLimit int64
 	DatabaseLimit int64
+
+	// SessionLength is how long a login lasts before it has to be done again.
+	SessionLength time.Duration
 }
 
 // BytesPerMB converts the stored megabytes to the bytes the log counts in.
@@ -85,6 +89,7 @@ var Defaults = Values{
 	NozzleOffAfter: 15 * time.Minute,
 	LampOffAfter:   8 * time.Hour,
 	ActivityLimit:  64 * BytesPerMB,
+	SessionLength:  14 * 24 * time.Hour,
 }
 
 // unit is how a setting's whole number should be read back.
@@ -148,6 +153,10 @@ var specs = map[string]spec{
 	KeyNozzleOffAfter: {unit: seconds, min: 60, max: 7 * 24 * 3600},
 	KeyLampOffAfter:   {unit: seconds, min: 60, max: 7 * 24 * 3600},
 	KeyActivityLimit:  {unit: megabytes, min: 1, max: 512},
+
+	// A login that lasts a year is not much of a login, and one that lasts
+	// minutes makes a phone on the home screen useless.
+	KeySessionLength: {unit: seconds, min: 3600, max: 365 * 24 * 3600},
 
 	// The floor is not fussiness: a cap of a few megabytes would delete almost
 	// everything and rebuild the file on every pass. Off is the default, since
@@ -281,6 +290,7 @@ func (s *Store) reload() error {
 	v.KeptJobs = readInt(stored, KeyKeptJobs, Defaults.KeptJobs)
 	v.ActivityLimit = int64(readInt(stored, KeyActivityLimit, int(Defaults.ActivityLimit/BytesPerMB))) * BytesPerMB
 	v.DatabaseLimit = int64(readInt(stored, KeyDatabaseLimit, int(Defaults.DatabaseLimit/BytesPerMB))) * BytesPerMB
+	v.SessionLength = readDuration(stored, KeySessionLength, Defaults.SessionLength)
 	v.PrinterIP = stored[KeyPrinterIP]
 	v.PrinterSerial = stored[KeyPrinterSerial]
 	v.AccessCode = stored[KeyPrinterAccessCode]

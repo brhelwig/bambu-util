@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brhelwig/bambu-util/internal/auth"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/settings"
 )
@@ -23,7 +24,7 @@ func start(t *testing.T) *httptest.Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	a, err := newApp(ctx, filepath.Join(t.TempDir(), "data"))
+	a, err := newApp(ctx, filepath.Join(t.TempDir(), "data"), auth.Decision{Disabled: true})
 	if err != nil {
 		t.Fatalf("assemble the app: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestTheAppReopensItsDatabase(t *testing.T) {
 
 	for _, run := range []string{"first", "second"} {
 		ctx, cancel := context.WithCancel(context.Background())
-		a, err := newApp(ctx, dir)
+		a, err := newApp(ctx, dir, auth.Decision{Disabled: true})
 		if err != nil {
 			t.Fatalf("%s run: %v", run, err)
 		}
@@ -110,7 +111,7 @@ func TestTheAppReopensItsDatabase(t *testing.T) {
 func TestAPrinterReportReachesTheStatusEndpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	a, err := newApp(ctx, filepath.Join(t.TempDir(), "data"))
+	a, err := newApp(ctx, filepath.Join(t.TempDir(), "data"), auth.Decision{Disabled: true})
 	if err != nil {
 		t.Fatalf("assemble the app: %v", err)
 	}

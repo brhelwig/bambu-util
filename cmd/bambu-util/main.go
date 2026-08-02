@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/brhelwig/bambu-util/internal/activity"
+	"github.com/brhelwig/bambu-util/internal/auth"
 	"github.com/brhelwig/bambu-util/internal/capacity"
 	"github.com/brhelwig/bambu-util/internal/deadlines"
 	"github.com/brhelwig/bambu-util/internal/history"
@@ -42,7 +43,10 @@ type app struct {
 
 // newApp opens the database under dataDir and wires everything to it. The
 // background loops run until ctx is cancelled.
-func newApp(ctx context.Context, dataDir string) (*app, error) {
+//
+// The decision about authentication is passed in rather than read here, so a
+// test says which it wants instead of arranging an environment.
+func newApp(ctx context.Context, dataDir string, decided auth.Decision) (*app, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir %s: %w", dataDir, err)
 	}
@@ -104,7 +108,25 @@ func newApp(ctx context.Context, dataDir string) (*app, error) {
 	v := config.Values()
 	link.Configure(p1s.Config{IP: v.PrinterIP, Serial: v.PrinterSerial, AccessCode: v.AccessCode})
 
+	logins, err := auth.NewStore(db)
+	if err != nil {
+		closeAll()
+		return nil, fmt.Errorf("open the session store: %w", err)
+	}
+	var guard *auth.Authenticator
+	if !decided.Disabled {
+		// Discovery happens now rather than at the first login, so a wrong
+		// issuer stops the app here instead of when someone tries to get in.
+		guard, err = auth.New(ctx, decided.Config, logins,
+			func() time.Duration { return config.Values().SessionLength })
+		if err != nil {
+			closeAll()
+			return nil, err
+		}
+	}
+
 	srv := web.NewServer(cache, link, store, notifier, timers, config.Values, config, link, events)
+	go auth.RunSweeper(ctx, logins, time.Hour, time.Now)
 	go hub.Start(ctx)
 	go srv.EnforceAutoOff(ctx)
 	go srv.EnforceLampAutomation(ctx)
@@ -122,7 +144,14 @@ func newApp(ctx context.Context, dataDir string) (*app, error) {
 		return p1s.GcodeState(fields), jobNameString(fields)
 	})
 
-	return &app{handler: srv.Handler(), cache: cache, describe: link.Describe, close: closeAll}, nil
+	// Everything the app serves goes behind the login, apart from the health
+	// check and the handful of files a phone needs before it can log in.
+	return &app{
+		handler:  guard.Handler(srv.Handler()),
+		cache:    cache,
+		describe: link.Describe,
+		close:    closeAll,
+	}, nil
 }
 
 func main() {
@@ -135,10 +164,21 @@ func main() {
 		dataDir = "./data"
 	}
 
+	// Before anything is opened or served: either a provider was configured or
+	// running without one was expressly asked for. Neither is not a default.
+	decided, err := auth.Decide(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if decided.Disabled {
+		log.Printf("WARNING: %s is set, so anything that can reach this port can drive the printer and watch the camera",
+			auth.EnvDisabled)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	a, err := newApp(ctx, dataDir)
+	a, err := newApp(ctx, dataDir, decided)
 	if err != nil {
 		log.Fatal(err)
 	}
