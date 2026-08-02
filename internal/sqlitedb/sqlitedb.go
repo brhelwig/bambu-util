@@ -12,7 +12,13 @@ import (
 // instead of waiting its turn. Write-ahead logging additionally lets reads go
 // on during a write; it is ignored for ":memory:", which has no file to log
 // against.
-const pragmas = "?_pragma=busy_timeout(5000)&_pragma=journal_mode(wal)"
+//
+// Incremental auto-vacuum is what lets the size cap return deleted space to the
+// disk a little at a time. It only takes hold on a database with no tables yet,
+// which is why one made before this existed has to be converted — see
+// internal/capacity.
+const pragmas = "?_pragma=busy_timeout(5000)&_pragma=journal_mode(wal)" +
+	"&_pragma=auto_vacuum(incremental)"
 
 // Open returns a handle for every store to share. One handle is not a
 // constraint SQLite imposes — it is enough for this app's traffic, and it is

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/brhelwig/bambu-util/internal/capacity"
 	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
@@ -366,4 +367,42 @@ func (s *Store) RecentJobs() ([]Job, error) {
 		jobs = append(jobs, j)
 	}
 	return jobs, rows.Err()
+}
+
+// Name identifies this source to the size cap.
+func (s *Store) Name() string { return "camera frames" }
+
+// Oldest returns the oldest stored frames for the size cap, oldest first. The
+// timestamp is given in milliseconds so frames and event-log entries, which are
+// recorded at different precision, can be put in one order.
+//
+// The order is by id rather than by timestamp, so that it matches how
+// DeleteThrough cuts. Frames are recorded as they arrive, so the two agree;
+// ordering by one and deleting by the other would not survive them disagreeing.
+func (s *Store) Oldest(n int) ([]capacity.Item, error) {
+	rows, err := s.db.Query(`
+		SELECT id, ts, octet_length(jpeg) FROM frames ORDER BY id ASC LIMIT ?`, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []capacity.Item
+	for rows.Next() {
+		var item capacity.Item
+		if err := rows.Scan(&item.ID, &item.When, &item.Bytes); err != nil {
+			return nil, err
+		}
+		item.When *= 1000
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// DeleteThrough removes every frame up to and including id. The size cap is
+// absolute, so this pays no attention to which print a frame belongs to: unlike
+// Prune, it will take footage that KeptJobs protects.
+func (s *Store) DeleteThrough(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM frames WHERE id <= ?`, id)
+	return err
 }

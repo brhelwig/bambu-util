@@ -240,3 +240,47 @@ func TestSetTextRejectsWhatItShould(t *testing.T) {
 		t.Errorf("PrinterIP = %q, want the rejected value not stored", got)
 	}
 }
+
+func TestTheDatabaseCapIsASettingAndIsOffByDefault(t *testing.T) {
+	store := openTest(t)
+	// Off by default on purpose: this deletes footage the other settings
+	// promised to keep, so switching it on has to be a choice.
+	if got := store.Values().DatabaseLimit; got != 0 {
+		t.Errorf("database cap = %d, want 0 meaning off", got)
+	}
+	if err := store.Set(KeyDatabaseLimit, 1024); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got := store.Values().DatabaseLimit; got != 1024*BytesPerMB {
+		t.Errorf("database cap = %d, want %d", got, 1024*BytesPerMB)
+	}
+	// Zero is how it is switched off again, not an out-of-range value.
+	if err := store.Set(KeyDatabaseLimit, 0); err != nil {
+		t.Errorf("switching the cap off was refused: %v", err)
+	}
+	if got := store.Values().DatabaseLimit; got != 0 {
+		t.Errorf("database cap = %d after switching off, want 0", got)
+	}
+	// Between off and the floor there is nothing useful: a cap that small would
+	// delete almost everything and rebuild the file every pass.
+	if err := store.Set(KeyDatabaseLimit, 16); err == nil {
+		t.Error("a cap below the floor was accepted")
+	}
+	if err := store.Set(KeyDatabaseLimit, 100_000); err == nil {
+		t.Error("a cap larger than any disk was accepted")
+	}
+}
+
+// A setting that can be switched off has to say so when it refuses, or the
+// message describes a range that does not include the value that works.
+func TestRefusingTheDatabaseCapMentionsSwitchingItOff(t *testing.T) {
+	err := openTest(t).Set(KeyDatabaseLimit, 16)
+	if err == nil {
+		t.Fatal("a cap below the floor was accepted")
+	}
+	for _, want := range []string{"0", "256 MB", "65536 MB"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %q", err, want)
+		}
+	}
+}

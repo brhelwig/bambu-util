@@ -32,6 +32,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 		settings.KeyNozzleOffAfter: int(v.NozzleOffAfter.Seconds()),
 		settings.KeyLampOffAfter:   int(v.LampOffAfter.Seconds()),
 		settings.KeyActivityLimit:  int(v.ActivityLimit / settings.BytesPerMB),
+		settings.KeyDatabaseLimit:  int(v.DatabaseLimit / settings.BytesPerMB),
 		settings.KeyDashboard:      v.Dashboard,
 	})
 }

@@ -423,6 +423,8 @@
     <input type="number" id="setLampOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
   <div class="setrow"><label for="setActivityLimit">Event log</label>
     <input type="number" id="setActivityLimit" min="1" max="512" step="1"><span class="unit">MB</span></div>
+  <div class="setrow"><label for="setDatabaseLimit">Database cap</label>
+    <input type="number" id="setDatabaseLimit" min="0" max="65536" step="1"><span class="unit">MB</span></div>
   <div class="notifywhat">The camera history window is also how far back the scrub
     bar reaches. Prints kept hold their footage past that window, thinned to one frame
     every 10 seconds. Auto-off countdowns already running keep the window they started with.
@@ -430,7 +432,11 @@
     are much the largest part of it, so how far back it reaches depends on how much the
     printer has to say. The figure counts what the log itself holds, not the size of the
     database file, which also holds the camera buffer and does not shrink on disk when
-    entries go.</div>
+    entries go. The database cap is the one bound on that file: 0 switches it off, and
+    with it set the oldest data goes — frames and log entries alike, whichever is older —
+    until the file is under it. It overrules everything above, so it will delete footage
+    that Prints kept was holding on to. It measures the database file, not the small
+    write-ahead file beside it.</div>
   <button id="settingsSave" disabled>Save</button>
   <div id="settingsMsg" class="notifywhat" style="margin:8px 0 0"></div>
 </div>
@@ -1660,6 +1666,7 @@ const SETTINGS = [
   { id: "setNozzleOff", name: "nozzle-off-after", perUnit: 60 },
   { id: "setLampOff", name: "lamp-off-after", perUnit: 3600 },
   { id: "setActivityLimit", name: "activity-limit", perUnit: 1 },
+  { id: "setDatabaseLimit", name: "database-limit", perUnit: 1 },
 ];
 
 // What the server last told us, so Save knows what actually changed and a

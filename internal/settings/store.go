@@ -27,6 +27,7 @@ const (
 	KeyNozzleOffAfter = "nozzle-off-after"
 	KeyLampOffAfter   = "lamp-off-after"
 	KeyActivityLimit  = "activity-limit"
+	KeyDatabaseLimit  = "database-limit"
 
 	KeyPrinterIP         = "printer-ip"
 	KeyPrinterSerial     = "printer-serial"
@@ -65,9 +66,11 @@ type Values struct {
 	NozzleOffAfter time.Duration
 	LampOffAfter   time.Duration
 
-	// ActivityLimit is in bytes, converted from the megabytes stored, because
-	// every consultation of it is a comparison against a size in bytes.
+	// ActivityLimit and DatabaseLimit are in bytes, converted from the megabytes
+	// stored, because every consultation of them is a comparison against a size
+	// in bytes. DatabaseLimit is zero when the cap is switched off.
 	ActivityLimit int64
+	DatabaseLimit int64
 }
 
 // BytesPerMB converts the stored megabytes to the bytes the log counts in.
@@ -98,9 +101,30 @@ const (
 // being useless — a recording window of a year fills the disk, a shut-off
 // window of a year is not a safety shut-off, and keeping every print ever made
 // defeats the retention it is meant to work alongside.
+//
+// A few settings can also be switched off, which is written as zero and sits
+// below their useful range rather than inside it.
 type spec struct {
 	unit     unit
 	min, max int
+	offAtNil bool
+}
+
+// allows reports whether value is one this setting will take.
+func (s spec) allows(value int) bool {
+	if s.offAtNil && value == 0 {
+		return true
+	}
+	return value >= s.min && value <= s.max
+}
+
+// refuse says what the setting will take, in the units it is written in.
+func (s spec) refuse(name string) error {
+	if s.offAtNil {
+		return fmt.Errorf("%s must be 0 to switch it off, or between %s and %s",
+			name, s.show(s.min), s.show(s.max))
+	}
+	return fmt.Errorf("%s must be between %s and %s", name, s.show(s.min), s.show(s.max))
 }
 
 // show renders a bound the way the setting is written, so a refusal reads in
@@ -118,12 +142,17 @@ func (s spec) show(value int) string {
 // The event log's ceiling is deliberately well short of a whole disk: this runs
 // on a Pi whose database also holds the camera buffer.
 var specs = map[string]spec{
-	KeyRetention:      {seconds, 3600, 30 * 24 * 3600},
-	KeyKeptJobs:       {count, 0, 50},
-	KeyBedOffAfter:    {seconds, 60, 7 * 24 * 3600},
-	KeyNozzleOffAfter: {seconds, 60, 7 * 24 * 3600},
-	KeyLampOffAfter:   {seconds, 60, 7 * 24 * 3600},
-	KeyActivityLimit:  {megabytes, 1, 512},
+	KeyRetention:      {unit: seconds, min: 3600, max: 30 * 24 * 3600},
+	KeyKeptJobs:       {unit: count, min: 0, max: 50},
+	KeyBedOffAfter:    {unit: seconds, min: 60, max: 7 * 24 * 3600},
+	KeyNozzleOffAfter: {unit: seconds, min: 60, max: 7 * 24 * 3600},
+	KeyLampOffAfter:   {unit: seconds, min: 60, max: 7 * 24 * 3600},
+	KeyActivityLimit:  {unit: megabytes, min: 1, max: 512},
+
+	// The floor is not fussiness: a cap of a few megabytes would delete almost
+	// everything and rebuild the file on every pass. Off is the default, since
+	// this deletes footage the other settings promised to keep.
+	KeyDatabaseLimit: {unit: megabytes, min: 256, max: 64 * 1024, offAtNil: true},
 }
 
 // Store reads and writes the settings, keeping the current set in memory so the
@@ -187,8 +216,8 @@ func (s *Store) Set(name string, value int) error {
 	if !ok {
 		return fmt.Errorf("settings: unknown setting %q", name)
 	}
-	if value < spec.min || value > spec.max {
-		return fmt.Errorf("%s must be between %s and %s", name, spec.show(spec.min), spec.show(spec.max))
+	if !spec.allows(value) {
+		return spec.refuse(name)
 	}
 	if _, err := s.db.Exec(`
 		INSERT INTO settings (name, value) VALUES (?, ?)
@@ -251,6 +280,7 @@ func (s *Store) reload() error {
 	v.LampOffAfter = readDuration(stored, KeyLampOffAfter, Defaults.LampOffAfter)
 	v.KeptJobs = readInt(stored, KeyKeptJobs, Defaults.KeptJobs)
 	v.ActivityLimit = int64(readInt(stored, KeyActivityLimit, int(Defaults.ActivityLimit/BytesPerMB))) * BytesPerMB
+	v.DatabaseLimit = int64(readInt(stored, KeyDatabaseLimit, int(Defaults.DatabaseLimit/BytesPerMB))) * BytesPerMB
 	v.PrinterIP = stored[KeyPrinterIP]
 	v.PrinterSerial = stored[KeyPrinterSerial]
 	v.AccessCode = stored[KeyPrinterAccessCode]
@@ -271,7 +301,7 @@ func readInt(stored map[string]string, name string, fallback int) int {
 	if err != nil {
 		return fallback
 	}
-	if spec := specs[name]; n < spec.min || n > spec.max {
+	if !specs[name].allows(n) {
 		return fallback
 	}
 	return n

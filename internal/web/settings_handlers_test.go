@@ -329,3 +329,27 @@ func TestThePrinterDetailsCannotBeSetThroughTheSettingsEndpoint(t *testing.T) {
 		t.Errorf("the printer was changed through the settings endpoint: %+v", v)
 	}
 }
+
+// The database cap is served in megabytes like the event log's, with zero
+// meaning it is switched off.
+func TestTheDatabaseCapIsServedInMegabytes(t *testing.T) {
+	ts, config := settingsTestServer(t)
+	if got := readSettings(t, ts)[settings.KeyDatabaseLimit]; got != float64(0) {
+		t.Errorf("database cap = %v, want 0 meaning off", got)
+	}
+
+	resp, err := ts.Client().Post(ts.URL+"/api/settings/"+settings.KeyDatabaseLimit+"?value=1024", "", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	if got := config.Values().DatabaseLimit; got != 1024*settings.BytesPerMB {
+		t.Errorf("stored %d bytes, want %d", got, 1024*settings.BytesPerMB)
+	}
+	if got := readSettings(t, ts)[settings.KeyDatabaseLimit]; got != float64(1024) {
+		t.Errorf("served %v after saving 1024, want 1024", got)
+	}
+}

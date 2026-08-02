@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brhelwig/bambu-util/internal/capacity"
 	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
@@ -283,4 +284,42 @@ func (a *Log) Entries(limit int) []Entry {
 		return nil
 	}
 	return out
+}
+
+// Name identifies this source to the size cap.
+func (a *Log) Name() string { return "event log" }
+
+// Oldest returns the oldest stored entries for the size cap, oldest first.
+func (a *Log) Oldest(n int) ([]capacity.Item, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	rows, err := a.db.Query(`SELECT id, at, `+sizeExpr+` FROM activity ORDER BY id ASC LIMIT ?`, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []capacity.Item
+	for rows.Next() {
+		var item capacity.Item
+		if err := rows.Scan(&item.ID, &item.When, &item.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// DeleteThrough removes every entry up to and including id. The running total
+// is recounted rather than adjusted, because the cap deletes on its own
+// schedule and the two must not drift apart.
+func (a *Log) DeleteThrough(id int64) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if _, err := a.db.Exec(`DELETE FROM activity WHERE id <= ?`, id); err != nil {
+		return err
+	}
+	return a.db.QueryRow(`SELECT COALESCE(SUM(` + sizeExpr + `), 0) FROM activity`).Scan(&a.bytes)
 }

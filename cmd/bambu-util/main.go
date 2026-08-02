@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/brhelwig/bambu-util/internal/activity"
+	"github.com/brhelwig/bambu-util/internal/capacity"
 	"github.com/brhelwig/bambu-util/internal/deadlines"
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
@@ -108,6 +109,10 @@ func newApp(ctx context.Context, dataDir string) (*app, error) {
 	go srv.EnforceAutoOff(ctx)
 	go srv.EnforceLampAutomation(ctx)
 	go srv.EnforceEventNotifications(ctx)
+	// The size cap runs after the retention pruner on the same cadence, and only
+	// bites when what retention left is still more than the disk should hold.
+	go capacity.Run(ctx, capacity.New(db,
+		func() int64 { return config.Values().DatabaseLimit }, store, events), 5*time.Minute)
 	go history.RunPruner(ctx, store, func() history.Policy {
 		v := config.Values()
 		return history.Policy{Window: v.Retention, KeptJobs: v.KeptJobs}

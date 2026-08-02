@@ -59,6 +59,11 @@ Features:
   It is kept in the database, so it is still there after a restart, which is
   when it is most wanted. How much it may hold is a size in megabytes set on the
   Settings screen; the oldest entries go once it is reached
+- An optional cap on the database file itself, off by default. With one set, the
+  oldest data goes — camera frames and event-log entries alike, whichever is
+  older — until the file is back under it, and the space is returned to the disk
+  a little at a time rather than in one long pause. It overrules the camera
+  window and the prints-kept setting, because a full disk stops everything
 - Light, dark, or follow-the-system theme, and the printer screen's sections
   can be hidden and reordered from Settings
 - iOS "Add to Home Screen" gives an app-like full-screen page
