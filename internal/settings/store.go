@@ -156,7 +156,7 @@ var specs = map[string]spec{
 
 	// A login that lasts a year is not much of a login, and one that lasts
 	// minutes makes a phone on the home screen useless.
-	KeySessionLength: {unit: seconds, min: 3600, max: 365 * 24 * 3600},
+	KeySessionLength: {unit: seconds, min: 24 * 3600, max: 365 * 24 * 3600},
 
 	// The floor is not fussiness: a cap of a few megabytes would delete almost
 	// everything and rebuild the file on every pass. Off is the default, since

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -493,20 +494,124 @@ func TestWhoIsLoggedInIsRealJSON(t *testing.T) {
 	}
 }
 
-// Starting a login needs no login, so the table it writes to has to be bounded
-// or anything that can reach the port could grow the database — and the size
-// cap would answer by deleting camera footage instead.
-func TestPartWayLoginsAreBounded(t *testing.T) {
-	app, _, _, store := setup(t)
-	for range MaxPendingLogins + 50 {
-		c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		}}
-		resp, err := c.Get(app.URL + "/auth/login")
+// A login begun on another name for the app — a LAN address — is moved to
+// PUBLIC_URL first, because the provider sends the browser back there and the
+// state cookie has to be waiting on that host.
+func TestALoginOnAnotherHostIsMovedToThePublicOne(t *testing.T) {
+	app, _, _, _ := setup(t)
+	other := strings.Replace(app.URL, "127.0.0.1", "localhost", 1)
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := c.Get(other + "/auth/login?next=%2Fcamera")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("login on another host = %d, want a redirect", resp.StatusCode)
+	}
+	if want := app.URL + "/auth/login?next=%2Fcamera"; resp.Header.Get("Location") != want {
+		t.Errorf("redirected to %q, want %q", resp.Header.Get("Location"), want)
+	}
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == stateCookieName {
+			t.Error("the state cookie was set on a host the callback will not come back to")
+		}
+	}
+
+	// And the whole round trip works from there.
+	jar := client(t)
+	if resp := get(t, jar, other+"/auth/login"); resp.StatusCode != http.StatusOK {
+		t.Errorf("logging in from another host ended on %d, want 200", resp.StatusCode)
+	}
+}
+
+// A polling page must not be a stream of writes: once extended, a session is
+// left alone until its expiry has gone an hour stale.
+func TestASessionIsNotExtendedOnEveryRequest(t *testing.T) {
+	app, _, a, store := setup(t)
+	c := client(t)
+	get(t, c, app.URL+"/auth/login")
+
+	var id string
+	if err := store.db.QueryRow(`SELECT id FROM sessions`).Scan(&id); err != nil {
+		t.Fatalf("no session was opened: %v", err)
+	}
+	before, err := store.Session(id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a.now = func() time.Time { return time.Now().Add(30 * time.Minute) }
+	resp := get(t, c, app.URL+"/api/status")
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == cookieName {
+			t.Error("the cookie was re-issued half an hour into a fresh session")
+		}
+	}
+	after, err := store.Session(id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Expires.Equal(before.Expires) {
+		t.Errorf("session moved from %s to %s half an hour in, want it left alone", before.Expires, after.Expires)
+	}
+}
+
+// SameSite=Lax lets a sibling subdomain post with the cookie attached, so an
+// unsafe request the browser marks as coming from elsewhere is refused.
+func TestAPostFromAnotherOriginIsRefused(t *testing.T) {
+	app, _, _, _ := setup(t)
+	c := client(t)
+	get(t, c, app.URL+"/auth/login")
+
+	for _, site := range []string{"same-site", "cross-site"} {
+		req, err := http.NewRequest(http.MethodPost, app.URL+"/auth/logout", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Sec-Fetch-Site", site)
+		resp, err := c.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("a %s POST = %d, want 403", site, resp.StatusCode)
+		}
+	}
+	// It did not log anyone out on the way.
+	if resp := get(t, c, app.URL+"/api/status"); resp.StatusCode != http.StatusOK {
+		t.Errorf("/api/status = %d after refused posts, want still logged in", resp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, app.URL+"/auth/logout", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("a same-origin POST = %d, want 200", resp.StatusCode)
+	}
+}
+
+// Starting a login needs no login, so the table it writes to has to be bounded
+// or anything that can reach the port could grow the database — and the size
+// cap would answer by deleting camera footage instead.
+func TestPartWayLoginsAreBounded(t *testing.T) {
+	store := openTestStore(t)
+	expires := time.Unix(1_700_000_000, 0).Add(loginWindow)
+	for i := range MaxPendingLogins + 50 {
+		// All in the same second, so nothing but insertion order separates them.
+		if err := store.StartLogin(fmt.Sprintf("state-%d", i), "v", "n", "/", expires); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var held int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pending_logins`).Scan(&held); err != nil {
@@ -514,5 +619,13 @@ func TestPartWayLoginsAreBounded(t *testing.T) {
 	}
 	if held > MaxPendingLogins {
 		t.Errorf("holding %d part-way logins, over the %d bound", held, MaxPendingLogins)
+	}
+	// What goes is the oldest, never the login that was just started.
+	newest := fmt.Sprintf("state-%d", MaxPendingLogins+49)
+	if _, err := store.TakeLogin(newest, expires.Add(-loginWindow)); err != nil {
+		t.Errorf("the newest login was dropped: %v", err)
+	}
+	if _, err := store.TakeLogin("state-0", expires.Add(-loginWindow)); err == nil {
+		t.Error("the oldest login was kept over the bound")
 	}
 }

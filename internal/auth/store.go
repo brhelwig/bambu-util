@@ -158,21 +158,29 @@ type Pending struct {
 // Starting one needs no login, so without a bound anything that can reach the
 // port could sit in a loop on it and grow the database — and the size cap would
 // answer that by deleting camera footage and event-log entries, which is the
-// wrong thing losing out. Far above any real number of people logging in at the
-// same moment, so it only ever catches abuse.
-const MaxPendingLogins = 256
+// wrong thing losing out.
+//
+// The bound is a trade, not a wall. The oldest logins are the ones dropped, so
+// someone flooding the endpoint can still push out a real login that is
+// part-way through. Set this high, that takes thousands of requests in the
+// time it takes to find a passkey rather than a few, while the table stays
+// at a couple of megabytes.
+const MaxPendingLogins = 10000
 
 // StartLogin records what the callback will need to check when the provider
 // sends the browser back. Lapsed rows and any excess beyond MaxPendingLogins go
 // at the same time, oldest first, so the table stays bounded between sweeps.
+//
+// Oldest is by insertion order, not by expiry: logins started in the same
+// second share an expiry, and ordering by it could drop the newest of them.
 func (s *Store) StartLogin(state, verifier, nonce, next string, expires time.Time) error {
 	now := expires.Add(-loginWindow)
 	if _, err := s.db.Exec(`DELETE FROM pending_logins WHERE expires <= ?`, now.Unix()); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`
-		DELETE FROM pending_logins WHERE state NOT IN (
-		  SELECT state FROM pending_logins ORDER BY expires DESC LIMIT ?
+		DELETE FROM pending_logins WHERE rowid <= (
+		  SELECT rowid FROM pending_logins ORDER BY rowid DESC LIMIT 1 OFFSET ?
 		)`, MaxPendingLogins-1); err != nil {
 		return err
 	}
