@@ -96,11 +96,16 @@ func TestValuesOutsideTheBoundsAreRefused(t *testing.T) {
 		"retention far too long":  365 * 24 * 3600,
 		"retention far too short": 1,
 		"shut-off far too long":   365 * 24 * 3600,
+		"shut-off under an hour":  30 * 60,
+		"lamp under an hour":      30 * 60,
 	}
 	for name, value := range cases {
 		key := KeyRetention
 		if strings.HasPrefix(name, "shut-off") {
 			key = KeyBedOffAfter
+		}
+		if strings.HasPrefix(name, "lamp") {
+			key = KeyLampOffAfter
 		}
 		if err := store.Set(key, value); err == nil {
 			t.Errorf("%s (%d) was accepted", name, value)
