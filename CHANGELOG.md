@@ -26,7 +26,7 @@ follow [Semantic Versioning](https://semver.org/).
 
   Authorization code flow with PKCE and a nonce. Sessions live in the database
   and the cookie carries nothing but their id, marked `HttpOnly`, `SameSite=Lax`
-  and `Secure` when the request arrived over HTTPS. How long a login lasts is on
+  and `Secure` when `PUBLIC_URL` is HTTPS. How long a login lasts is on
   the Settings screen, counted from the last time the page was used, and is 14
   days by default.
 
@@ -182,6 +182,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- With `AUTH_DISABLED=true`, a request the browser marks as coming from
+  another site is refused. Without this, a web page open on any machine on
+  the network could post actions to the printer's LAN address — heaters,
+  settings — and they would be carried out. The app's own page, curl and
+  scripts are unaffected.
+- The bed auto-off and lamp-off delays can no longer be set below an hour.
+  The Settings screen shows them in whole hours, so a shorter value set
+  through the API read as 0 there and made every save from that screen fail.
 - Pending countdowns survive a restart. The heater shut-offs, the lamp's
   eight-hour delay and the bed reminder clock were held in memory only, so
   every restart cancelled them silently — and since the deployment picks up a
