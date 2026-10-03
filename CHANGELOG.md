@@ -182,6 +182,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- With `AUTH_DISABLED=true`, a request the browser marks as coming from
+  another site is refused. Without this, a web page open on any machine on
+  the network could post actions to the printer's LAN address — heaters,
+  settings — and they would be carried out. The app's own page, curl and
+  scripts are unaffected.
 - The bed auto-off and lamp-off delays can no longer be set below an hour.
   The Settings screen shows them in whole hours, so a shorter value set
   through the API read as 0 there and made every save from that screen fail.
