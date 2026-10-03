@@ -18,6 +18,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Readable messages for printer errors: about 4,900 HMS codes and 940 print
+  error codes are now translated (community wording, not yet checked against a
+  real printer), and the separate `print_error` value now appears in the error
+  banner and push notifications alongside HMS entries. Unknown codes still show
+  the raw code.
 - A login, over OpenID Connect. Any provider works — it is built on the standard
   discovery document rather than anything provider-specific — and it was
   developed against Pocket ID, whose per-client group restriction is what

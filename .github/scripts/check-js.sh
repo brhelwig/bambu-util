@@ -10,6 +10,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 page=internal/web/static/index.html
 worker=internal/web/static/sw.js
 capture=.github/screenshots/capture.mjs
+compare=.github/screenshots/compare.mjs
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -29,7 +30,8 @@ fi
 
 cp "$worker" "$work/sw.js"
 cp "$capture" "$work/capture.mjs"
-scripts+=("$work/sw.js" "$work/capture.mjs")
+cp "$compare" "$work/compare.mjs"
+scripts+=("$work/sw.js" "$work/capture.mjs" "$work/compare.mjs")
 
 for f in "${scripts[@]}"; do
   node --check "$f"
@@ -41,4 +43,4 @@ npm install --prefix "$work" --silent --no-save --no-audit --no-fund eslint@9 gl
 # extracted files as the project it is linting.
 (cd "$work" && ./node_modules/.bin/eslint -- *.js *.mjs)
 
-echo "checked ${#scripts[@]} script(s) from $page, $worker and $capture"
+echo "checked ${#scripts[@]} script(s) from $page, $worker, $capture and $compare"
