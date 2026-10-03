@@ -3,7 +3,7 @@ module github.com/brhelwig/bambu-util
 go 1.26.5
 
 require (
-	github.com/coreos/go-oidc/v3 v3.20.0
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	golang.org/x/oauth2 v0.36.0
 	modernc.org/sqlite v1.54.0
