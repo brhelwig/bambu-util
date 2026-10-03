@@ -53,3 +53,31 @@ func TestHMSErrorsDefensive(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedTables(t *testing.T) {
+	msg, ok := HMSMessage("0300-0100-0001-0001")
+	if !ok || msg == "" {
+		t.Fatalf("expected embedded HMS entry, got %q ok=%v", msg, ok)
+	}
+	msg, ok = PrintErrorMessage("0300-4000")
+	if !ok || msg == "" {
+		t.Fatalf("expected embedded print_error entry, got %q ok=%v", msg, ok)
+	}
+	if m, _ := HMSMessage("0300-8000-0003-0002"); m != "AMS filament runout" {
+		t.Errorf("override lost: %q", m)
+	}
+}
+
+func TestPrintErrorSurfaced(t *testing.T) {
+	got := HMSErrors(map[string]any{"print_error": float64(0x03004000)})
+	if len(got) != 1 || got[0].Code != "0300-4000" || got[0].Message == got[0].Code {
+		t.Fatalf("got %+v", got)
+	}
+	if got := HMSErrors(map[string]any{"print_error": float64(0)}); len(got) != 0 {
+		t.Fatalf("zero print_error should be silent: %+v", got)
+	}
+	got = HMSErrors(map[string]any{"print_error": float64(0xDEADBEEF)})
+	if len(got) != 1 || got[0].Message != "DEAD-BEEF" {
+		t.Fatalf("unknown code should fall back to raw: %+v", got)
+	}
+}
