@@ -182,6 +182,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The bed auto-off and lamp-off delays can no longer be set below an hour.
+  The Settings screen shows them in whole hours, so a shorter value set
+  through the API read as 0 there and made every save from that screen fail.
 - Pending countdowns survive a restart. The heater shut-offs, the lamp's
   eight-hour delay and the bed reminder clock were held in memory only, so
   every restart cancelled them silently — and since the deployment picks up a
