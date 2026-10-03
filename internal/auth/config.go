@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -65,6 +66,11 @@ func Decide(env func(string) string) (Decision, error) {
 	case disabled:
 		return Decision{Disabled: true}, nil
 	case configured:
+		public, err := checkPublicURL(cfg.PublicURL)
+		if err != nil {
+			return Decision{}, err
+		}
+		cfg.PublicURL = public
 		return Decision{Config: cfg}, nil
 	case partly:
 		return Decision{}, fmt.Errorf(
@@ -75,6 +81,29 @@ func Decide(env func(string) string) (Decision, error) {
 			"nothing was said about authentication. Set %s, %s, %s and %s to require a login, or %s=true to run with none",
 			EnvIssuer, EnvClientID, EnvClientSecret, EnvPublicURL, EnvDisabled)
 	}
+}
+
+// checkPublicURL makes sure PUBLIC_URL is something a redirect can be built
+// from, and returns it without a trailing slash. A value that is merely present
+// would start the app and then fail every login at the provider, which is the
+// failure the startup check is there to rule out.
+func checkPublicURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("%s=%q is not a URL: %w", EnvPublicURL, raw, err)
+	case u.Scheme != "http" && u.Scheme != "https":
+		return "", fmt.Errorf("%s=%q needs to start with https:// (or http://)", EnvPublicURL, raw)
+	case u.Host == "":
+		return "", fmt.Errorf("%s=%q has no host", EnvPublicURL, raw)
+	case u.User != nil, u.RawQuery != "", u.Fragment != "", u.ForceQuery:
+		return "", fmt.Errorf("%s=%q should be just the scheme and host, like https://printer.example.com", EnvPublicURL, raw)
+	case u.Path != "" && u.Path != "/":
+		// The app serves its login from the root, so a path here would name a
+		// callback that nothing answers.
+		return "", fmt.Errorf("%s=%q has a path; the app has to be served from the root of its host", EnvPublicURL, raw)
+	}
+	return u.Scheme + "://" + u.Host, nil
 }
 
 func is(n int) string {

@@ -110,3 +110,43 @@ func TestOnlyTheExactWordSwitchesAuthenticationOff(t *testing.T) {
 		}
 	}
 }
+
+// A PUBLIC_URL that cannot be redirected to would start the app and then fail
+// every login at the provider, so it is refused at startup instead.
+func TestAPublicURLThatCannotBeRedirectedToIsRefused(t *testing.T) {
+	for _, bad := range []string{
+		"printer.example.com",
+		"ftp://printer.example.com",
+		"https://",
+		"https://printer.example.com/bambu",
+		"https://printer.example.com/?x=1",
+		"https://printer.example.com/#top",
+		"https://me@printer.example.com",
+	} {
+		given := map[string]string{}
+		for name, value := range complete {
+			given[name] = value
+		}
+		given[EnvPublicURL] = bad
+		if _, err := Decide(env(given)); err == nil {
+			t.Errorf("%s=%q was accepted", EnvPublicURL, bad)
+		} else if !strings.Contains(err.Error(), EnvPublicURL) {
+			t.Errorf("the refusal of %q does not name %s: %v", bad, EnvPublicURL, err)
+		}
+	}
+}
+
+func TestATrailingSlashOnThePublicURLIsDropped(t *testing.T) {
+	given := map[string]string{}
+	for name, value := range complete {
+		given[name] = value
+	}
+	given[EnvPublicURL] = "https://printer.example.com:8443/"
+	got, err := Decide(env(given))
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if got.Config.PublicURL != "https://printer.example.com:8443" {
+		t.Errorf("PublicURL = %q, want it without the trailing slash", got.Config.PublicURL)
+	}
+}

@@ -26,7 +26,7 @@ follow [Semantic Versioning](https://semver.org/).
 
   Authorization code flow with PKCE and a nonce. Sessions live in the database
   and the cookie carries nothing but their id, marked `HttpOnly`, `SameSite=Lax`
-  and `Secure` when the request arrived over HTTPS. How long a login lasts is on
+  and `Secure` when `PUBLIC_URL` is HTTPS. How long a login lasts is on
   the Settings screen, counted from the last time the page was used, and is 14
   days by default.
 

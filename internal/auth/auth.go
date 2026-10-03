@@ -33,6 +33,17 @@ type Config struct {
 // registered with the provider is PublicURL with this on the end.
 const CallbackPath = "/auth/callback"
 
+// discoveryTimeout bounds how long startup waits on the provider. A provider
+// that is down or silently dropping packets would otherwise hold the app at
+// startup forever, saying nothing and never answering its health check.
+const discoveryTimeout = 30 * time.Second
+
+// extendEvery is how stale a session's expiry may get before using the app
+// pushes it out again. Extending on every request would write to the database
+// several times a second for each open page, which polls; once an hour is
+// indistinguishable to someone who logs in every few days.
+const extendEvery = time.Hour
+
 // loginWindow is how long a part-way login may sit unfinished. Long enough to
 // find a passkey, short enough that abandoned ones do not pile up.
 const loginWindow = 15 * time.Minute
@@ -50,6 +61,9 @@ type Authenticator struct {
 	store    *Store
 	verifier *oidc.IDTokenVerifier
 	oauth    oauth2.Config
+	// public is PublicURL parsed. Its host is the one every login runs on, and
+	// its scheme decides whether cookies are marked Secure.
+	public *url.URL
 	// endSession is the provider's logout URL when it advertises one, so
 	// logging out here does not leave a provider session that logs straight
 	// back in on the next click.
@@ -62,7 +76,15 @@ type Authenticator struct {
 // Discovery happens here rather than on the first request, so a wrong issuer
 // stops the app at startup instead of when someone tries to log in.
 func New(ctx context.Context, cfg Config, store *Store, sessionFor func() time.Duration) (*Authenticator, error) {
-	provider, err := oidc.NewProvider(ctx, cfg.Issuer)
+	public, err := url.Parse(strings.TrimRight(cfg.PublicURL, "/"))
+	if err != nil || public.Host == "" {
+		return nil, fmt.Errorf("%s=%q is not a URL with a host", EnvPublicURL, cfg.PublicURL)
+	}
+	// The key set the provider hands back keeps none of this context's
+	// cancellation, so the deadline covers discovery and nothing after it.
+	discover, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
+	provider, err := oidc.NewProvider(discover, cfg.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("read the provider's configuration at %s: %w", cfg.Issuer, err)
 	}
@@ -79,9 +101,10 @@ func New(ctx context.Context, cfg Config, store *Store, sessionFor func() time.D
 			ClientID:     cfg.ClientID,
 			ClientSecret: cfg.ClientSecret,
 			Endpoint:     provider.Endpoint(),
-			RedirectURL:  strings.TrimRight(cfg.PublicURL, "/") + CallbackPath,
+			RedirectURL:  public.String() + CallbackPath,
 			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
 		},
+		public:     public,
 		endSession: extra.EndSession,
 		sessionFor: sessionFor,
 		now:        time.Now,
@@ -112,7 +135,16 @@ func (a *Authenticator) Handler(next http.Handler) http.Handler {
 	mux.HandleFunc("POST /auth/logout", a.logout)
 	mux.HandleFunc("GET /auth/me", a.me)
 	mux.Handle("/", a.guard(next))
-	return mux
+
+	// SameSite=Lax keeps the cookie off requests from other sites, but a
+	// sibling subdomain counts as the same site, so anything served elsewhere
+	// under the same domain could still post an action with it attached. This
+	// refuses any unsafe request the browser says came from another origin.
+	protect := http.NewCrossOriginProtection()
+	if err := protect.AddTrustedOrigin(a.public.Scheme + "://" + a.public.Host); err != nil {
+		log.Printf("auth: trusting %s as an origin: %v", a.public, err)
+	}
+	return protect.Handler(mux)
 }
 
 // guard lets a request through only when it carries a live session.
@@ -130,12 +162,16 @@ func (a *Authenticator) guard(next http.Handler) http.Handler {
 		// Using the app keeps you logged in; the clock only runs out on a
 		// browser that has stopped coming back. The cookie is re-issued as well
 		// as the row, because a browser throws its cookie away at the expiry it
-		// was given and would never come back to be extended again.
+		// was given and would never come back to be extended again. Both wait
+		// until the expiry is extendEvery stale, so a polling page is not a
+		// stream of writes.
 		until := a.now().Add(a.sessionFor())
-		if err := a.store.Extend(session.ID, until); err != nil {
-			log.Printf("auth: extending a session: %v", err)
-		} else {
-			http.SetCookie(w, a.cookie(r, session.ID, until))
+		if session.Expires.Before(until.Add(-extendEvery)) {
+			if err := a.store.Extend(session.ID, until); err != nil {
+				log.Printf("auth: extending a session: %v", err)
+			} else {
+				http.SetCookie(w, a.cookie(session.ID, until))
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -167,6 +203,14 @@ func (a *Authenticator) refuse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Authenticator) login(w http.ResponseWriter, r *http.Request) {
+	// The provider sends the browser back to PublicURL, so the state cookie has
+	// to be set on that host too; set anywhere else, the callback arrives
+	// without it and is refused. A login begun on another name for the app — a
+	// LAN address, say — is moved over before anything is set.
+	if !strings.EqualFold(r.Host, a.public.Host) {
+		http.Redirect(w, r, a.public.String()+r.URL.RequestURI(), http.StatusFound)
+		return
+	}
 	state, err := token()
 	if err != nil {
 		http.Error(w, "could not start the login", http.StatusInternalServerError)
@@ -195,7 +239,7 @@ func (a *Authenticator) login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/auth",
 		Expires:  a.now().Add(loginWindow),
 		HttpOnly: true,
-		Secure:   overHTTPS(r),
+		Secure:   a.secure(),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, a.oauth.AuthCodeURL(state,
@@ -251,7 +295,7 @@ func (a *Authenticator) callback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: stateCookieName, Value: "", Path: "/auth",
 		Expires: time.Unix(0, 0), HttpOnly: true,
-		Secure: overHTTPS(r), SameSite: http.SameSiteLaxMode,
+		Secure: a.secure(), SameSite: http.SameSiteLaxMode,
 	})
 
 	pending, err := a.store.TakeLogin(state, a.now())
@@ -310,7 +354,7 @@ func (a *Authenticator) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the login could not be completed", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, a.cookie(r, id, now.Add(a.sessionFor())))
+	http.SetCookie(w, a.cookie(id, now.Add(a.sessionFor())))
 	log.Printf("auth: %s logged in", name)
 	http.Redirect(w, r, pending.Next, http.StatusFound)
 }
@@ -322,7 +366,7 @@ func (a *Authenticator) logout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// An expiry in the past is how a cookie is taken back.
-	http.SetCookie(w, a.cookie(r, "", time.Unix(0, 0)))
+	http.SetCookie(w, a.cookie("", time.Unix(0, 0)))
 
 	// Where to go next is reported rather than redirected to. A redirect here
 	// would be followed by the page's own fetch, and the provider's end-session
@@ -355,27 +399,29 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
-// cookie builds the session cookie. It is marked Secure only when the request
-// arrived over HTTPS, directly or through a proxy that terminated it, because
-// marking it Secure on a plain-HTTP deployment would mean the browser never
-// sends it back and nobody could stay logged in.
+// cookie builds the session cookie.
 //
-// SameSite=Lax is what stops another site quietly posting an action to the
-// printer with this cookie attached.
-func (a *Authenticator) cookie(r *http.Request, value string, expires time.Time) *http.Cookie {
+// SameSite=Lax keeps it off requests that start on another site. It does not
+// stop a sibling subdomain, which is the same site; the cross-origin check in
+// Handler covers that.
+func (a *Authenticator) cookie(value string, expires time.Time) *http.Cookie {
 	return &http.Cookie{
 		Name:     cookieName,
 		Value:    value,
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,
-		Secure:   overHTTPS(r),
+		Secure:   a.secure(),
 		SameSite: http.SameSiteLaxMode,
 	}
 }
 
-func overHTTPS(r *http.Request) bool {
-	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+// secure is whether cookies are marked Secure. It follows PublicURL rather than
+// how each request arrived: a header saying the request came over HTTPS is the
+// client's to set, and a proxy may not set it at all. Marking a cookie Secure
+// on a plain-HTTP deployment would mean the browser never sends it back.
+func (a *Authenticator) secure() bool {
+	return a.public.Scheme == "https"
 }
 
 // RunSweeper clears out lapsed sessions and abandoned logins on every tick of

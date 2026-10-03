@@ -459,10 +459,14 @@ const $ = id => document.getElementById(id);
 // next, and every one of them would otherwise fail on its own in its own way.
 // Catching it in one place sends the browser to log in and come back here,
 // rather than leaving a page that quietly stops updating.
+// Only the first 401 navigates: a lapsed session fails every poll in flight at
+// once, and each extra login started would replace the one before it.
 const nativeFetch = window.fetch.bind(window);
+let loggingIn = false;
 window.fetch = async (...args) => {
   const response = await nativeFetch(...args);
-  if (response.status === 401) {
+  if (response.status === 401 && !loggingIn) {
+    loggingIn = true;
     location.href = "/auth/login?next=" + encodeURIComponent(location.pathname + location.search);
   }
   return response;
