@@ -3,12 +3,11 @@ name: screenshots
 on:
   pull_request:
 
-# Screenshots are pushed to an orphan branch and linked from the comment.
-# GitHub has no public way to attach an image to a comment, so the image has to
-# be reachable by URL before it can be shown; the orphan branch keeps them out
-# of the history of anything that ships.
+# Each screen is captured from the pull request and from its base branch, and
+# only the ones that look different are kept. Those go up as an artifact of the
+# run, and one comment on the pull request lists them and links to it.
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 concurrency:
@@ -18,11 +17,16 @@ concurrency:
 jobs:
   capture:
     # A pull request from a fork gets a read-only token, so it could capture but
-    # never publish. Skip rather than fail.
+    # never comment. Skip rather than fail.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    env:
+      RETENTION_DAYS: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The base commit is built too, to compare against.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
@@ -35,34 +39,76 @@ jobs:
       - name: Install the browser
         working-directory: .github/screenshots
         run: |
-          npm install --no-audit --no-fund playwright@1.62.1
+          npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
       - name: Run the app
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          go build -o /tmp/bambu-util ./cmd/bambu-util
-          mkdir -p /tmp/shot-data
           # No printer here. The app serves the page regardless, and the status
           # endpoint is answered by the browser, so nothing depends on one.
           # No login either: the app refuses to start without being told one way
           # or the other, and there is no provider to point these at.
-          LISTEN_ADDR=127.0.0.1:8081 DATA_DIR=/tmp/shot-data AUTH_DISABLED=true /tmp/bambu-util &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8081/healthz >/dev/null && break
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:8081/healthz
+          serve() { # binary, port
+            mkdir -p "/tmp/shot-data-$2"
+            LISTEN_ADDR="127.0.0.1:$2" DATA_DIR="/tmp/shot-data-$2" AUTH_DISABLED=true "$1" &
+            for i in $(seq 1 30); do
+              curl -sf "http://127.0.0.1:$2/healthz" >/dev/null && return 0
+              sleep 1
+            done
+            curl -sf "http://127.0.0.1:$2/healthz"
+          }
 
+          go build -o /tmp/bambu-util ./cmd/bambu-util
+          serve /tmp/bambu-util 8081
+
+          # The base branch is only something to compare against. If it cannot
+          # be built or started, every shot is shown rather than none.
+          git worktree add --detach /tmp/base "$BASE_SHA"
+          if (cd /tmp/base && go build -o /tmp/bambu-util-base ./cmd/bambu-util) &&
+             serve /tmp/bambu-util-base 8082; then
+            echo "BASELINE=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::could not run the base branch; showing every screen"
+          fi
+
+      # Both captures use this branch's harness, so the states are staged the
+      # same way and any difference is the page's own.
       - name: Capture
         working-directory: .github/screenshots
-        env:
-          BASE: http://127.0.0.1:8081
-          OUT: ${{ github.workspace }}/shots
-        run: node capture.mjs
+        run: |
+          BASE=http://127.0.0.1:8081 OUT="$GITHUB_WORKSPACE/shots/head" node capture.mjs
+          if [ "${BASELINE:-}" = true ]; then
+            BASE=http://127.0.0.1:8082 OUT="$GITHUB_WORKSPACE/shots/base" node capture.mjs ||
+              echo "::warning::could not capture the base branch; showing every screen"
+          fi
 
-      - name: Publish and comment
+      - name: Compare
+        id: compare
+        working-directory: .github/screenshots
+        env:
+          HEAD_DIR: ${{ github.workspace }}/shots/head
+          BASE_DIR: ${{ github.workspace }}/shots/base
+          OUT: ${{ github.workspace }}/shots/changed
+        run: node compare.mjs
+
+      - name: Upload
+        id: upload
+        if: steps.compare.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-pr${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            shots/changed/*.png
+          retention-days: ${{ env.RETENTION_DAYS }}
+          if-no-files-found: error
+
+      - name: Comment
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
-        run: .github/screenshots/publish.sh
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: .github/screenshots/comment.sh

@@ -5,7 +5,7 @@
 // pretending at the printer, so every screenshot is the real page and the real
 // script reacting to a status payload it cannot tell from a live one.
 import { chromium } from "playwright";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 
 const BASE = process.env.BASE || "http://127.0.0.1:8081";
 const OUT = process.env.OUT || "screenshots";
@@ -292,7 +292,10 @@ async function main() {
   }
 
   await browser.close();
-  console.log(JSON.stringify(shots.map(s => ({ name: s.name, title: s.title, note: s.note })), null, 2));
+  // What was captured and what each shot is, for the comparison and the comment.
+  const manifest = JSON.stringify(shots.map(s => ({ name: s.name, title: s.title, note: s.note })), null, 2);
+  await writeFile(`${OUT}/shots.json`, manifest + "\n");
+  console.log(manifest);
 }
 
 await main();
