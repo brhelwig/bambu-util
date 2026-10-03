@@ -4,10 +4,13 @@ on:
   pull_request:
 
 # Each screen is captured from the pull request and from its base branch, and
-# only the ones that look different are kept. Those go up as an artifact of the
-# run, and one comment on the pull request lists them and links to it.
+# only the ones that look different are kept. Those are pushed to an orphan
+# branch and shown, before and after, in one comment on the pull request.
+# GitHub has no public way to attach an image to a comment, so the image has to
+# be reachable by URL before it can be shown; the orphan branch keeps them out
+# of the history of anything that ships.
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 concurrency:
@@ -20,8 +23,6 @@ jobs:
     # never comment. Skip rather than fail.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    env:
-      RETENTION_DAYS: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -93,22 +94,10 @@ jobs:
           OUT: ${{ github.workspace }}/shots/changed
         run: node compare.mjs
 
-      - name: Upload
-        id: upload
-        if: steps.compare.outputs.count != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshots-pr${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
-          path: |
-            shots/changed/*.png
-          retention-days: ${{ env.RETENTION_DAYS }}
-          if-no-files-found: error
-
       - name: Comment
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         run: .github/screenshots/comment.sh
