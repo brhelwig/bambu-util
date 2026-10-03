@@ -1,17 +1,35 @@
 name: release
 on:
+  # A tag pushed by hand.
   push:
     tags: ["v*"]
+  # Called by release-main.yaml for the tag it cuts after each merge. A tag
+  # pushed with the workflow token does not start workflows, so that one is
+  # called directly rather than relying on the trigger above.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      sha:
+        type: string
+        required: true
 
 permissions:
   contents: write
   packages: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  SHA: ${{ inputs.sha || github.sha }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -26,7 +44,7 @@ jobs:
             [ "$goos" = "windows" ] && bin=bambu-util.exe
             CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch \
               go build -trimpath -ldflags="-s -w" -o "$bin" ./cmd/bambu-util
-            name="bambu-util_${GITHUB_REF_NAME}_${goos}_${goarch}"
+            name="bambu-util_${TAG}_${goos}_${goarch}"
             if [ "$goos" = "windows" ]; then
               zip -q "dist/${name}.zip" "$bin" README.md LICENSE
             else
@@ -37,8 +55,10 @@ jobs:
           (cd dist && sha256sum -- * > checksums.txt)
       - name: Extract changelog section
         run: |
-          awk -v ver="${GITHUB_REF_NAME#v}" '
-            $0 ~ "^## \\[" ver "\\]" {found=1; next}
+          # Every merge is released, so the version's own section does not
+          # exist yet: the notes are whatever is under Unreleased.
+          awk -v ver="${TAG#v}" '
+            $0 ~ "^## \\[" ver "\\]" || $0 ~ "^## \\[Unreleased\\]" {found=1; next}
             found && /^## \[/ {exit}
             found {print}
           ' CHANGELOG.md > release-notes.md
@@ -47,8 +67,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "$GITHUB_REF_NAME" \
+          gh release create "$TAG" dist/* \
+            --title "$TAG" \
+            --verify-tag \
             --notes-file release-notes.md
 
   # A v* tag always points at a commit that already went through the main-branch
@@ -68,5 +89,5 @@ jobs:
       - name: Tag the CI-built image with the release version
         run: |
           docker buildx imagetools create \
-            --tag "ghcr.io/brhelwig/bambu-util:${GITHUB_REF_NAME}" \
-            "ghcr.io/brhelwig/bambu-util:${GITHUB_SHA}"
+            --tag "ghcr.io/brhelwig/bambu-util:${TAG}" \
+            "ghcr.io/brhelwig/bambu-util:${SHA}"
