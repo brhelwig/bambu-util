@@ -14,27 +14,44 @@ REPO="${GITHUB_REPOSITORY}"
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-# Take the branch as it stands, or start one with no history behind it.
-if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-  git fetch origin "$BRANCH" --depth 1
-  git worktree add /tmp/shots-branch "origin/$BRANCH"
-  git -C /tmp/shots-branch switch -c "$BRANCH" || git -C /tmp/shots-branch switch "$BRANCH"
-else
-  git worktree add --detach /tmp/shots-branch
-  git -C /tmp/shots-branch checkout --orphan "$BRANCH"
-  git -C /tmp/shots-branch rm -rf . >/dev/null 2>&1 || true
-fi
+# Every pull request pushes to this one branch, and the concurrency group is
+# per pull request, so two runs can race. Each attempt starts from the branch as
+# it stands now, and a rejected push just goes round again on the newer tip.
+publish() {
+  rm -rf /tmp/shots-branch
+  git worktree prune
+  # Take the branch as it stands, or start one with no history behind it.
+  if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+    git fetch origin "$BRANCH" --depth 1
+    git worktree add --detach /tmp/shots-branch "origin/$BRANCH"
+    git -C /tmp/shots-branch switch -C "$BRANCH"
+  else
+    git worktree add --detach /tmp/shots-branch
+    git -C /tmp/shots-branch checkout --orphan "$BRANCH"
+    git -C /tmp/shots-branch rm -rf . >/dev/null 2>&1 || true
+  fi
 
-mkdir -p "/tmp/shots-branch/${DIR}"
-cp "${GITHUB_WORKSPACE}"/shots/*.png "/tmp/shots-branch/${DIR}/"
+  mkdir -p "/tmp/shots-branch/${DIR}"
+  cp "${GITHUB_WORKSPACE}"/shots/*.png "/tmp/shots-branch/${DIR}/"
 
-git -C /tmp/shots-branch add -A
-if git -C /tmp/shots-branch diff --cached --quiet; then
-  echo "screenshots unchanged; nothing to push"
-else
+  git -C /tmp/shots-branch add -A
+  if git -C /tmp/shots-branch diff --cached --quiet; then
+    echo "screenshots unchanged; nothing to push"
+    return 0
+  fi
   git -C /tmp/shots-branch commit -q -m "Screenshots for #${PR} at ${SHA:0:7}"
   git -C /tmp/shots-branch push -q origin "$BRANCH"
-fi
+}
+
+for attempt in 1 2 3 4 5; do
+  if publish; then break; fi
+  if [ "$attempt" = 5 ]; then
+    echo "could not push ${BRANCH} after ${attempt} attempts" >&2
+    exit 1
+  fi
+  echo "push to ${BRANCH} was rejected (attempt ${attempt}); retrying on the newer tip"
+  sleep $((attempt * 2))
+done
 
 raw() { echo "https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DIR}/$1"; }
 
