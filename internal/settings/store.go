@@ -147,16 +147,19 @@ func (s spec) show(value int) string {
 // The event log's ceiling is deliberately well short of a whole disk: this runs
 // on a Pi whose database also holds the camera buffer.
 var specs = map[string]spec{
-	KeyRetention:      {unit: seconds, min: 3600, max: 30 * 24 * 3600},
-	KeyKeptJobs:       {unit: count, min: 0, max: 50},
-	KeyBedOffAfter:    {unit: seconds, min: 60, max: 7 * 24 * 3600},
+	KeyRetention: {unit: seconds, min: 3600, max: 30 * 24 * 3600},
+	KeyKeptJobs:  {unit: count, min: 0, max: 50},
+	// The floors match the units the Settings screen shows: the bed and lamp
+	// are set in whole hours there, so anything shorter would read as 0 and
+	// every save from that screen would then be refused.
+	KeyBedOffAfter:    {unit: seconds, min: 3600, max: 7 * 24 * 3600},
 	KeyNozzleOffAfter: {unit: seconds, min: 60, max: 7 * 24 * 3600},
-	KeyLampOffAfter:   {unit: seconds, min: 60, max: 7 * 24 * 3600},
+	KeyLampOffAfter:   {unit: seconds, min: 3600, max: 7 * 24 * 3600},
 	KeyActivityLimit:  {unit: megabytes, min: 1, max: 512},
 
 	// A login that lasts a year is not much of a login, and one that lasts
 	// minutes makes a phone on the home screen useless.
-	KeySessionLength: {unit: seconds, min: 3600, max: 365 * 24 * 3600},
+	KeySessionLength: {unit: seconds, min: 24 * 3600, max: 365 * 24 * 3600},
 
 	// The floor is not fussiness: a cap of a few megabytes would delete almost
 	// everything and rebuild the file on every pass. Off is the default, since
