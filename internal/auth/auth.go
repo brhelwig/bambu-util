@@ -124,10 +124,13 @@ var openPaths = map[string]bool{
 
 // Handler puts the login in front of next. A nil authenticator means the app
 // was started with authentication switched off, and everything goes straight
-// through.
+// through — apart from the cross-origin check, which applies either way.
 func (a *Authenticator) Handler(next http.Handler) http.Handler {
 	if a == nil {
-		return next
+		// With no login there is no cookie to borrow, but there is no need for
+		// one: a page open in any browser on the network could post an action
+		// to the printer's LAN address and it would be carried out.
+		return http.NewCrossOriginProtection().Handler(next)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /auth/login", a.login)

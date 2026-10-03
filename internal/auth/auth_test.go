@@ -23,6 +23,9 @@ func guarded() http.Handler {
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"connected":false}`))
 	})
+	mux.HandleFunc("POST /api/actions/light", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -385,6 +388,39 @@ func TestWithNoAuthenticatorEverythingIsServed(t *testing.T) {
 	for _, path := range []string{"/", "/api/status", "/healthz"} {
 		if resp := get(t, client(t), app.URL+path); resp.StatusCode != http.StatusOK {
 			t.Errorf("%s = %d with authentication off, want 200", path, resp.StatusCode)
+		}
+	}
+}
+
+// With no login, nothing stands between a page open on any machine on the
+// network and the printer, so a post the browser marks as coming from another
+// site is refused all the same. Requests with no such mark — curl, scripts,
+// older browsers — and the app's own page go through.
+func TestWithNoAuthenticatorAPostFromAnotherSiteIsRefused(t *testing.T) {
+	var none *Authenticator
+	app := httptest.NewServer(none.Handler(guarded()))
+	t.Cleanup(app.Close)
+
+	for site, want := range map[string]int{
+		"cross-site":  http.StatusForbidden,
+		"same-site":   http.StatusForbidden,
+		"same-origin": http.StatusNoContent,
+		"":            http.StatusNoContent,
+	} {
+		req, err := http.NewRequest(http.MethodPost, app.URL+"/api/actions/light", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if site != "" {
+			req.Header.Set("Sec-Fetch-Site", site)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("a POST marked %q = %d, want %d", site, resp.StatusCode, want)
 		}
 	}
 }
