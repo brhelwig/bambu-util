@@ -124,7 +124,7 @@ func (s *Server) pollAutoOff() {
 		s.send(push.Notification{
 			Title: "Nozzle turned off",
 			Body:  "It had been on since it was last set here.",
-			Tag:   tagBed,
+			Tag:   tagNozzle,
 			Kind:  push.KindHeaterOff,
 		})
 	}

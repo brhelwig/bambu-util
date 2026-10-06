@@ -12,9 +12,10 @@ import (
 // Notification tags. A second notification carrying the same tag replaces the
 // first on the phone rather than stacking beneath it.
 const (
-	tagJob   = "job"
-	tagError = "error"
-	tagBed   = "bed"
+	tagJob    = "job"
+	tagError  = "error"
+	tagBed    = "bed"
+	tagNozzle = "nozzle"
 )
 
 // printEvents turns the printer's state into notifications. It fires on
