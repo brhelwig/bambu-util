@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 are calendar-based (`vYY.DOY.MMMM`: year, day of the year and minute of the day,
 in UTC, so 15:07 on 6 October 2026 is `v26.279.907`); every commit that
-CI on `main` is released.
+passes CI on `main` is released.
 
 ## [Unreleased]
 
