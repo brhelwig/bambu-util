@@ -59,9 +59,18 @@ func (s *StateCache) SetConnected(v bool) {
 func (s *StateCache) Snapshot() (map[string]any, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(map[string]any, len(s.fields))
-	for k, v := range s.fields {
+	return copyMaps(s.fields), s.connected
+}
+
+// copyMaps copies m and every map nested in it, since deepMerge writes into
+// nested maps in place. Arrays are always replaced whole, so they are shared.
+func copyMaps(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if nested, ok := v.(map[string]any); ok {
+			v = copyMaps(nested)
+		}
 		out[k] = v
 	}
-	return out, s.connected
+	return out
 }
