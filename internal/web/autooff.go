@@ -7,13 +7,9 @@ import (
 	"github.com/brhelwig/bambu-util/internal/deadlines"
 )
 
-// Heaters left on unattended waste power and are a mild fire risk, so the bed
-// and nozzle are shut off automatically some time after they were last set
-// through this app. How long is a setting. Enforcement is server-side (see
-// Server.pollAutoOff) so it still fires when no browser is open, and it waits
-// for the printer to be idle so it can never cut the heat out from under a
-// print. Adjusting a heater — including turning it off — resets its timer.
-
+// autoOff turns the bed and nozzle off a set time after they were last set
+// through this app. Server.pollAutoOff enforces it, and only while the printer
+// is idle. Setting a heater again, including to off, resets its timer.
 type autoOff struct {
 	mu       sync.Mutex
 	now      func() time.Time
@@ -23,10 +19,8 @@ type autoOff struct {
 	nozAt    time.Time
 }
 
-// newAutoOff resumes whatever countdowns were pending when the process last
-// stopped. One that came due while it was down is left in the past, so it fires
-// on the first poll rather than being written off as stale — a shut-off missed
-// because of a restart is the whole reason these are stored.
+// newAutoOff resumes the countdowns pending when the process last stopped. One
+// that fell due while it was down fires on the first poll.
 func newAutoOff(store timerStore, cur current) *autoOff {
 	a := &autoOff{now: time.Now, settings: cur, timers: timers{store: store}}
 	pending := a.timers.load()

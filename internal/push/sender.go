@@ -14,14 +14,11 @@ import (
 	"github.com/brhelwig/bambu-util/internal/activity"
 )
 
-// deliveryTTL is how long a push service holds a message for a phone that is
-// off. Long enough to survive a night's sleep, short enough that nothing
-// arrives a day stale.
+// deliveryTTL is how long a push service holds a message for an offline phone.
 const deliveryTTL = 4 * time.Hour
 
-// The kinds of notification a device can ask for. They are stored against each
-// subscription, so the names outlive any one release and must not be reworded
-// casually.
+// The kinds of notification a device can ask for. They are stored in the
+// database, so don't rename them.
 const (
 	KindPrintStarted  = "print-started"
 	KindPrintFinished = "print-finished"
@@ -61,8 +58,7 @@ type Sender struct {
 	now    func() time.Time
 }
 
-// Watch records what is sent out, so a notification can be seen leaving
-// alongside the printer traffic that prompted it.
+// Watch makes the sender record what it sends in log.
 func (s *Sender) Watch(log *activity.Log) { s.log = log }
 
 // NewSender loads the server identity, creating one on first use.
@@ -91,9 +87,8 @@ func (s *Sender) Unsubscribe(endpoint string) error { return s.store.Delete(endp
 // Count reports how many browsers are subscribed.
 func (s *Sender) Count() (int, error) { return s.store.Count() }
 
-// Send delivers to every subscription and reports how many were reached. Only
-// a subscription the push service calls gone is forgotten: a timeout or a
-// server error is temporary, and the phone behind it is still real.
+// Send delivers to every subscription that wants n.Kind and reports how many
+// were reached.
 func (s *Sender) Send(ctx context.Context, n Notification) (delivered int, err error) {
 	subs, err := s.store.All()
 	if err != nil {
@@ -109,15 +104,7 @@ func (s *Sender) Send(ctx context.Context, n Notification) (delivered int, err e
 			continue
 		}
 		wanted++
-		gone, err := s.deliver(ctx, sub, payload)
-		switch {
-		case gone:
-			if err := s.store.Delete(sub.Endpoint); err != nil {
-				log.Printf("push: forgetting dead subscription: %v", err)
-			}
-		case err != nil:
-			log.Printf("push: delivery failed: %v", err)
-		default:
+		if s.deliverOrForget(ctx, sub, payload) {
 			delivered++
 		}
 	}
@@ -129,6 +116,24 @@ func (s *Sender) Send(ctx context.Context, n Notification) (delivered int, err e
 		s.log.Acknowledge(entry, s.now(), nil)
 	}
 	return delivered, nil
+}
+
+// deliverOrForget delivers to one subscription and reports whether it arrived.
+// A subscription the push service reports gone is deleted; other failures are
+// logged and treated as temporary.
+func (s *Sender) deliverOrForget(ctx context.Context, sub Subscription, payload []byte) bool {
+	gone, err := s.deliver(ctx, sub, payload)
+	switch {
+	case gone:
+		if err := s.store.Delete(sub.Endpoint); err != nil {
+			log.Printf("push: forgetting dead subscription: %v", err)
+		}
+		return false
+	case err != nil:
+		log.Printf("push: delivery failed: %v", err)
+		return false
+	}
+	return true
 }
 
 func (s *Sender) deliver(ctx context.Context, sub Subscription, payload []byte) (gone bool, err error) {
@@ -166,13 +171,8 @@ func (s *Sender) deliver(ctx context.Context, sub Subscription, payload []byte) 
 	return false, nil
 }
 
-// RemindBedOn tells each device the bed is still on, as often as that device
-// asked to hear it. The schedule is per subscription rather than shared: two
-// devices asking for different intervals must each get their own, and a device
-// that has never asked hears nothing.
-//
-// since is when the bed came on, so the reminder can say how long it has been
-// rather than merely that it is.
+// RemindBedOn tells each device the bed is still on, at the interval that
+// device chose. since is when the bed came on.
 func (s *Sender) RemindBedOn(ctx context.Context, since time.Time, target float64) error {
 	subs, err := s.store.All()
 	if err != nil {
@@ -202,15 +202,7 @@ func (s *Sender) RemindBedOn(ctx context.Context, since time.Time, target float6
 		if err != nil {
 			return err
 		}
-		gone, err := s.deliver(ctx, sub, payload)
-		switch {
-		case gone:
-			if err := s.store.Delete(sub.Endpoint); err != nil {
-				log.Printf("push: forgetting dead subscription: %v", err)
-			}
-			continue
-		case err != nil:
-			log.Printf("push: delivery failed: %v", err)
+		if !s.deliverOrForget(ctx, sub, payload) {
 			continue
 		}
 		if err := s.store.MarkBedReminded(sub.Endpoint, now); err != nil {
@@ -234,8 +226,7 @@ func (s *Sender) SetPreferences(endpoint string, kinds []string, bedInterval tim
 	return s.store.SetPreferences(endpoint, kinds, bedInterval)
 }
 
-// roundedHours reports a stretch of time in whole hours, so a reminder that
-// arrives a tick late still reads as the round number a person expects.
+// roundedHours reports d in whole hours.
 func roundedHours(d time.Duration) string {
 	h := int(d.Round(time.Hour).Hours())
 	if h <= 1 {

@@ -1,251 +1,94 @@
 # Changelog
 
 All notable changes to this project are documented in this file. The format
-follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
-are calendar-based (`YY.DOY.MMMM`: year, day of the year and minute of the day,
-in UTC, so 15:07 on 6 October 2026 is `26.279.907`); every commit that
-passes CI on `main` is released.
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every commit
+that passes CI on `main` is released, versioned by date as `YY.DOY.M` (year,
+day of year, minute of day, UTC; e.g. `26.279.907`).
 
 ## [Unreleased]
 
-### Changed
-
-- **Breaking: the app will not start until it is told what to do about
-  authentication.** Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
-  and `PUBLIC_URL` to require a login, or `AUTH_DISABLED=true` to run with none.
-  An existing deployment sets neither and will stop with a message naming what
-  to add. There is deliberately no default: until now anything that could reach
-  the port could drive the printer and watch the camera, and the failure mode of
-  a default is that nobody notices which one they got.
-
 ### Added
 
-- Readable messages for printer errors: about 4,900 HMS codes and 940 print
-  error codes are now translated (community wording, not yet checked against a
-  real printer), and the separate `print_error` value now appears in the error
-  banner and push notifications alongside HMS entries. Unknown codes still show
-  the raw code.
-- A login, over OpenID Connect. Any provider works — it is built on the standard
-  discovery document rather than anything provider-specific — and it was
-  developed against Pocket ID, whose per-client group restriction is what
-  decides who may in. The app trusts the provider on that rather than keeping a
-  second list that can disagree with it.
-
-  Authorization code flow with PKCE and a nonce. Sessions live in the database
-  and the cookie carries nothing but their id, marked `HttpOnly`, `SameSite=Lax`
-  and `Secure` when `PUBLIC_URL` is HTTPS. How long a login lasts is on
-  the Settings screen, counted from the last time the page was used, and is 14
-  days by default.
-
-  The health check and the few files a phone needs before it can log in stay
-  open; everything else needs a session. A page is sent to the provider, while
-  the page's own requests are refused outright, because a fetch that follows a
-  redirect and parses a login page as JSON fails in a way nobody can read.
-
-
-- A theme setting: light, dark, or follow the system, which is the default. The
-  choice is kept on the device and applied before the page is drawn, so it never
-  flashes the wrong one. Every colour is now named once per theme rather than
-  written into each rule.
-- The printer screen's sections can be hidden and reordered from Settings, so
-  the parts you do not use are not in the way. Stored on the server, so the
-  layout is the same wherever the page is opened.
-
-- An Events screen, reached by the list icon in the top corner: what was sent to
-  the printer and whether it was acknowledged, what the printer reported back,
-  and what was sent to subscribed devices. Each entry keeps its raw message,
-  because a summary is not always what is needed when working out why something
-  did not happen. Tick boxes choose which kinds to show. It is kept in the
-  database rather than in memory, so it survives a restart — which is when it is
-  most wanted, since a log that empties itself when the app stops has nothing to
-  show about why it stopped.
-
-- A cap on the size of the database file, off by default. The camera window and
-  the event log each bound their own data, but nothing bounded the file, so a
-  generous camera window could fill the disk and take the app down with it. With
-  a cap set, the oldest data goes — camera frames and event-log entries alike,
-  whichever is older — until the file is under it. It is deliberately absolute:
-  it will delete footage that "prints kept" was holding on to, because a promise
-  to keep a timelapse is not worth a full disk. Off by default for that reason.
-
-  Deleting rows does not shrink a SQLite file on its own, so the freed space is
-  returned to the disk explicitly, a few pages at a time rather than in one long
-  rebuild that would lock the camera and the page out for the duration. A
-  database made before this existed is converted once, the first time a cap is
-  actually exceeded, so anyone who never sets one never waits for it.
-
-- A setting for how much the event log may hold, in megabytes, alongside the
-  camera history window. Once it is reached the oldest entries go. The bound is
-  a size rather than a number of entries because one entry ranges from a few
-  bytes to a whole printer state, so a count says very little about the disk it
-  costs. The figure counts what the log holds, not the size of the database file,
-  which also holds the camera buffer and does not shrink on disk when entries go.
-
-- A Settings screen, reached by the gear in the top corner, holding the camera
-  history window and the three automatic-off delays (bed, nozzle, chamber
-  lamp). It is a screen of its own rather than more cards under the printer
-  status, so nothing has to be scrolled past to reach the controls;
-  notifications moved onto it too. The values are kept in the database and read
-  whenever they are consulted, so a change takes effect without a restart. A
-  countdown already running keeps the window it started with. How many finished
-  prints keep their footage is a setting too, having been fixed at five. Changes
-  are applied by a Save button rather than as you type, so a half-typed number
-  never becomes the shut-off window.
-  `RECORDING_RETENTION` is gone — the same setting now lives on the page.
-
-- Each subscribed device chooses which notifications it receives — print
-  started, finished, ended without finishing, printer errors, heaters turned
-  off automatically — and how often to be reminded the bed is on, from never
-  to every 24 hours. The choices are stored against that device's own
-  subscription, so a phone and a tablet can want different things, and each
-  keeps its own place in its own reminder schedule. A device that has never
-  chosen is told about everything. The bed reminder replaces the fixed ladder
-  of 1, 8, 16 and 24 hours with a repeating interval.
-- Notifications to the phone, so the page does not have to be open. Turn
-  them on from the Notifications card; a test button proves the path before
-  anything is riding on it. Subscriptions are stored under `DATA_DIR`
-  alongside the server identity browsers bind to — losing that directory
-  silently unsubscribes every phone, so it belongs on a volume.
-  Requires HTTPS, and on iPhone and iPad iOS 16.4 or later with the app
-  added to the Home Screen.
-- Notifications for what the printer does: a print starting, finishing, or
-  ending without finishing; any error the printer raises, which is how
-  filament runout arrives; and a reminder at 1, 8, 16 and 24 hours of how long
-  the bed has been on with no print running, plus a message when the automatic
-  shut-off turns a heater off. Each is sent on the change itself, so a printer
-  sitting in a finished state does not keep announcing it, and the first look
-  after a restart is silent rather than reporting a print that ended hours
-  ago.
-- Always-on camera recording into a rolling history buffer (24h by default,
-  set in Settings), stored in SQLite under `DATA_DIR`.
-- One camera view: follows the live tail of the recording buffer by
-  default, with a scrub bar to drag back through recent footage, a
-  **Live** button to jump back to the tail, and a jobs list to fast-forward
-  through a specific print's footage as a timelapse.
-- Chamber lamp automation: turns on the moment a job starts or the
-  bed/nozzle is commanded hot, off automatically 8h after going idle.
-  Fires only on those transitions, so a manual toggle in between is never
-  overridden. Shown as a countdown in the status card, same as the
-  bed/nozzle auto-off timers.
-- Released container images are tagged `YY.DOY.MMMM`, so a deployment can pin a
-  version or roll back to one. The version tag names the same manifest the
-  `main` build produced rather than a rebuild of the tagged commit.
+- Login over OpenID Connect (authorization code flow with PKCE). Built against
+  the standard discovery document and tested with Pocket ID; who may log in is
+  decided by the provider. Sessions are stored in the database and last 14 days
+  from last use by default. The health check and the files a phone needs before
+  logging in are served without a session.
+- Settings screen (gear icon) for the printer connection, notifications,
+  camera history window, number of prints whose footage is kept, bed/nozzle/lamp
+  auto-off delays, event log size, database size cap, login length, theme and
+  status-screen layout. Values are stored in the database, applied with a Save
+  button, and take effect without a restart.
+- Events screen (pulse icon) listing commands sent and whether the printer
+  acknowledged them, printer reports, and notifications sent, each with its raw
+  message. Stored in the database with a size limit (64 MB by default).
+- Optional cap on the database file size, off by default. When exceeded, the
+  oldest camera frames and events are deleted, regardless of other retention
+  settings, and the space is returned to the disk incrementally.
+- Web push notifications: print started, finished or failed; printer errors
+  (including filament runout); heaters turned off automatically; and a
+  repeating reminder while the bed is hot with no print running. Each device
+  chooses which it wants. Requires HTTPS, and iOS 16.4+ with the page added to
+  the Home Screen on iPhone/iPad.
+- Continuous camera recording into a rolling buffer (24h by default). One view
+  follows the live image with a scrub bar into the buffer and a `● LIVE` badge
+  to return to it. During a print the scrub bar starts 5 minutes before the
+  print did.
+- Recent prints list with start times; each can be played back as a timelapse.
+  The most recent finished prints (5 by default) keep their footage past the
+  buffer window, thinned to one frame every 10 seconds. The print in progress is
+  also protected, up to 48h.
+- Chamber lamp automation: on when a print starts or a heater is set, off after
+  a delay (8h by default) once idle. Manual toggles are never overridden.
+- Readable messages for printer errors: about 4,900 HMS codes and 940
+  `print_error` codes, shown in the error banner and notifications. The wording
+  comes from the community and has not been checked against a real printer.
+- Light, dark or system theme (system by default).
+- Status-screen sections can be hidden and reordered.
 
 ### Changed
 
-- The printer is set up on the Settings screen instead of through
-  `PRINTER_IP`, `PRINTER_SERIAL` and `PRINTER_ACCESS_CODE`, which are gone. The
-  app starts with no printer and serves the page anyway — that is where one is
-  entered — and saving a different printer reconnects in place rather than
-  needing a restart. The access code is stored under `DATA_DIR` and is never
-  sent back to the page, which reports only whether one is set; leaving the
-  field blank keeps the stored one. Only `DATA_DIR` and `LISTEN_ADDR` remain as
-  environment variables, since the app needs them before it can read anything.
-- The app is called **Bambu Util**, in the page heading, the browser tab, the
-  notifications it sends, and the web manifest. A Home Screen icon added before
-  this keeps its old label until it is removed and re-added — iOS reads the
-  manifest at install time. "P1S" now only ever refers to the printer.
-- Notification subscriptions moved into the existing database, having briefly
-  had a `push.db` of their own. An installation tracking `main` that already
-  turned notifications on will mint a fresh identity on the next start, and
-  those phones stop receiving until notifications are turned on again — the
-  page notices and resets itself to Off. Delete the orphaned
-  `DATA_DIR/push.db`; nothing reads it any more. No released version is
-  affected.
-- The camera connection is now held continuously so it can record, instead
-  of only while a viewer is on the page. Bambu Studio's own camera view will
-  not work while bambu-util is running.
-- Removed the raw MJPEG live-stream endpoint and the manual camera on/off
-  toggle — every view now sources frames from the recording buffer, so
-  there's no separate "live" connection to toggle.
-- The scrub bar is bounded rather than spanning the whole stored buffer: it
-  reaches back one camera-history window (24h by default) while the
-  printer is idle, and starts 5 minutes before the print began while one is
-  running, so a job is one drag of the bar. Older footage — the kept prints'
-  thinned timelapses — is still reachable by picking a job from the list.
-- Timelapse speeds are 30x, 60x, 300x, and 600x, and play back at 4 frames per
-  second instead of 1 — the old 1x-20x speeds were slower than the recording
-  rate they were replaying.
-- The five most recently finished prints keep their footage regardless of
-  the history window, thinned to one frame every 10 seconds once past the
-  cutoff. Whole prints at the full recording rate would add gigabytes. The
-  in-progress print is protected too, so a print longer than the retention
-  window still yields a whole timelapse — but only back 48h, so a job row left
-  open by a printer that vanished mid-print cannot exempt footage from
-  retention indefinitely.
-- Recent jobs show each print's start time, so two runs of the same file can
-  be told apart.
-- **Play** is an icon button, and live is a `● LIVE` badge on the camera image
-  itself — lit red while the view follows the tail, dimmed once it has been
-  scrubbed back, and tapping it returns to live. It used to be a skip-to-end
-  glyph sitting between play and the speed selector, which read as "next track"
-  and grouped a mode with the controls that only ever act on recorded footage.
-- The page no longer carries a "P1S bed control" heading; the name lives in the
-  document title, matching the web manifest.
-- **Eject** is now called **Unload**, matching what it does.
-- Time remaining reads as hours and minutes (`2h 15m`) once over an hour.
-- AMS desiccant dryness is shown as Bambu Studio's letter grade (A driest)
-  instead of a bare `level 5`.
+- **Breaking:** the app will not start unless authentication is configured. Set
+  `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `PUBLIC_URL`, or set
+  `AUTH_DISABLED=true` to run without a login.
+- **Breaking:** the printer is configured on the Settings screen. `PRINTER_IP`,
+  `PRINTER_SERIAL`, `PRINTER_ACCESS_CODE` and `RECORDING_RETENTION` are no
+  longer read. The app starts without a printer, and changing it reconnects
+  without a restart. The access code is never sent back to the page.
+- The camera connection is held continuously, so Bambu Studio's camera view
+  will not work while bambu-util is running.
+- The MJPEG live-stream endpoint and the camera on/off toggle are removed; every
+  view reads from the recording buffer.
+- Timelapse speeds are 30x, 60x, 300x and 600x, played at 4 frames per second.
+- Pending auto-off and reminder timers are stored in the database and survive a
+  restart; one that fell due while the app was down fires on startup.
+- The heater auto-off waits until the printer is idle instead of turning
+  heaters off mid-print.
+- Pause, resume, stop and unload are sent with MQTT QoS 1, so the printer has to
+  acknowledge them. Extrude is still sent without, since it is unsafe to repeat.
+- Unload only requires the printer to be idle; it no longer requires the AMS to
+  report a loaded tray, which external spools never do.
+- The app is named **Bambu Util** in the page, browser tab, notifications and
+  manifest. Home Screen icons added before this keep their old label until
+  re-added.
+- **Eject** is renamed **Unload**.
+- Time remaining is shown as hours and minutes (`2h 15m`) once over an hour.
+- AMS desiccant dryness is shown as Bambu Studio's A–E grade.
 
 ### Fixed
 
-- With `AUTH_DISABLED=true`, a request the browser marks as coming from
-  another site is refused. Without this, a web page open on any machine on
-  the network could post actions to the printer's LAN address — heaters,
-  settings — and they would be carried out. The app's own page, curl and
-  scripts are unaffected.
-- The bed auto-off and lamp-off delays can no longer be set below an hour.
-  The Settings screen shows them in whole hours, so a shorter value set
-  through the API read as 0 there and made every save from that screen fail.
-- Pending countdowns survive a restart. The heater shut-offs, the lamp's
-  eight-hour delay and the bed reminder clock were held in memory only, so
-  every restart cancelled them silently — and since the deployment picks up a
-  new image by restarting, that was every update. Setting the bed hot and
-  deploying an hour later left the 24-hour safety shut-off simply gone. They
-  are now stored under `DATA_DIR`, and one that came due while the process was
-  down fires on the first poll rather than being written off as stale.
-
-- Pause, resume, stop and unload are now sent so the printer's broker has to
-  acknowledge them, and retries until it does. Every command was previously
-  sent unacknowledged, so a dropped **Stop** was silent — the page reported it
-  sent and the print carried on. Commands that are unsafe to repeat, such as
-  extrude, deliberately stay unacknowledged.
-- The heater safety shut-off can no longer command the bed or nozzle cold in
-  the middle of a print. It ran on elapsed time alone and read no printer
-  state, so setting the nozzle hot for a cold pull and then starting a print
-  within 15 minutes would cut the hotend mid-job. It now waits for the printer
-  to be idle, and waits rather than discarding the shut-off, so the heaters
-  still go off once the print is over.
-- **Unload** follows the same idle rule as the other actions. It also required
-  the AMS to report a loaded tray, which left the button dead exactly when it
-  was wanted: an external spool has no tray to report, and the reading does not
-  survive the end of a print, so a finished job could leave filament stuck with
-  no way to eject it.
-- The scrub bar's caption reports when the displayed frame was actually taken,
-  not the time it was dragged to. The frame endpoint returns the first frame at
-  or after the requested time, so with retention leaving gaps between kept
-  prints the two could be hours apart and the picture was misdated.
-- A print no longer appears in the recent-jobs list more than once. Pausing
-  closed the job and resuming opened a second one, and a restart mid-print
-  opened another while leaving the first open forever; a paused print now
-  counts as the same job, and a restart adopts the row already open. Printer
-  states that mean neither running nor finished — `PREPARE`, or `unknown`
-  before the first status report — no longer end a job that is still going.
-  A print running under a different name than the adopted row starts its own
-  row, so a job boundary crossed while the service was down no longer files
-  one print's footage under the previous print's name.
+- With `AUTH_DISABLED=true`, requests a browser marks as coming from another
+  site are refused, so other web pages can't send commands to the printer.
+- A print no longer appears more than once in the recent-prints list after a
+  pause or a restart, and `PREPARE` or an unknown state no longer ends a job
+  that is still running.
 
 ### Removed
 
-- The filament load path — `POST /api/actions/load` and the command behind it.
-  Filament handling became unload-only two releases ago and the page has not
-  called it since, but it stayed reachable to anyone who knew the URL and it
-  commanded the printer to feed filament.
-- Chamber temperature. The P1S reports a value that does not track the
-  chamber (5°C mid-print, with the bed at 55°C), and there is no way to make
-  it meaningful. The chamber *fan* speed is unaffected.
-- Wi-Fi signal strength. Nothing is decided by it, and the printer being
-  reachable is already reported by the connection row.
+- `POST /api/actions/load`. The page stopped using it in 0.5.0.
+- Chamber temperature, which the P1S does not report meaningfully. Chamber fan
+  speed is unaffected.
+- Wi-Fi signal strength.
 
 ## [0.5.0] - 2026-07-22
 
@@ -282,7 +125,7 @@ passes CI on `main` is released.
 
 ### Added
 
-- Camera stream auto-starts on page load; the show/hide toggle is gone.
+- Camera stream auto-starts on page load.
 - Status is split into "Job status" and "Machine status" cards; the job card
   shows a "No active print" placeholder when idle.
 - New status fields: job name, layer / total layers, time remaining, chamber
@@ -303,6 +146,7 @@ passes CI on `main` is released.
 
 ### Changed
 
+- The camera show/hide toggle is removed.
 - Bed heating moved from a fixed 100 °C toggle to the drying slider, and the
   nozzle from a fixed toggle to the cleaning slider.
 
@@ -356,6 +200,9 @@ passes CI on `main` is released.
 - Monthly Dependabot updates for Go modules, GitHub Actions, and Docker base
   images
 
+[Unreleased]: https://github.com/brhelwig/bambu-util/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.5.0
+[0.4.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.4.0
 [0.3.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.3.0
 [0.2.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.2.0
 [0.1.0]: https://github.com/brhelwig/bambu-util/releases/tag/v0.1.0

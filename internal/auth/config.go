@@ -25,11 +25,8 @@ type Decision struct {
 }
 
 // Decide reads the environment and works out whether to require a login.
-//
-// There is no default. Running unguarded is allowed, but only when someone said
-// so: an app that is running is one whose exposure was chosen rather than
-// overlooked. Saying nothing, or saying half of it, is an error rather than a
-// quiet fallback to either answer.
+// There is no default: either a full provider config or AUTH_DISABLED=true is
+// required, and anything else is an error.
 func Decide(env func(string) string) (Decision, error) {
 	cfg := Config{
 		Issuer:       strings.TrimSpace(env(EnvIssuer)),
@@ -57,9 +54,7 @@ func Decide(env func(string) string) (Decision, error) {
 
 	switch {
 	case disabled && (configured || partly):
-		// Contradictory. Letting the off switch win would mean a variable left
-		// over from an afternoon's debugging quietly unguarding an app that
-		// looks configured, so this asks which was meant.
+		// Contradictory; don't let a leftover AUTH_DISABLED silently win.
 		return Decision{}, fmt.Errorf(
 			"%s is set to true but a provider is configured too; unset one of them to say which you meant",
 			EnvDisabled)
@@ -83,10 +78,8 @@ func Decide(env func(string) string) (Decision, error) {
 	}
 }
 
-// checkPublicURL makes sure PUBLIC_URL is something a redirect can be built
-// from, and returns it without a trailing slash. A value that is merely present
-// would start the app and then fail every login at the provider, which is the
-// failure the startup check is there to rule out.
+// checkPublicURL checks PUBLIC_URL is a bare scheme and host, and returns it
+// without a trailing slash.
 func checkPublicURL(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	switch {
@@ -99,8 +92,6 @@ func checkPublicURL(raw string) (string, error) {
 	case u.User != nil, u.RawQuery != "", u.Fragment != "", u.ForceQuery:
 		return "", fmt.Errorf("%s=%q should be just the scheme and host, like https://printer.example.com", EnvPublicURL, raw)
 	case u.Path != "" && u.Path != "/":
-		// The app serves its login from the root, so a path here would name a
-		// callback that nothing answers.
 		return "", fmt.Errorf("%s=%q has a path; the app has to be served from the root of its host", EnvPublicURL, raw)
 	}
 	return u.Scheme + "://" + u.Host, nil

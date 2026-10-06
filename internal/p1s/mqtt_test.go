@@ -30,8 +30,8 @@ func TestHandleReportIgnoresGarbage(t *testing.T) {
 	}
 }
 
-func TestPrintCommandPayload(t *testing.T) {
-	got := printCommandPayload(7, "pause")
+func TestRequestPayload(t *testing.T) {
+	got := request(7, "print", "pause", nil)
 	want := `{"print":{"command":"pause","sequence_id":"7"}}`
 	if got != want {
 		t.Fatalf("got %s, want %s", got, want)

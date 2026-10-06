@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -17,6 +16,7 @@ import (
 	"github.com/brhelwig/bambu-util/internal/history"
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
+	"github.com/brhelwig/bambu-util/internal/settings"
 )
 
 //go:embed static
@@ -36,6 +36,10 @@ type Commander interface {
 	ResumePrint()
 	StopPrint()
 }
+
+// current returns the settings as they are now. Callers consult it at the
+// point of use, so an edit on the page takes effect without a restart.
+type current func() settings.Values
 
 type Server struct {
 	cache         *p1s.StateCache
@@ -71,9 +75,7 @@ func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notif
 // defaultTick is how often the background loops look at the printer.
 const defaultTick = 10 * time.Second
 
-// every calls poll on every tick until ctx is cancelled. The three loops below
-// differ only in what they poll, so they share this rather than each carrying
-// its own copy of it.
+// every calls poll on every tick until ctx is cancelled.
 func (s *Server) every(ctx context.Context, poll func()) {
 	interval := s.tick
 	if interval <= 0 {
@@ -122,7 +124,7 @@ func (s *Server) pollAutoOff() {
 		s.send(push.Notification{
 			Title: "Nozzle turned off",
 			Body:  "It had been on since it was last set here.",
-			Tag:   tagBed,
+			Tag:   tagNozzle,
 			Kind:  push.KindHeaterOff,
 		})
 	}
@@ -140,8 +142,7 @@ func (s *Server) pollEvents() {
 		s.send(n)
 	}
 
-	// Each device asked for its own reminder interval, so the schedule cannot
-	// live with the events above — it belongs beside the subscriptions.
+	// Bed reminders are scheduled per device, by the sender.
 	if since := s.events.bedOnSince(); since.IsZero() {
 		if err := s.notify.ForgetBedReminders(); err != nil {
 			log.Printf("notify: clearing bed reminders: %v", err)
@@ -151,11 +152,10 @@ func (s *Server) pollEvents() {
 	}
 }
 
-// send delivers one notification, letting a delivery failure go no further than
-// the log: nothing the printer does should hinge on whether a phone was told.
+// send delivers one notification, logging any failure.
 func (s *Server) send(n push.Notification) {
 	if _, err := s.notify.Send(context.Background(), n); err != nil {
-		log.Printf("notify %q: %v", n.Title, err)
+		log.Printf("notify: %q: %v", n.Title, err)
 	}
 }
 
@@ -174,10 +174,6 @@ func (s *Server) pollLamp() {
 	nozzleTarget, _ := fields["nozzle_target_temper"].(float64)
 	active := jobActive || bedTarget > 0 || nozzleTarget > 0
 
-	// forceOn/forceOff each fire exactly once, on the relevant transition
-	// (see lampAuto), so there's no need to read the printer's reported
-	// lamp state first to dedup — nothing here polls or spams a command
-	// every tick, only on an actual transition.
 	forceOn, forceOff := s.lamp.poll(active)
 	if forceOn {
 		s.cmd.SetChamberLight(true)
@@ -252,8 +248,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 			"stop":   p1s.PrintActionAllowed(connected, gs, "stop") == nil,
 		},
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, resp)
 }
 
 var actions = map[string]func(Commander){
@@ -494,8 +489,7 @@ func (s *Server) historyRange(w http.ResponseWriter, _ *http.Request) {
 			oldest = &start
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"oldest": oldest, "newest": newest})
+	writeJSON(w, map[string]any{"oldest": oldest, "newest": newest})
 }
 
 // seekStart is the earliest timestamp the scrub bar should reach: just before the
@@ -549,6 +543,5 @@ func (s *Server) historyJobs(w http.ResponseWriter, _ *http.Request) {
 	for i, j := range jobs {
 		out[i] = map[string]any{"id": j.ID, "name": j.Name, "start": j.Start, "end": j.End}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }

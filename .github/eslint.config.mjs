@@ -1,7 +1,6 @@
 import globals from "globals";
 
-// Only rules that catch outright mistakes. The page is the one part of this
-// repo with no tests, so the bar is "would have been a bug", not style.
+// Only rules that catch outright mistakes, not style.
 const rules = {
   "no-undef": "error",
   "no-const-assign": "error",
@@ -29,7 +28,7 @@ export default [
     rules,
   },
   {
-    files: ["capture.mjs"],
+    files: ["capture.mjs", "compare.mjs"],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "module",

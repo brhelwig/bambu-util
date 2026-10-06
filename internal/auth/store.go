@@ -1,11 +1,6 @@
-// Package auth requires a login before anything but the printer's own health
-// check can be reached, using OpenID Connect against whatever provider the app
-// is pointed at.
-//
-// Who may log in is the provider's business, not this app's: a valid login for
-// its client gets in. Pocket ID, the provider this was built against, restricts
-// a client to chosen user groups, which is one place to manage access rather
-// than two that can disagree.
+// Package auth puts an OpenID Connect login in front of the app. Who may log
+// in is left to the provider: any valid login for the configured client gets
+// in.
 package auth
 
 import (
@@ -69,8 +64,7 @@ func NewStore(db *sql.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// Close closes the database, unless it belongs to whoever passed it in —
-// closing a shared handle would take every other store down with it.
+// Close closes the database if this store opened it.
 func (s *Store) Close() error {
 	if !s.owned {
 		return nil
@@ -153,26 +147,15 @@ type Pending struct {
 	Next     string
 }
 
-// MaxPendingLogins bounds how many part-way logins are held at once.
-//
-// Starting one needs no login, so without a bound anything that can reach the
-// port could sit in a loop on it and grow the database — and the size cap would
-// answer that by deleting camera footage and event-log entries, which is the
-// wrong thing losing out.
-//
-// The bound is a trade, not a wall. The oldest logins are the ones dropped, so
-// someone flooding the endpoint can still push out a real login that is
-// part-way through. Set this high, that takes thousands of requests in the
-// time it takes to find a passkey rather than a few, while the table stays
-// at a couple of megabytes.
+// MaxPendingLogins bounds how many started logins are held at once. Starting
+// one needs no login, so without a bound anyone could grow the database. The
+// oldest are dropped first; the limit is high enough that a flood has to be
+// large to push out a real login in progress.
 const MaxPendingLogins = 10000
 
-// StartLogin records what the callback will need to check when the provider
-// sends the browser back. Lapsed rows and any excess beyond MaxPendingLogins go
-// at the same time, oldest first, so the table stays bounded between sweeps.
-//
-// Oldest is by insertion order, not by expiry: logins started in the same
-// second share an expiry, and ordering by it could drop the newest of them.
+// StartLogin records what the callback will need to check. It also drops
+// lapsed rows and anything beyond MaxPendingLogins, oldest (by rowid, since
+// expiries can tie) first.
 func (s *Store) StartLogin(state, verifier, nonce, next string, expires time.Time) error {
 	now := expires.Add(-loginWindow)
 	if _, err := s.db.Exec(`DELETE FROM pending_logins WHERE expires <= ?`, now.Unix()); err != nil {
@@ -192,9 +175,8 @@ func (s *Store) StartLogin(state, verifier, nonce, next string, expires time.Tim
 // ErrNoLogin is returned when a callback carries a state nothing is waiting on.
 var ErrNoLogin = errors.New("auth: no login is waiting on that state")
 
-// TakeLogin returns what was stored for state and deletes it in the same
-// breath, so a callback cannot be replayed with the same state twice. An
-// expired one is refused and removed just the same.
+// TakeLogin returns and deletes what was stored for state, so a callback can't
+// be replayed. Expired entries are deleted and refused.
 func (s *Store) TakeLogin(state string, now time.Time) (*Pending, error) {
 	tx, err := s.db.Begin()
 	if err != nil {

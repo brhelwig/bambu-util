@@ -43,9 +43,6 @@ type app struct {
 
 // newApp opens the database under dataDir and wires everything to it. The
 // background loops run until ctx is cancelled.
-//
-// The decision about authentication is passed in rather than read here, so a
-// test says which it wants instead of arranging an environment.
 func newApp(ctx context.Context, dataDir string, decided auth.Decision) (*app, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir %s: %w", dataDir, err)
@@ -131,8 +128,7 @@ func newApp(ctx context.Context, dataDir string, decided auth.Decision) (*app, e
 	go srv.EnforceAutoOff(ctx)
 	go srv.EnforceLampAutomation(ctx)
 	go srv.EnforceEventNotifications(ctx)
-	// The size cap runs after the retention pruner on the same cadence, and only
-	// bites when what retention left is still more than the disk should hold.
+	// The size cap only bites when what retention keeps is still too much.
 	go capacity.Run(ctx, capacity.New(db,
 		func() int64 { return config.Values().DatabaseLimit }, store, events), 5*time.Minute)
 	go history.RunPruner(ctx, store, func() history.Policy {
@@ -164,8 +160,7 @@ func main() {
 		dataDir = "./data"
 	}
 
-	// Before anything is opened or served: either a provider was configured or
-	// running without one was expressly asked for. Neither is not a default.
+	// Refuse to start unless authentication was explicitly configured.
 	decided, err := auth.Decide(os.Getenv)
 	if err != nil {
 		log.Fatal(err)

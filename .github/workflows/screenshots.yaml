@@ -86,7 +86,6 @@ jobs:
           fi
 
       - name: Compare
-        id: compare
         working-directory: .github/screenshots
         env:
           HEAD_DIR: ${{ github.workspace }}/shots/head

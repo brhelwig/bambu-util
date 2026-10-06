@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// errorMessages is the community English message table (ha-bambulab, MIT),
+// errorMessagesJSON is the community English message table (ha-bambulab, MIT),
 // filtered to entries that apply to the P1S/P1P. It is not verified against a
 // real printer payload. "hms" is keyed by FormatHMSCode output; "print_error"
 // by the 8-hex-digit print_error value split into two 4-digit groups.

@@ -19,10 +19,8 @@ type JobWatcher struct {
 }
 
 // NewJobWatcher creates a watcher writing job rows to store. It adopts a row
-// left open by an earlier process instead of opening a second one: whether a
-// print is being recorded lives only in this struct, so a restart mid-print
-// would otherwise list that print twice and leave the first row open forever.
-// Rows already stranded that way are closed on the way past.
+// left open by an earlier process, so a restart mid-print doesn't record the
+// print twice, and closes any older open rows.
 func NewJobWatcher(store *Store) *JobWatcher {
 	w := &JobWatcher{store: store, now: time.Now}
 	if n, err := store.CloseOrphanJobs(); err != nil {
@@ -43,19 +41,14 @@ func NewJobWatcher(store *Store) *JobWatcher {
 	return w
 }
 
-// Poll opens a job row when a print starts and closes the open one when it
-// ends. Repeated calls with the same state are no-ops, so it's safe to call on
-// every status poll. States that mean neither — "unknown" before the printer's
-// first report, or PREPARE while it heats — leave the row alone; closing on
-// those would end a print that is still running.
+// Poll opens a job row when a print starts and closes it when it ends.
+// Repeated calls with the same state are no-ops. States that are neither
+// running nor ended ("unknown", PREPARE) leave the row alone.
 func (w *JobWatcher) Poll(gcodeState, jobName string) {
 	switch {
 	case p1s.JobActive(gcodeState):
-		// A print running under a different name than the open row means a job
-		// boundary went by unobserved — the service was down across it. Close the
-		// old row rather than filing this print's footage under the last one's
-		// name and start time. An empty name is a report that simply didn't carry
-		// one, not evidence of a different print.
+		// A different name means a job boundary was missed (e.g. while the app
+		// was down), so start a new row. An empty name is just a partial report.
 		if w.inJob && jobName != "" && jobName != w.openName {
 			w.closeOpen()
 		}

@@ -86,8 +86,8 @@ else
       echo "\`${BASE_REF}\` could not be captured to compare against, so all ${total} screens are shown as of \`${SHA:0:7}\`."
     fi
     echo
-    echo "<sub>Only the status endpoint is answered by the harness; the page and its script are"
-    echo "the real ones. Notification support is stood in for on the settings shots, because"
+    echo "<sub>The harness stubs the printer status (and, on some screens, events and settings);"
+    echo "the page and its script are the real ones. Notification support is stood in for on the settings shots, because"
     echo "headless Chromium refuses notifications outright.</sub>"
     echo
     jq -c '.changed[]' "$CHANGED" | while read -r shot; do

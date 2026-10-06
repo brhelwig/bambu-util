@@ -143,21 +143,17 @@
     padding: max(env(safe-area-inset-top), 12px) 16px 24px;
     max-width: 480px;
   }
-  h1 { font-size: 1.1rem; font-weight: 600; margin: 8px 0 16px; }
   .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
   .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.95rem; }
   .row span:first-child { color: var(--muted); }
   .ok { color: var(--ok); }
   .bad { color: var(--bad); }
-  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .actions button:last-child:nth-child(odd) { grid-column: 1 / -1; }
   button {
     border: 0; border-radius: 10px; padding: 16px 8px;
     font-size: 1rem; font-weight: 600;
     background: var(--control); color: var(--text);
   }
   button:disabled { opacity: 0.4; }
-  button.warn { background: var(--accent-solid); }
   button.danger { background: var(--danger); }
   button.danger.armed { background: var(--danger-armed); }
   #log { min-height: 1.2em; color: var(--muted); font-size: 0.85rem; margin-top: 12px; }
@@ -173,13 +169,10 @@
   .iconbtn svg { width: 26px; height: 26px; display: block; }
   .iconbtn .cap { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.02em; }
   .iconbtn.on { color: var(--accent); }
-  .iconbtn.danger { background: var(--danger); }
-  .iconbtn.danger.armed { background: var(--danger-armed); }
   .ams-editor { background: var(--inset); border-radius: 10px; padding: 8px 12px; margin: 2px 0 10px; }
   .notifywhat { color: var(--muted); font-size: 0.8rem; margin: 2px 0 10px; }
   .topbar { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
   .screentitle { font-size: 0.95rem; font-weight: 600; flex: 1; }
-  .topbar .screentitle:last-child { flex: 1; }
   .topicon { background: none; padding: 6px; color: var(--muted); display: inline-flex; }
   .topicon svg { width: 22px; height: 22px; display: block; }
   /* One grid, so every box lands in the same column whatever the unit beside
@@ -272,7 +265,7 @@
 </div>
 <div id="hmsBanner" class="card" style="display:none; background:var(--alert-bg); color:var(--alert-text);"></div>
 <div id="controlsCard">
-<div class="iconrow cols3" id="row1">
+<div class="iconrow cols3">
   <button class="iconbtn" id="lampBtn" aria-label="Chamber lamp" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 2a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.2v.3h6v-.3c0-.8.4-1.6 1-2.2A6 6 0 0 0 12 2z"/></svg></span><span class="cap">Lamp</span></button>
   <button class="iconbtn" id="pauseBtn" data-print-action="pause" aria-label="Pause print" disabled>
@@ -280,14 +273,14 @@
   <button class="iconbtn danger" id="stopBtn" data-print-action="stop" aria-label="Stop print" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></span><span class="cap">Stop</span></button>
 </div>
-<div class="iconrow" id="row2">
+<div class="iconrow">
   <button class="iconbtn" data-action="lower-bed" aria-label="Lower bed">
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M12 4v9"/><path d="M8 9l4 4 4-4"/></svg></span><span class="cap">Bed down</span></button>
   <button class="iconbtn" data-action="home" aria-label="Home axes">
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg></span><span class="cap">Home</span></button>
   <button class="iconbtn" data-action="extrude" id="extrudeBtn" aria-label="Extrude filament">
     <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 4h14a1 1 0 0 1 .95 1.32l-2.4 6.9a1 1 0 0 1-.95.68H7.4a1 1 0 0 1-.95-.68l-2.4-6.9A1 1 0 0 1 5 4z"/><path d="M12 13.6c-1.5 2-2.2 3.4-2.2 4.5a2.2 2.2 0 0 0 4.4 0c0-1.1-.7-2.5-2.2-4.5z"/></svg></span><span class="cap">Extrude</span></button>
-  <button class="iconbtn" data-action="unload" id="unloadBtn" aria-label="Unload loaded filament" disabled>
+  <button class="iconbtn" data-action="unload" aria-label="Unload loaded filament" disabled>
     <span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l7 9H5z"/><rect x="5" y="16" width="14" height="3" rx="1.5"/></svg></span><span class="cap">Unload</span></button>
 </div>
 </div>
@@ -455,12 +448,8 @@
 const $ = id => document.getElementById(id);
 
 // --- Session ----------------------------------------------------------------
-// A session that has run out shows up as a 401 on whichever request happens
-// next, and every one of them would otherwise fail on its own in its own way.
-// Catching it in one place sends the browser to log in and come back here,
-// rather than leaving a page that quietly stops updating.
-// Only the first 401 navigates: a lapsed session fails every poll in flight at
-// once, and each extra login started would replace the one before it.
+// Any 401 means the session lapsed: go log in and come back. Only the first
+// one navigates, since every in-flight poll fails at once.
 const nativeFetch = window.fetch.bind(window);
 let loggingIn = false;
 window.fetch = async (...args) => {
@@ -472,8 +461,7 @@ window.fetch = async (...args) => {
   return response;
 };
 
-// The Account card only means anything when there is a login to speak of: with
-// authentication switched off there is no /auth/me and nothing to show.
+// The Account card is only shown when login is enabled.
 async function refreshAccount() {
   if (DEMO) return;
   try {
@@ -487,21 +475,16 @@ async function refreshAccount() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  $("logout").addEventListener("click", async () => {
-    // The server reports where to go rather than redirecting, because a
-    // provider's log-out page answers no cross-origin request and following a
-    // redirect here would fail without the page ever moving.
-    let then = "/";
-    try {
-      const r = await nativeFetch("/auth/logout", { method: "POST" });
-      if (r.ok) then = (await r.json()).then || "/";
-    } catch {
-      // Logged out locally regardless; the worst case is staying on this page.
-    }
-    location.href = then;
-  });
+$("logout").addEventListener("click", async () => {
+  // The server returns where to go (possibly the provider's logout page).
+  let then = "/";
+  try {
+    const r = await nativeFetch("/auth/logout", { method: "POST" });
+    if (r.ok) then = (await r.json()).then || "/";
+  } catch {}
+  location.href = then;
 });
+
 const fmt = v => (typeof v === "number" ? v.toFixed(1) : "?");
 
 // Icons that swap with state (the rest are inline in the markup).
@@ -515,9 +498,8 @@ function setIco(btn, svg, cap) {
   if (cap != null) btn.querySelector(".cap").textContent = cap;
 }
 
-// Declared up here (not by the stop-button wiring below) because refresh() can
-// call disarmStop() on its very first, synchronous run — before that wiring
-// executes — which would otherwise hit the temporal dead zone.
+// Declared early: refresh() can call disarmStop() before the stop-button
+// wiring below runs.
 let stopTimer = null;
 
 // Countdown text: "23h 59m" while over an hour, "14:32" (m:ss) under it.
@@ -557,9 +539,8 @@ function amsHumidityText(unit) {
   return parts.join(" · ");
 }
 
-// amsTarget is the global tray index for ams_change_filament, computed from the
-// reported ids (ams_id*4 + tray_id) rather than DOM position, so a sparse or
-// reordered report still targets the right slot. null if ids aren't usable.
+// amsTarget is a tray's global index (ams_id*4 + tray_id), comparable with
+// ams.tray_now. null if the ids aren't usable.
 function amsTarget(unit, slot) {
   const u = parseInt(unit && unit.id, 10);
   const t = parseInt(slot && slot.id, 10);
@@ -649,9 +630,8 @@ function renderAms(ams, canEdit) {
 }
 
 // buildFilamentEditor makes the inline per-tray profile form, prefilled from the
-// tray's current reported values. tray_info_idx (the printer's own profile id,
-// which the reference is unsure about) is carried through hidden and unchanged
-// so a colour/type edit doesn't clobber it.
+// tray's reported values. tray_info_idx (the printer's profile id) is sent back
+// unchanged so an edit doesn't clobber it.
 function buildFilamentEditor(unit, slot) {
   const box = document.createElement("div");
   box.className = "ams-editor";
@@ -727,29 +707,6 @@ const DRY_STOPS = [
   { t: 90,  label: "90°C · ABS/ASA/PC" },
   { t: 100, label: "100°C · PA/PVA/desiccant" },
 ];
-let dryDragging = false;
-
-// Mirror the printer's reported bed target onto the slider by snapping to
-// the nearest preset.
-function setDrySliderFromTarget(target) {
-  const t = typeof target === "number" ? target : 0;
-  let best = 0, bestDiff = Infinity;
-  DRY_STOPS.forEach((stop, i) => {
-    const d = Math.abs(stop.t - t);
-    if (d < bestDiff) { bestDiff = d; best = i; }
-  });
-  $("drySlider").value = best;
-  $("dryLabel").textContent = DRY_STOPS[best].label;
-}
-
-$("drySlider").addEventListener("input", () => {
-  dryDragging = true;
-  $("dryLabel").textContent = DRY_STOPS[Number($("drySlider").value)].label;
-});
-$("drySlider").addEventListener("change", () => {
-  dryDragging = false;
-  post(`set-bed-temp?temp=${DRY_STOPS[Number($("drySlider").value)].t}`);
-});
 
 // Nozzle presets for cleaning / cold pulls. Bambu's cold-pull guide
 // (wiki.bambulab.com/en/p1/manual/p1s-cold-pull) sets the nozzle slightly
@@ -762,32 +719,41 @@ const NOZZLE_STOPS = [
   { t: 275, label: "275°C · ABS/PC" },
   { t: 295, label: "295°C · PA/CF" },
 ];
-let nozzleDragging = false;
 
-function setNozzleSliderFromTarget(target) {
-  const t = typeof target === "number" ? target : 0;
-  let best = 0, bestDiff = Infinity;
-  NOZZLE_STOPS.forEach((stop, i) => {
-    const d = Math.abs(stop.t - t);
-    if (d < bestDiff) { bestDiff = d; best = i; }
+// presetSlider wires a slider that snaps to stops and posts the chosen
+// temperature to endpoint on release. While it is being dragged, status
+// updates leave it alone.
+function presetSlider(sliderId, labelId, stops, endpoint) {
+  const slider = $(sliderId), label = $(labelId);
+  const ctl = {
+    dragging: false,
+    // Show the printer's reported target as the nearest stop.
+    setFromTarget(target) {
+      const t = typeof target === "number" ? target : 0;
+      let best = 0, bestDiff = Infinity;
+      stops.forEach((stop, i) => {
+        const d = Math.abs(stop.t - t);
+        if (d < bestDiff) { bestDiff = d; best = i; }
+      });
+      slider.value = best;
+      label.textContent = stops[best].label;
+    },
+  };
+  slider.addEventListener("input", () => {
+    ctl.dragging = true;
+    label.textContent = stops[Number(slider.value)].label;
   });
-  $("nozzleSlider").value = best;
-  $("nozzleLabel").textContent = NOZZLE_STOPS[best].label;
+  slider.addEventListener("change", () => {
+    ctl.dragging = false;
+    post(`${endpoint}?temp=${stops[Number(slider.value)].t}`);
+  });
+  return ctl;
 }
+const drySlider = presetSlider("drySlider", "dryLabel", DRY_STOPS, "set-bed-temp");
+const nozzleSlider = presetSlider("nozzleSlider", "nozzleLabel", NOZZLE_STOPS, "set-nozzle-temp");
 
-$("nozzleSlider").addEventListener("input", () => {
-  nozzleDragging = true;
-  $("nozzleLabel").textContent = NOZZLE_STOPS[Number($("nozzleSlider").value)].label;
-});
-$("nozzleSlider").addEventListener("change", () => {
-  nozzleDragging = false;
-  post(`set-nozzle-temp?temp=${NOZZLE_STOPS[Number($("nozzleSlider").value)].t}`);
-});
-
-// Demo mode: preview the UI live without a printer. Default (?demo) is an idle
-// printer — the state where drying/cleaning/load actually apply — so every
-// control is genuinely usable. ?demo=print shows a running job instead, with
-// controls correctly locked exactly as real hardware locks them mid-print.
+// Demo mode: preview the UI without a printer. ?demo is an idle printer with
+// every control usable; ?demo=print is a running job with controls locked.
 const demoParams = new URLSearchParams(location.search);
 const DEMO = demoParams.has("demo");
 const DEMO_PRINT = demoParams.get("demo") === "print";
@@ -879,9 +845,9 @@ async function refresh() {
     $("dryCard").style.display = s.actionsAllowed ? "" : "none";
     $("nozzleCard").style.display = s.actionsAllowed ? "" : "none";
     // Sliders mirror the printer's targets unless the user is dragging them.
-    if (!dryDragging) setDrySliderFromTarget(s.bedTarget);
+    if (!drySlider.dragging) drySlider.setFromTarget(s.bedTarget);
     $("drySlider").disabled = !s.actionsAllowed;
-    if (!nozzleDragging) setNozzleSliderFromTarget(s.nozzleTarget);
+    if (!nozzleSlider.dragging) nozzleSlider.setFromTarget(s.nozzleTarget);
     $("nozzleSlider").disabled = !s.actionsAllowed;
     showTimer("dryTimerRow", "dryTimer", s.bedOffIn);
     showTimer("nozzleTimerRow", "nozzleTimer", s.nozzleOffIn);
@@ -890,15 +856,7 @@ async function refresh() {
     // Extrude also needs a hot nozzle (cold extrusion strips filament); the
     // printer enforces this too, but disable the button to make it obvious.
     $("extrudeBtn").disabled = !s.actionsAllowed || (s.nozzleTemp ?? 0) < 170;
-    // Unload follows the same idle rule as the other actions. It used to also
-    // require the AMS to report a loaded tray, which left the button dead
-    // exactly when it was wanted: an external spool has no tray to report, and
-    // the reading does not survive the end of a print. Unloading with nothing
-    // loaded costs a wasted sequence; not being able to unload costs a
-    // disassembly.
-    // Lamp toggles in any state, so it's gated on connection only. chamberLight
-    // is null until the printer reports it — stay neutral and disabled until
-    // then rather than assert a state we haven't seen.
+    // The lamp works in any state; it is disabled only until its state is known.
     const lampKnown = typeof s.chamberLight === "boolean";
     const lampOn = s.chamberLight === true;
     const lamp = $("lampBtn");
@@ -1004,12 +962,8 @@ document.querySelectorAll("[data-print-action]").forEach(b =>
     }
   }));
 
-// Camera: one window, always sourced from the recording buffer — there is
-// no separate live stream. "Live" just means following the tail of the
-// buffer, polled at roughly the camera's own capture rate; scrubbing the
-// slider or opening a job's timelapse drops out of following and shows a
-// specific historical frame instead, via the same "fetch nearest frame at
-// a timestamp" endpoint.
+// Camera: every view reads from the recording buffer. "Live" means following
+// its tail; scrubbing or playing a job's timelapse stops following.
 let camRange = null; // {oldest, newest} in unix seconds, or nulls if empty
 let camPos = 0;
 let camFollowing = true; // true: keep showing the newest frame as it arrives
@@ -1032,12 +986,9 @@ function fmtCamTime(ts, extra) {
   });
 }
 
-// Each frame is fetched rather than assigned to an <img> src, because the only
-// way to learn when a frame was actually taken is a response header, and an
-// <img> cannot read those. The endpoint returns the first frame at or after the
-// time asked for, and retention leaves real gaps between kept prints, so the two
-// can be hours apart — captioning with the requested time would misdate the
-// picture on screen.
+// Frames are fetched rather than set as an <img> src so the response header
+// with the frame's real capture time can be read; it can differ from the
+// requested time by hours across retention gaps.
 let camFrameSeq = 0;  // drops responses overtaken by a newer request
 let camFrameUrl = null; // object URL on screen, revoked when replaced
 
@@ -1076,9 +1027,7 @@ function setCamBounds(min, max) {
   $("camSlider").max = max;
 }
 
-// The LIVE badge doubles as the indicator of whether the view is following the
-// tail: lit with a red dot while it is, dimmed when the view has been scrubbed
-// back into recorded footage.
+// The LIVE badge is lit while following the tail and dimmed when scrubbed back.
 function setFollowing(on) {
   camFollowing = on;
   const btn = $("camLiveBtn");
@@ -1093,10 +1042,8 @@ function setCamPlayIcon(playing) {
   $("camPlayBtn").setAttribute("aria-label", playing ? "Pause timelapse" : "Play timelapse");
 }
 
-// stopCamPlayback only stops advancing. The job being watched — camBoundEnd and
-// camJobSpan — outlives it, because pausing is not leaving the job: clearing the
-// cap here let a resumed timelapse run past its job's end and on to the live
-// tail, with the thumb stuck at the end of the bar. Only Live leaves a job.
+// stopCamPlayback only stops advancing; the job being watched (camBoundEnd,
+// camJobSpan) stays selected until Live is tapped.
 function stopCamPlayback() {
   camPlaying = false;
   setCamPlayIcon(false);
@@ -1198,8 +1145,8 @@ async function refreshCamRange() {
   $("camEmpty").style.display = has ? "none" : "";
   $("camControls").style.display = has ? "" : "none";
   if (!has) return;
-  // The server decides how far back the bar reaches: 24h while idle, or just
-  // before the running print started.
+  // The server decides how far back the bar reaches: one history window while
+  // idle, or just before the running print started.
   if (!camJobSpan) setCamBounds(camRange.oldest, camRange.newest);
   if (camFollowing) seekTo(camRange.newest);
 }
@@ -1221,8 +1168,8 @@ if (!DEMO) {
 }
 
 // --- Notifications ----------------------------------------------------------
-// On iPhone this needs the page installed to the Home Screen, which nothing
-// here can do for the user — so a browser that cannot subscribe is told why.
+// On iPhone this needs the page added to the Home Screen; say so when push
+// isn't available.
 const PUSH_READY = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 const INSTALLED = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
 
@@ -1239,8 +1186,7 @@ function bytesToB64(buf) {
   return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// What each kind is called on screen. The names on the wire outlive any
-// release, so they are mapped here rather than shown raw.
+// Display names for notification kinds.
 const KIND_LABELS = {
   "print-started": "Print started",
   "print-finished": "Print finished",
@@ -1249,8 +1195,7 @@ const KIND_LABELS = {
   "heater-off": "Heater turned off automatically",
 };
 
-// Saved as soon as they are changed: each is one choice on its own, unlike the
-// timings where a half-typed number would be a bad setting.
+// Saved as soon as they change (unlike the timings, which wait for Save).
 async function savePrefs() {
   if (!pushSub) return;
   const kinds = [...document.querySelectorAll("#notifyKinds input:checked")].map(i => i.value);
@@ -1424,8 +1369,6 @@ initNotifications();
 loadDashboard();
 
 // --- Screens ----------------------------------------------------------------
-// Settings is its own screen rather than more cards under the status: nothing
-// on it is worth scrolling past to reach the printer controls.
 function showScreen(which) {
   for (const name of ["mainScreen", "settingsScreen", "eventsScreen"]) {
     $(name).style.display = name === which ? "" : "none";
@@ -1443,9 +1386,7 @@ $("eventsBack").addEventListener("click", () => showScreen("mainScreen"));
 $("eventsRefresh").addEventListener("click", refreshEvents);
 
 // --- Appearance -------------------------------------------------------------
-// The theme is a device preference, not an app setting: it has to be applied
-// before the first paint, which rules out waiting for the server, and one
-// person's phone and tablet are not in the same light.
+// The theme is stored per device so it can be applied before first paint.
 function applyTheme(choice) {
   if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
   else delete document.documentElement.dataset.theme;
@@ -1462,7 +1403,7 @@ $("setTheme").addEventListener("change", () => applyTheme($("setTheme").value));
 
 // --- Dashboard --------------------------------------------------------------
 // Which sections are on the printer screen, and in what order. Stored on the
-// server so it is the same wherever the page is opened.
+// server.
 const DASH_SECTIONS = [
   { id: "jobCard", label: "Job status" },
   { id: "machineCard", label: "Machine status" },
@@ -1481,15 +1422,9 @@ function applyDashboard() {
   const main = $("mainScreen");
   for (const { id } of DASH_SECTIONS) {
     const el = $(id);
-    if (!el) continue;
-    if (dashOrder.includes(id)) {
-      main.appendChild(el);          // re-appending is what puts it in order
-      el.dataset.hidden = "";
-    } else {
-      el.dataset.hidden = "yes";
-    }
+    if (el) el.dataset.hidden = dashOrder.includes(id) ? "" : "yes";
   }
-  // Order the visible ones as chosen.
+  // Re-appending in the chosen order is what orders them.
   for (const id of dashOrder) {
     const el = $(id);
     if (el) main.appendChild(el);
@@ -1578,9 +1513,7 @@ async function loadDashboard() {
 }
 
 // --- Events -----------------------------------------------------------------
-// What went to the printer, what came back, and what was sent to a phone. The
-// raw message is there to be read when a summary is not enough, which is the
-// whole reason for keeping it.
+// Commands sent, printer reports, and notifications, with raw messages.
 const EVENT_FILTERS = {
   command: "eventsCommands",
   report: "eventsReports",
@@ -1667,8 +1600,8 @@ for (const id of Object.values(EVENT_FILTERS)) {
 }
 
 // --- Printer ----------------------------------------------------------------
-// The access code is never served back, so the field starts blank and blank
-// means unchanged. Nothing here can read the stored credential.
+// The access code is never sent back, so the field starts blank and blank
+// means unchanged.
 async function refreshPrinter() {
   if (DEMO) return;
   try {
@@ -1714,9 +1647,8 @@ $("printerSave").addEventListener("click", async () => {
 });
 
 // --- Settings ---------------------------------------------------------------
-// Each control edits one setting and saves as soon as it is changed. The server
-// is the only thing that decides whether a value is allowed, so a refusal is
-// shown and the field put back to what is actually stored.
+// Each field edits one setting; Save sends the ones that changed. The server
+// validates, and a refused field is put back to the stored value.
 const SETTINGS = [
   { id: "setRetention", name: "retention", perUnit: 3600 },
   { id: "setKeptJobs", name: "kept-jobs", perUnit: 1 },
@@ -1770,8 +1702,7 @@ $("settingsSave").addEventListener("click", async () => {
       failures.push(e.message || String(e));
     }
   }
-  // Read back rather than assume: whatever the server kept is the truth, and a
-  // field the server refused goes back to the value actually in force.
+  // Reload from the server so refused fields show the stored value.
   await refreshSettings();
   $("settingsMsg").textContent = failures.length ? failures.join(" · ") : "Saved.";
 });

@@ -12,19 +12,15 @@ import (
 // Notification tags. A second notification carrying the same tag replaces the
 // first on the phone rather than stacking beneath it.
 const (
-	tagJob   = "job"
-	tagError = "error"
-	tagBed   = "bed"
+	tagJob    = "job"
+	tagError  = "error"
+	tagBed    = "bed"
+	tagNozzle = "nozzle"
 )
 
-// printEvents turns the printer's reported state into the handful of changes
-// worth interrupting someone for.
-//
-// Every decision is a transition, never a level, so nothing repeats itself: a
-// print that stays finished is announced once. The first observation after
-// start-up only records where things stand — announcing a print that finished
-// hours ago because this process has just met the printer would be noise, and
-// worse, indistinguishable from the real thing.
+// printEvents turns the printer's state into notifications. It fires on
+// transitions only, and the first observation after startup just records the
+// current state, so a print that finished before a restart isn't announced.
 type printEvents struct {
 	mu       sync.Mutex
 	now      func() time.Time

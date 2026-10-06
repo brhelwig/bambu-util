@@ -29,10 +29,8 @@ CREATE TABLE IF NOT EXISTS server_key (
 );
 `
 
-// Subscription is one browser's address for push messages, as handed over when
-// the user turns notifications on, plus what that device asked to be told
-// about. Preferences live here rather than in the settings because two devices
-// should be able to want different things.
+// Subscription is one browser's push subscription and that device's
+// notification preferences.
 type Subscription struct {
 	Endpoint string
 	P256dh   []byte // the browser's public key
@@ -44,14 +42,12 @@ type Subscription struct {
 	// BedInterval is how often to repeat the bed reminder while the bed is on
 	// with no print running. Zero means never.
 	BedInterval time.Duration
-	// BedRemindedAt is when this device was last reminded, so each device keeps
-	// its own place in its own schedule.
+	// BedRemindedAt is when this device was last reminded.
 	BedRemindedAt time.Time
 }
 
-// Wants reports whether this device asked to be told about a kind. A device
-// that has chosen nothing is told about everything, which is what turning
-// notifications on and never opening the settings should mean.
+// Wants reports whether this device wants a kind. A device that has chosen
+// nothing gets everything.
 func (s Subscription) Wants(kind string) bool {
 	if len(s.Kinds) == 0 {
 		return true
@@ -90,8 +86,7 @@ func New(db *sql.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// Close closes the database, unless it belongs to whoever passed it in —
-// closing a shared handle would take every other store down with it.
+// Close closes the database if this store opened it.
 func (s *Store) Close() error {
 	if !s.owned {
 		return nil
@@ -99,9 +94,8 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// Key returns this server's identity, generating and storing one the first time
-// it is asked. The key is persistent because browsers bind their subscription
-// to it: a new key silently stops every existing phone from receiving.
+// Key returns this server's VAPID key, generating and storing one the first
+// time. Subscriptions are bound to it, so changing it breaks every one.
 func (s *Store) Key() (*Key, error) {
 	var der []byte
 	err := s.db.QueryRow(`SELECT der FROM server_key WHERE id = 1`).Scan(&der)
@@ -153,9 +147,7 @@ func (s *Store) Save(sub Subscription, ts int64) error {
 	return err
 }
 
-// Delete forgets one subscription. Deleting one that is not there is not an
-// error: both the user turning notifications off and the push service reporting
-// a dead endpoint can race.
+// Delete forgets one subscription. A missing one is not an error.
 func (s *Store) Delete(endpoint string) error {
 	_, err := s.db.Exec(`DELETE FROM subscriptions WHERE endpoint = ?`, endpoint)
 	return err

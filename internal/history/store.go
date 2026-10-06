@@ -58,8 +58,7 @@ func New(db *sql.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// Close closes the database, unless it belongs to whoever passed it in —
-// closing a shared handle would take every other store down with it.
+// Close closes the database if this store opened it.
 func (s *Store) Close() error {
 	if !s.owned {
 		return nil
@@ -109,24 +108,15 @@ func (s *Store) Range() (oldest, newest *int64, err error) {
 	return oldest, newest, nil
 }
 
-// DefaultKeptJobs is how many finished prints keep their footage past the
-// cutoff when nothing says otherwise, so a recent timelapse stays watchable
-// after the rolling buffer has moved on. The running value is a setting.
-const DefaultKeptJobs = 5
-
 // ThinInterval is the spacing, in seconds, that kept footage is reduced to once
-// it ages past the cutoff. Keeping five whole prints at the recording rate would
-// add gigabytes; timelapse playback runs at 60x or faster, so a frame every 10s
-// is still more footage than the playback can show.
+// it ages past the cutoff. Timelapses play at 30x or faster, so a frame every
+// 10s is enough.
 const ThinInterval = 10
 
-// MaxOpenJobSpan bounds, in seconds, how far back from the cutoff the
-// in-progress print's footage is protected. The print's own row is what protects
-// it, and that row only closes once the printer reports a finished state — a
-// printer that drops off the network mid-print leaves RUNNING as the last thing
-// it said, so the row can stay open indefinitely. Without this bound that one row
-// would exempt everything from its start onward from retention, permanently. Set
-// well past any real print length, so it only ever catches the stuck case.
+// MaxOpenJobSpan bounds, in seconds, how far back from the cutoff an
+// in-progress print's footage is protected. A printer that vanishes mid-print
+// can leave its job row open forever; this stops that row exempting all later
+// footage from retention.
 const MaxOpenJobSpan = 48 * 60 * 60
 
 // Prune enforces the retention policy. Frames older than cutoff are deleted
@@ -216,10 +206,8 @@ func (s *Store) deleteUnkeptFrames(cutoff int64, kept []window) error {
 	return err
 }
 
-// thinWindow reduces the pre-cutoff part of one kept window to a single frame
-// per ThinInterval, keeping the earliest frame in each interval. Frames newer
-// than cutoff are left at the full recording rate — they are still part of the
-// live scrollback buffer.
+// thinWindow reduces the pre-cutoff part of one kept window to the earliest
+// frame per ThinInterval. Frames newer than cutoff are left alone.
 func (s *Store) thinWindow(cutoff int64, w window) error {
 	end := cutoff - 1
 	if w.end != nil && *w.end < end {
@@ -278,11 +266,8 @@ func (s *Store) ActiveJob() (*Job, error) {
 }
 
 // CloseJobAtLastFrame closes job id at the last frame recorded inside it, or at
-// fallback when it has no surviving footage. The last frame is the right end
-// time in both cases that matter: for a print that has just stopped, recording
-// ran up to now anyway; for a row stranded by a process that exited mid-print,
-// the footage stops where the print did, which is far more honest than the
-// moment we happened to notice.
+// fallback when it has none. For a row left open by a crash, that is when the
+// print actually stopped being recorded.
 func (s *Store) CloseJobAtLastFrame(id, fallback int64) error {
 	var start int64
 	if err := s.db.QueryRow(`SELECT start_ts FROM jobs WHERE id = ?`, id).Scan(&start); err != nil {
@@ -306,10 +291,8 @@ func (s *Store) CloseJobAtLastFrame(id, fallback int64) error {
 	return s.CloseJob(id, end)
 }
 
-// CloseOrphanJobs closes every job row left open except the newest, reporting
-// how many it closed. Only one print runs at a time, so additional open rows are
-// wreckage from a process that exited mid-print back when a restart opened a
-// second row instead of adopting the first.
+// CloseOrphanJobs closes every open job row except the newest, reporting how
+// many it closed. Only one print runs at a time, so any others are stale.
 func (s *Store) CloseOrphanJobs() (int, error) {
 	rows, err := s.db.Query(`SELECT id, start_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC, id DESC`)
 	if err != nil {
@@ -341,11 +324,8 @@ func (s *Store) CloseOrphanJobs() (int, error) {
 	return len(orphans) - 1, nil
 }
 
-// RecentJobs returns every job row currently stored, newest-started first. Rows
-// sharing a start second are broken by insertion order, so "newest" is never
-// ambiguous — two prints can start in the same second if one is restarted
-// immediately.
-// Prune keeps this bounded to the prints whose footage is still retained.
+// RecentJobs returns every stored job, newest-started first (ties broken by
+// insertion order). Prune keeps this bounded.
 func (s *Store) RecentJobs() ([]Job, error) {
 	rows, err := s.db.Query(`SELECT id, name, start_ts, end_ts FROM jobs ORDER BY start_ts DESC, id DESC`)
 	if err != nil {
@@ -372,13 +352,8 @@ func (s *Store) RecentJobs() ([]Job, error) {
 // Name identifies this source to the size cap.
 func (s *Store) Name() string { return "camera frames" }
 
-// Oldest returns the oldest stored frames for the size cap, oldest first. The
-// timestamp is given in milliseconds so frames and event-log entries, which are
-// recorded at different precision, can be put in one order.
-//
-// The order is by id rather than by timestamp, so that it matches how
-// DeleteThrough cuts. Frames are recorded as they arrive, so the two agree;
-// ordering by one and deleting by the other would not survive them disagreeing.
+// Oldest returns the oldest stored frames for the size cap, ordered by id to
+// match DeleteThrough. When is in milliseconds, like the event log's.
 func (s *Store) Oldest(n int) ([]capacity.Item, error) {
 	rows, err := s.db.Query(`
 		SELECT id, ts, octet_length(jpeg) FROM frames ORDER BY id ASC LIMIT ?`, n)
@@ -399,9 +374,8 @@ func (s *Store) Oldest(n int) ([]capacity.Item, error) {
 	return out, rows.Err()
 }
 
-// DeleteThrough removes every frame up to and including id. The size cap is
-// absolute, so this pays no attention to which print a frame belongs to: unlike
-// Prune, it will take footage that KeptJobs protects.
+// DeleteThrough removes every frame up to and including id, including footage
+// Prune would keep.
 func (s *Store) DeleteThrough(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM frames WHERE id <= ?`, id)
 	return err

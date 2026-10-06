@@ -1,12 +1,6 @@
-// Package activity records what the app did and what was done to it — commands
-// sent to the printer, what the printer reported back, and notifications sent
-// out — so a command can be seen leaving and being acknowledged rather than the
-// page merely claiming it was sent.
-//
-// It is kept in the database, because the log is most wanted after something
-// went wrong and the app was restarted, which is exactly when a log held in
-// memory has nothing to show. What bounds it is a size rather than a count of
-// entries, since one entry ranges from a few bytes to a whole printer state.
+// Package activity is a persistent event log of commands sent to the printer
+// (and whether they were acknowledged), printer reports, and notifications
+// sent. It is bounded by size in bytes, since entries vary widely in size.
 package activity
 
 import (
@@ -20,9 +14,8 @@ import (
 	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
-// Times are stored in milliseconds rather than the whole seconds the camera
-// history uses: a command and the report answering it routinely land in the
-// same second, and the order of exactly that is what the log is read for.
+// Times are in milliseconds, since a command and its reply often land in the
+// same second.
 const schema = `
 CREATE TABLE IF NOT EXISTS activity (
   id      INTEGER PRIMARY KEY,
@@ -42,9 +35,7 @@ const (
 	Notification = "notification" // sent to subscribed devices
 )
 
-// Entry is one thing that happened. Acked is nil for anything not yet
-// confirmed, which for a command means the printer has not answered — the
-// difference this whole thing exists to show.
+// Entry is one logged event. Acked is nil until the printer confirms it.
 type Entry struct {
 	ID      int64      `json:"id"`
 	At      time.Time  `json:"at"`
@@ -55,24 +46,20 @@ type Entry struct {
 	Error   string     `json:"error,omitempty"`
 }
 
-// maxPayload caps how much of one payload is kept. The printer's first report
-// after connecting is its entire state and dwarfs everything else; keeping all
-// of it would spend much of the budget on one entry.
+// maxPayload caps how much of one payload is kept (the first report after
+// connecting is the printer's whole state).
 const maxPayload = 4096
 
-// rowOverhead stands for the columns whose size does not vary — the id, the two
-// timestamps and the kind. Without it a flood of tiny entries would count as
-// costing almost nothing while still filling the disk.
+// rowOverhead approximates the columns sizeExpr does not measure (id,
+// timestamps, kind), so many tiny entries still count against the budget.
 const rowOverhead = 64
 
-// lowWater is how far under the limit a trim cuts. Trimming exactly to the
-// limit would mean a delete on every insert once the log is full; going under
-// lets one trim cover many entries.
+// lowWater is how far under the limit a trim cuts, so a full log isn't
+// trimmed on every insert.
 const lowWater = 0.9
 
-// sizeExpr is what one stored row costs. octet_length rather than length,
-// because length counts characters and the printer does not only send ASCII —
-// a character count would quietly undercount the budget.
+// sizeExpr is what one stored row costs, in bytes (octet_length, not the
+// character count length gives).
 var sizeExpr = fmt.Sprintf(
 	"octet_length(summary) + octet_length(payload) + octet_length(error) + %d", rowOverhead)
 
@@ -103,25 +90,21 @@ func Open(path string, limit func() int64) (*Log, error) {
 	return l, nil
 }
 
-// New returns a log over db, creating its table if needed. limit is the budget
-// in bytes, read on every write rather than held, so lowering it on the
-// settings page takes effect on the next entry instead of at the next restart.
-// The caller keeps ownership of db.
+// New returns a log over db, creating its table if needed. limit returns the
+// budget in bytes and is read on every write. The caller keeps ownership of db.
 func New(db *sql.DB, limit func() int64) (*Log, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
 	l := &Log{db: db, limit: limit, now: time.Now}
-	// What is already stored is counted once here; every write keeps the figure
-	// up to date after that, so the budget costs no scan per entry.
+	// Count once; writes keep the total up to date after that.
 	if err := db.QueryRow(`SELECT COALESCE(SUM(` + sizeExpr + `), 0) FROM activity`).Scan(&l.bytes); err != nil {
 		return nil, err
 	}
 	return l, nil
 }
 
-// Close closes the database, unless it belongs to whoever passed it in —
-// closing a shared handle would take every other store down with it.
+// Close closes the database if this store opened it.
 func (a *Log) Close() error {
 	if !a.owned {
 		return nil
@@ -129,11 +112,9 @@ func (a *Log) Close() error {
 	return a.db.Close()
 }
 
-// Record adds an entry and returns it, so a command can be marked acknowledged
-// later. A nil log records nothing, so nothing has to check before calling.
-//
-// A database that will not take the entry costs the entry, not the command: the
-// printer must do what it was told whether or not the log kept a note of it.
+// Record adds an entry and returns it, so it can be acknowledged later. A nil
+// log records nothing. A failed write is logged and returns nil; it never
+// blocks the command being recorded.
 func (a *Log) Record(kind, summary, payload string) *Entry {
 	if a == nil {
 		return nil
@@ -160,11 +141,9 @@ func (a *Log) Record(kind, summary, payload string) *Entry {
 	return entry
 }
 
-// Acknowledge marks when the printer's broker confirmed a message, or why it
-// did not. A nil entry is ignored, so callers need not check.
-//
-// The answer can arrive half a minute after the command, by which time trimming
-// may have taken the row; the update then changes nothing, which is right.
+// Acknowledge records when the broker confirmed a message, or the error if it
+// didn't. A nil entry is ignored. The row may already have been trimmed, in
+// which case nothing changes.
 func (a *Log) Acknowledge(entry *Entry, at time.Time, err error) {
 	if a == nil || entry == nil {
 		return
@@ -173,8 +152,7 @@ func (a *Log) Acknowledge(entry *Entry, at time.Time, err error) {
 	defer a.mu.Unlock()
 
 	if err == nil {
-		// The acknowledged time is a fixed-size column, already covered by the
-		// per-row overhead, so nothing is added to the total.
+		// Fixed-size column, covered by rowOverhead.
 		if _, dbErr := a.db.Exec(`UPDATE activity SET acked = ? WHERE id = ?`, at.UnixMilli(), entry.ID); dbErr != nil {
 			log.Printf("activity: acknowledging %d: %v", entry.ID, dbErr)
 		}
@@ -186,9 +164,7 @@ func (a *Log) Acknowledge(entry *Entry, at time.Time, err error) {
 		log.Printf("activity: acknowledging %d: %v", entry.ID, dbErr)
 		return
 	}
-	// Only what actually landed is charged. An entry trimmed away while the
-	// broker was still deciding updates nothing, and charging for it anyway
-	// would push the running total above what is stored and never come back.
+	// Only count the error if the row still existed.
 	changed, dbErr := res.RowsAffected()
 	if dbErr != nil {
 		log.Printf("activity: acknowledging %d: %v", entry.ID, dbErr)
@@ -209,8 +185,7 @@ func (a *Log) trim() {
 	}
 	target := int64(float64(limit) * lowWater)
 
-	// Ids only ever rise and only the oldest ever go, so how far to delete is a
-	// walk from the oldest end until enough has been freed.
+	// Walk from the oldest until enough is freed, then delete up to that id.
 	rows, err := a.db.Query(`SELECT id, ` + sizeExpr + ` FROM activity ORDER BY id ASC`)
 	if err != nil {
 		log.Printf("activity: trimming: %v", err)
@@ -244,9 +219,7 @@ func (a *Log) trim() {
 	a.bytes -= freed
 }
 
-// Entries returns at most limit entries, newest first, which is the order they
-// are looked for in. What is kept is bounded by a size, which is far more than
-// a page should draw at once, so what is served is bounded here instead.
+// Entries returns at most limit entries, newest first.
 func (a *Log) Entries(limit int) []Entry {
 	if a == nil {
 		return nil
@@ -311,9 +284,8 @@ func (a *Log) Oldest(n int) ([]capacity.Item, error) {
 	return out, rows.Err()
 }
 
-// DeleteThrough removes every entry up to and including id. The running total
-// is recounted rather than adjusted, because the cap deletes on its own
-// schedule and the two must not drift apart.
+// DeleteThrough removes every entry up to and including id, then recounts the
+// running total.
 func (a *Log) DeleteThrough(id int64) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

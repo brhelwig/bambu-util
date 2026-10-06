@@ -1,6 +1,10 @@
 package p1s
 
-import "testing"
+import (
+	"encoding/json"
+	"strconv"
+	"testing"
+)
 
 func TestMergeAccumulatesAndOverwrites(t *testing.T) {
 	c := NewStateCache()
@@ -60,5 +64,33 @@ func TestConnectedFlag(t *testing.T) {
 	c.SetConnected(true)
 	if _, conn := c.Snapshot(); !conn {
 		t.Fatal("SetConnected(true) not reflected")
+	}
+}
+
+// A snapshot must not share nested maps with the cache: Merge writes into them
+// in place, and a handler encoding a snapshot reads them without the lock.
+func TestSnapshotIsIndependentOfLaterMerges(t *testing.T) {
+	c := NewStateCache()
+	c.Merge(map[string]any{"ams": map[string]any{"tray_now": "1"}})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1000; i++ {
+			c.Merge(map[string]any{"ams": map[string]any{"tray_now": strconv.Itoa(i)}})
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		fields, _ := c.Snapshot()
+		if _, err := json.Marshal(fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+	<-done
+
+	snap, _ := c.Snapshot()
+	c.Merge(map[string]any{"ams": map[string]any{"tray_now": "changed"}})
+	if got := snap["ams"].(map[string]any)["tray_now"]; got == "changed" {
+		t.Fatal("a later Merge changed an earlier snapshot")
 	}
 }
