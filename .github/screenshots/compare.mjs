@@ -5,7 +5,7 @@
 // not the states being staged differently. A shot the base has no counterpart
 // for (a new screen, or a base that could not be captured at all) counts as
 // changed.
-import { copyFile, mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
@@ -21,9 +21,7 @@ const haveBase = existsSync(`${BASE}/shots.json`);
 async function differs(a, b) {
   const [x, y] = await Promise.all([a, b].map(async f => PNG.sync.read(await readFile(f))));
   if (x.width !== y.width || x.height !== y.height) return null;
-  // The default threshold already ignores anti-aliasing noise; anything left is
-  // a pixel a person could see move.
-  return pixelmatch(x.data, y.data, null, x.width, x.height, { threshold: 0.1 });
+  return pixelmatch(x.data, y.data, null, x.width, x.height);
 }
 
 await mkdir(OUT, { recursive: true });
@@ -57,7 +55,4 @@ await writeFile(`${OUT}/changed.json`, JSON.stringify({
   changed,
 }, null, 2) + "\n");
 
-if (process.env.GITHUB_OUTPUT) {
-  await appendFile(process.env.GITHUB_OUTPUT, `count=${changed.length}\n`);
-}
 console.log(`${changed.length} of ${shots.length} shot(s) changed`);

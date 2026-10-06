@@ -1,9 +1,9 @@
 name: release
 
-# Every commit that lands on main and passes ci is released. Versions are
-# calendar-based, YY.DOY.MMMM: year, day of the year and minute of the day, in
-# UTC. It waits on ci rather than the push itself because the image is not
-# rebuilt here: the one ci built for that commit is given the version as a tag.
+# Every commit that lands on main and passes ci is released, versioned
+# YY.DOY.M (year, day of year, minute of day, UTC; see the tag step). It waits
+# on ci because the image is not rebuilt here: the one ci built for that commit
+# is given the version as a tag.
 on:
   workflow_run:
     workflows: [ci]
