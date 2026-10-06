@@ -1,8 +1,8 @@
 name: release-main
 
 # Every commit that lands on main and passes ci is released. Versions are
-# calendar dates, vYYYY.MM.DD, with .1, .2, ... for further releases the same
-# day. It waits on ci rather than the push itself because release.yaml retags
+# calendar-based, vYY.DOY.MMMM: year, day of the year and minute of the day, in
+# UTC. It waits on ci rather than the push itself because release.yaml retags
 # the image ci built for that commit, which only exists once ci has finished.
 on:
   workflow_run:
@@ -39,13 +39,16 @@ jobs:
             echo "$SHA is already released"
             exit 0
           fi
-          today=$(date -u +%Y.%m.%d)
-          tag="v$today"
-          n=0
-          while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
-            n=$((n + 1))
-            tag="v$today.$n"
-          done
+          # Year, day of year and minute of the day, all UTC and unpadded: a
+          # commit at 15:07 UTC on 6 October 2026 is v26.279.907. The `10#`
+          # keeps 08 and 09 from being read as octal.
+          now=$(date -u +'%y %-j %H %M')
+          set -- $now
+          tag="v$1.$2.$((10#$3 * 60 + 10#$4))"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists"
+            exit 1
+          fi
           git tag "$tag" "$SHA"
           git push origin "refs/tags/$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
