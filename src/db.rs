@@ -119,8 +119,8 @@ impl Db {
 }
 
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-    let applied: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    for (i, sql) in MIGRATIONS.iter().enumerate().skip(applied) {
+    let applied: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(applied as usize) {
         conn.execute_batch(&format!(
             "BEGIN; {sql}; PRAGMA user_version = {}; COMMIT;",
             i + 1
@@ -141,10 +141,10 @@ mod tests {
             .query_row("PRAGMA auto_vacuum", [], |r| r.get(0))
             .unwrap();
         assert_eq!(mode, 2);
-        let version: usize = conn
+        let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, MIGRATIONS.len());
+        assert_eq!(version as usize, MIGRATIONS.len());
     }
 
     #[test]
