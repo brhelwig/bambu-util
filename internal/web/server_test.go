@@ -80,6 +80,24 @@ func (f *fakeCommander) PausePrint()  { f.record("pause") }
 func (f *fakeCommander) ResumePrint() { f.record("resume") }
 func (f *fakeCommander) StopPrint()   { f.record("stop") }
 
+// testServer builds a Server over throwaway stores, with the default
+// settings and a fake printer. Each override adjusts the options first.
+func testServer(cache *p1s.StateCache, cmd Commander, overrides ...func(*Options)) *Server {
+	o := Options{
+		Cache:     cache,
+		Commander: cmd,
+		History:   openTestStore(),
+		Notifier:  openTestNotifier(),
+		Activity:  openTestLog(),
+		Settings:  testSettings,
+		Printer:   testPrinter(),
+	}
+	for _, override := range overrides {
+		override(&o)
+	}
+	return NewServer(o)
+}
+
 func openTestStore() *history.Store {
 	store, err := history.New(memDB())
 	if err != nil {
@@ -141,7 +159,7 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 	}
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler()), cmd, store
+	return httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler()), cmd, store
 }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
@@ -350,7 +368,7 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler()), cmd
+	return httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -518,7 +536,7 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler())
+	ts := httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -563,7 +581,7 @@ func TestStatusHMSPopulated(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler())
+	ts := httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -607,7 +625,7 @@ func seekTestServer(state string, now int64) (*httptest.Server, *history.Store) 
 		v.Retention = seekWindowUnderTest
 		return v
 	}
-	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, cur, nil, testPrinter(), openTestLog())
+	srv := testServer(cache, &fakeCommander{}, func(o *Options) { o.History = store; o.Settings = cur })
 	srv.now = func() time.Time { return time.Unix(now, 0) }
 	return httptest.NewServer(srv.Handler()), store
 }

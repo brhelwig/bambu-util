@@ -20,7 +20,7 @@ func (e *printEvents) hasObserved() bool {
 func loopServer(connected bool, fields map[string]any) (*Server, *fakeCommander) {
 	cache := newStateCacheWith(connected, fields)
 	cmd := &fakeCommander{}
-	s := NewServer(cache, cmd, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
+	s := testServer(cache, cmd)
 	s.tick = time.Millisecond
 	return s, cmd
 }

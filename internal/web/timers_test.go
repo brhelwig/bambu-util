@@ -171,10 +171,10 @@ func TestTheStatusCountdownSurvivesARestart(t *testing.T) {
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
 
-	first := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil, testPrinter(), openTestLog())
+	first := testServer(cache, &fakeCommander{}, func(o *Options) { o.Timers = store })
 	first.autoOff.setBed(60)
 
-	second := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), store, testSettings, nil, testPrinter(), openTestLog())
+	second := testServer(cache, &fakeCommander{}, func(o *Options) { o.Timers = store })
 	bed, _ := second.autoOff.remaining()
 	if bed <= 0 {
 		t.Errorf("bed countdown after a restart = %d, want the remaining time", bed)

@@ -122,7 +122,17 @@ func newApp(ctx context.Context, dataDir string, decided auth.Decision) (*app, e
 		}
 	}
 
-	srv := web.NewServer(cache, link, store, notifier, timers, config.Values, config, link, events)
+	srv := web.NewServer(web.Options{
+		Cache:          cache,
+		Commander:      link,
+		History:        store,
+		Notifier:       notifier,
+		Activity:       events,
+		Settings:       config.Values,
+		SettingsWriter: config,
+		Printer:        link,
+		Timers:         timers,
+	})
 	go auth.RunSweeper(ctx, logins, time.Hour, time.Now)
 	go hub.Start(ctx)
 	go srv.EnforceAutoOff(ctx)
