@@ -127,7 +127,7 @@ three ways:
 | Tag | Points at |
 |---|---|
 | `latest` | The newest `main` build. Deployments that follow it pick up new code by restarting. |
-| `vYY.DOY.MMMM` | A released version — the same manifest as the `main` build it was cut from, not a rebuild. Use it to pin or roll back. |
+| `YY.DOY.MMMM` | A released version — the same manifest as the `main` build it was cut from, not a rebuild. Use it to pin or roll back. |
 | `<commit sha>` | One specific `main` build. |
 
 ### Printer prerequisites

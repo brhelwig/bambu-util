@@ -2,8 +2,8 @@
 
 All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
-are calendar-based (`vYY.DOY.MMMM`: year, day of the year and minute of the day,
-in UTC, so 15:07 on 6 October 2026 is `v26.279.907`); every commit that
+are calendar-based (`YY.DOY.MMMM`: year, day of the year and minute of the day,
+in UTC, so 15:07 on 6 October 2026 is `26.279.907`); every commit that
 passes CI on `main` is released.
 
 ## [Unreleased]
@@ -127,7 +127,7 @@ passes CI on `main` is released.
   Fires only on those transitions, so a manual toggle in between is never
   overridden. Shown as a countdown in the status card, same as the
   bed/nozzle auto-off timers.
-- Released container images are tagged `vYY.DOY.MMMM`, so a deployment can pin a
+- Released container images are tagged `YY.DOY.MMMM`, so a deployment can pin a
   version or roll back to one. The version tag names the same manifest the
   `main` build produced rather than a rebuild of the tagged commit.
 

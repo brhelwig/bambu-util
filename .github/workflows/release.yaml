@@ -2,7 +2,7 @@ name: release
 on:
   # A tag pushed by hand.
   push:
-    tags: ["v*"]
+    tags: ["[0-9]*.[0-9]*.[0-9]*"]
   # Called by release-main.yaml for the tag it cuts after each merge. A tag
   # pushed with the workflow token does not start workflows, so that one is
   # called directly rather than relying on the trigger above.
@@ -57,7 +57,7 @@ jobs:
         run: |
           # Every merge is released, so the version's own section does not
           # exist yet: the notes are whatever is under Unreleased.
-          awk -v ver="${TAG#v}" '
+          awk -v ver="${TAG}" '
             $0 ~ "^## \\[" ver "\\]" || $0 ~ "^## \\[Unreleased\\]" {found=1; next}
             found && /^## \[/ {exit}
             found {print}
@@ -72,7 +72,7 @@ jobs:
             --verify-tag \
             --notes-file release-notes.md
 
-  # A v* tag always points at a commit that already went through the main-branch
+  # A release tag always points at a commit that already went through the main-branch
   # image job, so the released version is a new name for that exact manifest
   # rather than a rebuild. Rebuilding would silently pick up whatever golang and
   # distroless base images have moved to since, shipping something other than
