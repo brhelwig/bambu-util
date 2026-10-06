@@ -86,8 +86,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag the CI-built image with the release version
+      # latest moves here rather than in ci, so it only ever names a release.
+      - name: Tag the CI-built image with the release version and latest
         run: |
           docker buildx imagetools create \
             --tag "ghcr.io/brhelwig/bambu-util:${TAG}" \
+            --tag "ghcr.io/brhelwig/bambu-util:latest" \
             "ghcr.io/brhelwig/bambu-util:${SHA}"
