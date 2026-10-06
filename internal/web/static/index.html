@@ -802,15 +802,22 @@ if (DEMO) {
   $("log").textContent = `demo (${mode}) — no printer connected`;
 }
 
-async function refresh() {
+// The newest status, so the dashboard can be re-drawn without waiting for the
+// next one (null until the first arrives).
+let lastStatus = null;
+
+// refresh re-draws the status: a fresh one in demo, the last one pushed
+// otherwise.
+function refresh() {
+  if (DEMO) {
+    renderStatus(demoStatus());
+  } else if (lastStatus) {
+    renderStatus(lastStatus);
+  }
+}
+
+function renderStatus(s) {
   try {
-    let s;
-    if (DEMO) {
-      s = demoStatus();
-    } else {
-      const r = await fetch("/api/status");
-      s = await r.json();
-    }
     $("conn").textContent = s.connected ? "connected" : "disconnected";
     $("conn").className = s.connected ? "ok" : "bad";
     $("state").textContent = s.gcodeState;
@@ -878,22 +885,29 @@ async function refresh() {
     });
     if (!pa.stop) disarmStop();
   } catch {
-    $("conn").textContent = "bridge unreachable";
-    $("conn").className = "bad";
-    document.querySelectorAll("[data-action], [data-print-action]").forEach(b => b.disabled = true);
-    $("dryCard").style.display = "none";
-    $("nozzleCard").style.display = "none";
-    $("drySlider").disabled = true;
-    $("nozzleSlider").disabled = true;
-    $("lampBtn").disabled = true;
-    // Don't leave a frozen countdown implying a timer we can no longer confirm.
-    $("dryTimerRow").style.display = "none";
-    $("nozzleTimerRow").style.display = "none";
-    $("lampTimerRow").style.display = "none";
+    renderUnreachable();
   }
 }
-refresh();
-setInterval(refresh, 2000);
+
+function renderUnreachable() {
+  $("conn").textContent = "bridge unreachable";
+  $("conn").className = "bad";
+  document.querySelectorAll("[data-action], [data-print-action]").forEach(b => b.disabled = true);
+  $("dryCard").style.display = "none";
+  $("nozzleCard").style.display = "none";
+  $("drySlider").disabled = true;
+  $("nozzleSlider").disabled = true;
+  $("lampBtn").disabled = true;
+  // Don't leave a frozen countdown implying a timer we can no longer confirm.
+  $("dryTimerRow").style.display = "none";
+  $("nozzleTimerRow").style.display = "none";
+  $("lampTimerRow").style.display = "none";
+}
+
+if (DEMO) {
+  refresh();
+  setInterval(refresh, 2000);
+}
 
 async function post(action) {
   // In demo there is no printer: apply slider changes locally, no-op the rest.
@@ -1027,9 +1041,28 @@ function setCamBounds(min, max) {
   $("camSlider").max = max;
 }
 
+// The live-update socket (see connectLive), declared here because following
+// the tail is switched on below, before the socket is opened.
+let liveSocket = null;
+let liveRetry = 1000;
+
+// showLiveFrame paints a frame pushed by the server while following the tail.
+function showLiveFrame(ts, jpeg) {
+  ++camFrameSeq; // any frame still being fetched for a scrub is now stale
+  const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
+  $("camImg").src = url;
+  if (camFrameUrl) URL.revokeObjectURL(camFrameUrl);
+  camFrameUrl = url;
+  camPos = ts;
+  $("camSlider").value = Math.floor(ts);
+  $("camTime").textContent = fmtCamTime(ts, { second: "2-digit" });
+}
+
 // The LIVE badge is lit while following the tail and dimmed when scrubbed back.
 function setFollowing(on) {
   camFollowing = on;
+  // While following, the server sends each frame as it is recorded.
+  liveSend({ type: "follow", on });
   const btn = $("camLiveBtn");
   btn.classList.toggle("on", on);
   // The badge is both the live indicator and the way back to it, so the label
@@ -1134,13 +1167,8 @@ function renderCamJobs(jobs) {
   });
 }
 
-async function refreshCamRange() {
-  try {
-    const r = await fetch("/camera/history/range");
-    camRange = await r.json();
-  } catch {
-    return;
-  }
+function applyCamRange(range) {
+  camRange = range;
   const has = camRange.oldest != null && camRange.newest != null;
   $("camEmpty").style.display = has ? "none" : "";
   $("camControls").style.display = has ? "" : "none";
@@ -1148,24 +1176,60 @@ async function refreshCamRange() {
   // The server decides how far back the bar reaches: one history window while
   // idle, or just before the running print started.
   if (!camJobSpan) setCamBounds(camRange.oldest, camRange.newest);
-  if (camFollowing) seekTo(camRange.newest);
+  // Frames themselves arrive on the socket while following; this only keeps
+  // the thumb at the end of a bar that is still growing.
+  if (camFollowing) $("camSlider").value = camRange.newest;
 }
 
-async function refreshCamJobs() {
-  try {
-    const r = await fetch("/camera/history/jobs");
-    renderCamJobs(await r.json());
-  } catch {
-    // leave the last-known job list in place
-  }
+// --- Live updates -------------------------------------------------------------
+// One websocket carries everything that changes on its own: the printer's
+// status, the camera's recorded span, the recent prints, and — while following
+// the tail — each camera frame as it is recorded. The server sends a complete
+// picture on connect, so a reconnect misses nothing.
+function liveSend(msg) {
+  if (liveSocket && liveSocket.readyState === WebSocket.OPEN) liveSocket.send(JSON.stringify(msg));
 }
 
-if (!DEMO) {
-  refreshCamRange();
-  refreshCamJobs();
-  setInterval(refreshCamRange, 1000); // ~1fps, matches the camera's capture rate
-  setInterval(refreshCamJobs, 30000);
+function connectLive() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/live");
+  ws.binaryType = "arraybuffer";
+  let opened = false;
+  ws.onopen = () => {
+    opened = true;
+    liveRetry = 1000;
+    liveSocket = ws;
+    liveSend({ type: "follow", on: camFollowing });
+  };
+  ws.onmessage = ev => {
+    if (typeof ev.data !== "string") {
+      // A frame: an 8-byte big-endian capture time, then the JPEG.
+      const ts = Number(new DataView(ev.data).getBigUint64(0));
+      if (camFollowing) showLiveFrame(ts, ev.data.slice(8));
+      return;
+    }
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "status") {
+      lastStatus = msg;
+      renderStatus(msg);
+    } else if (msg.type === "range") {
+      applyCamRange(msg);
+    } else if (msg.type === "jobs") {
+      renderCamJobs(msg.jobs);
+    }
+  };
+  ws.onclose = () => {
+    if (liveSocket === ws) liveSocket = null;
+    renderUnreachable();
+    // A socket refused before it opened may mean the login lapsed, which a
+    // websocket can't say; an ordinary request can, and the fetch wrapper
+    // sends the page to log in on its 401.
+    if (!opened) fetch("/api/status").catch(() => {});
+    setTimeout(connectLive, liveRetry);
+    liveRetry = Math.min(liveRetry * 2, 30000);
+  };
 }
+
+if (!DEMO) connectLive();
 
 // --- Notifications ----------------------------------------------------------
 // On iPhone this needs the page added to the Home Screen; say so when push

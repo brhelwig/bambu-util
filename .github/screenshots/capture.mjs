@@ -1,9 +1,9 @@
 // Renders the page in each state the printer can be in and writes a PNG per
 // state.
 //
-// The states are driven by answering /api/status in the browser rather than by
-// pretending at the printer, so every screenshot is the real page and the real
-// script reacting to a status payload it cannot tell from a live one.
+// The states are driven by answering the printer's status in the browser rather
+// than by pretending at the printer, so every screenshot is the real page and
+// the real script reacting to a status payload it cannot tell from a live one.
 import { chromium } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 
@@ -138,6 +138,22 @@ const states = [
   },
 ];
 
+// Answers the printer's status with `status`, however the page asks for it: the
+// live socket's status messages are swapped for it on their way to the page
+// (the rest — camera range, recent prints — come from the real server), and
+// /api/status is answered too, for a page that still polls.
+async function stubStatus(page, status) {
+  await page.route("**/api/status", route => route.fulfill({ json: status }));
+  await page.routeWebSocket("**/api/live", ws => {
+    const server = ws.connectToServer();
+    server.onMessage(message => {
+      let type = null;
+      try { type = JSON.parse(message).type; } catch {}
+      ws.send(type === "status" ? JSON.stringify({ type: "status", ...status }) : message);
+    });
+  });
+}
+
 async function main() {
   await mkdir(OUT, { recursive: true });
   const browser = await chromium.launch();
@@ -189,11 +205,9 @@ async function main() {
   const shots = [];
   for (const state of states) {
     const page = await context.newPage();
-    // Answer the status endpoint ourselves; everything else reaches the real
-    // server, so the camera card shows its genuine empty state rather than a
-    // staged one.
-    await page.route("**/api/status", route =>
-      route.fulfill({ json: state.status }));
+    // Answer the status ourselves; everything else reaches the real server, so
+    // the camera card shows its genuine empty state rather than a staged one.
+    await stubStatus(page, state.status);
     await page.goto(BASE + "/", { waitUntil: "networkidle" });
     await page.waitForTimeout(400);
     const file = `${OUT}/${state.name}.png`;
@@ -215,7 +229,7 @@ async function main() {
   for (const shot of settingsShots) {
     const page = await context.newPage();
     await page.addInitScript(notificationSupport(shot.permission, shot.subscribed));
-    await page.route("**/api/status", route => route.fulfill({ json: { ...idle, ams } }));
+    await stubStatus(page, { ...idle, ams });
     await page.goto(BASE + "/", { waitUntil: "networkidle" });
     if (!await page.locator("#settingsBtn").count()) {
       console.log("no settings screen on this branch, skipping");
@@ -249,7 +263,7 @@ async function main() {
         payload: '{"print":{"gcode_state":"RUNNING","bed_temper":59.8,"mc_percent":47}}' },
     ];
     const page = await context.newPage();
-    await page.route("**/api/status", route => route.fulfill({ json: { ...idle, ams } }));
+    await stubStatus(page, { ...idle, ams });
     await page.route("**/api/events", route => route.fulfill({ json: { events } }));
     await page.goto(BASE + "/", { waitUntil: "networkidle" });
     if (await page.locator("#eventsBtn").count()) {
@@ -273,7 +287,7 @@ async function main() {
   {
     const page = await context.newPage();
     await page.addInitScript(`try { localStorage.setItem("theme", "light"); } catch {}`);
-    await page.route("**/api/status", route => route.fulfill({ json: printing }));
+    await stubStatus(page, printing);
     await page.route("**/api/settings", route => route.fulfill({
       json: { retention: 86400, "kept-jobs": 5, "bed-off-after": 86400,
               "nozzle-off-after": 900, "lamp-off-after": 28800,

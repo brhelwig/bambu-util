@@ -74,6 +74,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/healthz", get(|| async { StatusCode::OK }))
         .fallback(statics::serve)
+        .method_not_allowed_fallback(|| async { text(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed") })
         .with_state(app)
 }
 
