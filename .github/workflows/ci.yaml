@@ -8,6 +8,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  IMAGE: ghcr.io/brhelwig/bambu-util
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -48,15 +51,9 @@ jobs:
             ~/go/pkg/mod
           key: cross-${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: cross-${{ runner.os }}-go-
-      # The same targets release.yaml builds, so a break in one is caught here
-      # rather than at tag time.
-      - name: Build every release target
-        run: |
-          for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            echo "building $platform"
-            CGO_ENABLED=0 GOOS=${platform%/*} GOARCH=${platform#*/} \
-              go build -trimpath -ldflags="-s -w" -o /dev/null ./cmd/bambu-util
-          done
+      # The same script release.yaml runs, so a target that stops building
+      # fails here rather than at release time.
+      - run: .github/scripts/build-dist.sh ci "$RUNNER_TEMP/dist"
 
   javascript:
     runs-on: ubuntu-latest
@@ -93,7 +90,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ghcr.io/brhelwig/bambu-util:${{ github.sha }}
-            ghcr.io/brhelwig/bambu-util:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
           labels: |
             org.opencontainers.image.source=https://github.com/brhelwig/bambu-util

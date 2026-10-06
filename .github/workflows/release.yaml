@@ -1,31 +1,66 @@
 name: release
+
+# Every commit that lands on main and passes ci is released. Versions are
+# calendar-based, YY.DOY.MMMM: year, day of the year and minute of the day, in
+# UTC. It waits on ci rather than the push itself because the image is not
+# rebuilt here: the one ci built for that commit is given the version as a tag.
 on:
-  # A tag pushed by hand.
-  push:
-    tags: ["[0-9]*.[0-9]*.[0-9]*"]
-  # Called by release-main.yaml for the tag it cuts after each merge. A tag
-  # pushed with the workflow token does not start workflows, so that one is
-  # called directly rather than relying on the trigger above.
-  workflow_call:
-    inputs:
-      tag:
-        type: string
-        required: true
-      sha:
-        type: string
-        required: true
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+# One at a time, so two merges close together cannot pick the same version.
+concurrency:
+  group: release
 
 permissions:
   contents: write
   packages: write
 
 env:
-  TAG: ${{ inputs.tag || github.ref_name }}
-  SHA: ${{ inputs.sha || github.sha }}
+  IMAGE: ghcr.io/brhelwig/bambu-util
+  SHA: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
-  release:
+  tag:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+      - name: Pick the next version and tag the commit
+        id: next
+        run: |
+          # A rerun must not release the same commit twice.
+          if git tag --points-at "$SHA" | grep -q '^[0-9]'; then
+            echo "$SHA is already released"
+            exit 0
+          fi
+          # Year, day of year and minute of the day, all UTC and unpadded: a
+          # commit at 15:07 UTC on 6 October 2026 is 26.279.907. The `10#`
+          # keeps 08 and 09 from being read as octal.
+          now=$(date -u +'%y %-j %H %M')
+          set -- $now
+          tag="$1.$2.$((10#$3 * 60 + 10#$4))"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists"
+            exit 1
+          fi
+          git tag "$tag" "$SHA"
+          git push origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -33,32 +68,13 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Build binaries
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            goos=${platform%/*}
-            goarch=${platform#*/}
-            bin=bambu-util
-            [ "$goos" = "windows" ] && bin=bambu-util.exe
-            CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch \
-              go build -trimpath -ldflags="-s -w" -o "$bin" ./cmd/bambu-util
-            name="bambu-util_${TAG}_${goos}_${goarch}"
-            if [ "$goos" = "windows" ]; then
-              zip -q "dist/${name}.zip" "$bin" README.md LICENSE
-            else
-              tar -czf "dist/${name}.tar.gz" "$bin" README.md LICENSE
-            fi
-            rm "$bin"
-          done
-          (cd dist && sha256sum -- * > checksums.txt)
+      - run: .github/scripts/build-dist.sh "$TAG"
       - name: Extract changelog section
         run: |
-          # Every merge is released, so the version's own section does not
-          # exist yet: the notes are whatever is under Unreleased.
-          awk -v ver="${TAG}" '
-            $0 ~ "^## \\[" ver "\\]" || $0 ~ "^## \\[Unreleased\\]" {found=1; next}
+          # Every merge is released, so the notes are whatever is under
+          # Unreleased.
+          awk '
+            /^## \[Unreleased\]/ {found=1; next}
             found && /^## \[/ {exit}
             found {print}
           ' CHANGELOG.md > release-notes.md
@@ -72,12 +88,12 @@ jobs:
             --verify-tag \
             --notes-file release-notes.md
 
-  # A release tag always points at a commit that already went through the main-branch
-  # image job, so the released version is a new name for that exact manifest
-  # rather than a rebuild. Rebuilding would silently pick up whatever golang and
-  # distroless base images have moved to since, shipping something other than
-  # what CI tested.
+  # The released version is a new name for the exact manifest ci built and
+  # tested for this commit, not a rebuild. Rebuilding would silently pick up
+  # whatever golang and distroless base images have moved to since.
   image-tag:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       - uses: docker/setup-buildx-action@v4
@@ -89,5 +105,5 @@ jobs:
       - name: Tag the CI-built image with the release version
         run: |
           docker buildx imagetools create \
-            --tag "ghcr.io/brhelwig/bambu-util:${TAG}" \
-            "ghcr.io/brhelwig/bambu-util:${SHA}"
+            --tag "$IMAGE:${{ needs.tag.outputs.tag }}" \
+            "$IMAGE:$SHA"
