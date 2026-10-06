@@ -1,0 +1,42 @@
+[package]
+name = "bambu-util"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "A web bridge for controlling a Bambu Lab P1S from a phone browser"
+
+[dependencies]
+aes-gcm = "0.10"
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+getrandom = "0.2"
+hkdf = "0.12"
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
+p256 = { version = "0.13", features = ["ecdh", "ecdsa", "pkcs8"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots"] }
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+rust-embed = "8"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync", "io-util", "signal"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "env-filter", "ansi"] }
+url = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+bytes = "1.12.1"
+tokio-tungstenite = "0.28"
+
+[profile.release]
+strip = true
+lto = "thin"

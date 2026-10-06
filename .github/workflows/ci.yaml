@@ -9,51 +9,43 @@ permissions:
 
 env:
   IMAGE: ghcr.io/brhelwig/bambu-util
+  CARGO_TERM_COLOR: always
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: Format
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "not gofmt'd:" >&2
-            echo "$unformatted" >&2
-            exit 1
-          fi
-      - run: go vet ./...
-      - run: .github/scripts/check-go-version.sh
-      # The race detector needs cgo, which the rest of the build deliberately
-      # does without.
-      - run: go test -race ./...
-        env:
-          CGO_ENABLED: 1
+      # rustup installs the toolchain rust-toolchain.toml names on first use.
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: .github/scripts/check-rust-version.sh
+      - run: cargo test --locked
 
   cross-compile:
-    runs-on: ubuntu-latest
+    # The same script release.yaml runs, so a target that stops building fails
+    # here rather than at release time. macOS builds need Apple's SDK, so they
+    # run on macOS; everything else cross-compiles from Linux.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux/amd64, runner: ubuntu-latest }
+          - { platform: linux/arm64, runner: ubuntu-latest }
+          - { platform: windows/amd64, runner: ubuntu-latest }
+          - { platform: windows/arm64, runner: ubuntu-latest }
+          - { platform: darwin/amd64, runner: macos-latest }
+          - { platform: darwin/arm64, runner: macos-latest }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: Swatinem/rust-cache@v2
         with:
-          go-version-file: go.mod
-          # This job's build cache holds six targets, so it gets its own entry
-          # rather than fighting the test job for one key.
-          cache: false
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: cross-${{ runner.os }}-go-${{ hashFiles('go.sum') }}
-          restore-keys: cross-${{ runner.os }}-go-
-      # The same script release.yaml runs, so a target that stops building
-      # fails here rather than at release time.
-      - run: .github/scripts/build-dist.sh ci "$RUNNER_TEMP/dist"
+          key: ${{ matrix.platform }}
+      - if: runner.os == 'Linux'
+        run: pip install -r .github/zigbuild/requirements.txt
+      - run: .github/scripts/build-dist.sh ci "$RUNNER_TEMP/dist" ${{ matrix.platform }}
 
   javascript:
     runs-on: ubuntu-latest

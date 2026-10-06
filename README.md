@@ -80,10 +80,11 @@ on the Settings page, not in the environment.
 
 ## Running
 
-From source:
+From source, with [Rust](https://rustup.rs) installed (the version is pinned in
+`rust-toolchain.toml` and fetched automatically):
 
 ```sh
-AUTH_DISABLED=true go run ./cmd/bambu-util
+AUTH_DISABLED=true cargo run --release
 ```
 
 Then open `http://<host>:8081`, go to Settings and enter the printer details.
@@ -145,11 +146,16 @@ last use by default (configurable in Settings).
 
 ### Data
 
-`DATA_DIR` holds the camera buffer, event log, settings (including the
-printer's access code), notification subscriptions and pending auto-off
-timers. Put it on a persistent volume: losing it also loses the push signing
-key, which unsubscribes every device. The database uses WAL mode, so back up
-the `-wal` and `-shm` files along with the `.db`.
+`DATA_DIR` holds `bambu-util.sqlite`: the camera buffer, event log, settings
+(including the printer's access code), notification subscriptions and pending
+auto-off timers. Put it on a persistent volume: losing it also loses the push
+signing key, which unsubscribes every device. The database uses WAL mode, so
+back up the `-wal` and `-shm` files along with it.
+
+**Upgrading from the Go version** (releases before the Rust rewrite): the
+database starts afresh. Enter the printer details on the Settings page again
+and turn notifications back on on each phone; the old `bambu-util.db` can be
+deleted.
 
 ## Security
 
@@ -162,6 +168,21 @@ tailnet).
 
 The printer's access code is stored in the database, so treat `DATA_DIR` as
 sensitive. The page is never sent the code back, only whether one is set.
+
+## Development
+
+```sh
+cargo test                      # everything, against a fake printer
+cargo clippy --all-targets      # lints
+cargo run --example fake_printer
+```
+
+The fake printer serves the printer's MQTT and camera ports on 127.0.0.1 with
+a print under way. Run the app alongside it (`AUTH_DISABLED=true cargo run`) and
+set the printer to `127.0.0.1`, serial `FAKE0001`, access code `12345678`.
+
+The page gets its live data — status, the camera, recent prints — over one
+websocket at `/api/live`; everything else is plain HTTP.
 
 ## Protocol notes
 

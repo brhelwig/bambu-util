@@ -55,9 +55,37 @@ jobs:
           git push origin "refs/tags/$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-  release:
+  # Each platform builds on a runner that can build it (see build-dist.sh), and
+  # one job gathers them into the release.
+  build:
     needs: tag
     if: needs.tag.outputs.tag != ''
+    strategy:
+      matrix:
+        include:
+          - { platform: linux/amd64, runner: ubuntu-latest }
+          - { platform: linux/arm64, runner: ubuntu-latest }
+          - { platform: windows/amd64, runner: ubuntu-latest }
+          - { platform: windows/arm64, runner: ubuntu-latest }
+          - { platform: darwin/amd64, runner: macos-latest }
+          - { platform: darwin/arm64, runner: macos-latest }
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+      - if: runner.os == 'Linux'
+        run: pip install -r .github/zigbuild/requirements.txt
+      - run: .github/scripts/build-dist.sh "$TAG" dist ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ strategy.job-index }}
+          path: dist/*
+
+  release:
+    needs: [tag, build]
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.tag.outputs.tag }}
@@ -65,10 +93,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.SHA }}
-      - uses: actions/setup-go@v7
+      - uses: actions/download-artifact@v8
         with:
-          go-version-file: go.mod
-      - run: .github/scripts/build-dist.sh "$TAG"
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - run: .github/scripts/build-dist.sh checksums dist
       # The notes list the pull requests merged since the previous release,
       # grouped by .github/release.yml.
       - name: Create release
@@ -82,7 +112,7 @@ jobs:
 
   # The released version is a new name for the exact manifest ci built and
   # tested for this commit, not a rebuild. Rebuilding would silently pick up
-  # whatever golang and distroless base images have moved to since.
+  # whatever rust and distroless base images have moved to since.
   image-tag:
     needs: tag
     if: needs.tag.outputs.tag != ''
