@@ -12,11 +12,10 @@ import (
 
 func openTestTimers(t *testing.T) *deadlines.Store {
 	t.Helper()
-	store, err := deadlines.Open(":memory:")
+	store, err := deadlines.New(memDB())
 	if err != nil {
 		t.Fatalf("open timers: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 	return store
 }
 

@@ -6,8 +6,7 @@ import (
 )
 
 func TestJobWatcherOpensAndClosesOnTransition(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 
 	w.Poll("IDLE", "")
@@ -29,8 +28,7 @@ func TestJobWatcherOpensAndClosesOnTransition(t *testing.T) {
 }
 
 func TestJobWatcherIgnoresRepeatedRunningPolls(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 
 	w.Poll("RUNNING", "a.3mf")
@@ -44,8 +42,7 @@ func TestJobWatcherIgnoresRepeatedRunningPolls(t *testing.T) {
 }
 
 func TestJobWatcherIgnoresRepeatedNonRunningPolls(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 
 	w.Poll("IDLE", "")
@@ -57,8 +54,7 @@ func TestJobWatcherIgnoresRepeatedNonRunningPolls(t *testing.T) {
 }
 
 func TestJobWatcherKeepsOneRowAcrossPauseAndResume(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 
 	w.Poll("RUNNING", "a.3mf")
@@ -75,8 +71,7 @@ func TestJobWatcherKeepsOneRowAcrossPauseAndResume(t *testing.T) {
 }
 
 func TestJobWatcherAdoptsARowLeftOpenByAnEarlierProcess(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	NewJobWatcher(s).Poll("RUNNING", "a.3mf")
 
 	// Same store, fresh watcher: what a restart mid-print looks like.
@@ -97,8 +92,7 @@ func TestJobWatcherAdoptsARowLeftOpenByAnEarlierProcess(t *testing.T) {
 }
 
 func TestJobWatcherClosesRowsStrandedByTheOldRestartBug(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// The state the screenshots in issue #26 show: one print listed three
 	// times, two of the rows never closed.
 	s.OpenJob("pencil.3mf", 1000)
@@ -123,8 +117,7 @@ func TestJobWatcherClosesRowsStrandedByTheOldRestartBug(t *testing.T) {
 }
 
 func TestJobWatcherStartsAFreshRowWhenADifferentPrintIsRunning(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	first := NewJobWatcher(s)
 	first.now = func() time.Time { return time.Unix(1000, 0) }
 	first.Poll("RUNNING", "a.3mf")
@@ -148,8 +141,7 @@ func TestJobWatcherStartsAFreshRowWhenADifferentPrintIsRunning(t *testing.T) {
 }
 
 func TestJobWatcherKeepsTheOpenRowWhenTheNameIsMissing(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 	w.Poll("RUNNING", "a.3mf")
 
@@ -164,8 +156,7 @@ func TestJobWatcherKeepsTheOpenRowWhenTheNameIsMissing(t *testing.T) {
 }
 
 func TestJobWatcherIgnoresUnknownState(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	NewJobWatcher(s).Poll("RUNNING", "a.3mf")
 
 	// A restart polls before the printer's first report, when GcodeState
@@ -180,8 +171,7 @@ func TestJobWatcherIgnoresUnknownState(t *testing.T) {
 }
 
 func TestJobWatcherClosesAtTheLastRecordedFrame(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 	w.now = func() time.Time { return time.Unix(9000, 0) }
 
@@ -200,8 +190,7 @@ func TestJobWatcherClosesAtTheLastRecordedFrame(t *testing.T) {
 }
 
 func TestJobWatcherClosesAtNowWithoutFootage(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 	w.now = func() time.Time { return time.Unix(9000, 0) }
 
@@ -216,8 +205,7 @@ func TestJobWatcherClosesAtNowWithoutFootage(t *testing.T) {
 }
 
 func TestJobWatcherIgnoresPrepareWhileRunning(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	w := NewJobWatcher(s)
 
 	w.Poll("RUNNING", "a.3mf")

@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -148,33 +146,8 @@ var specs = map[string]spec{
 // Store reads and writes the settings, caching the current values in memory.
 type Store struct {
 	db     *sql.DB
-	owned  bool
 	mu     sync.RWMutex
 	values Values
-}
-
-// Open makes a store over a database of its own at path. The app shares one
-// database across stores and calls New instead.
-func Open(path string) (*Store, error) {
-	db, err := sqlitedb.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	store, err := New(db)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	store.owned = true
-	return store, nil
-}
-
-// Close closes the database if this store opened it.
-func (s *Store) Close() error {
-	if !s.owned {
-		return nil
-	}
-	return s.db.Close()
 }
 
 // New returns a store over db, creating its table if needed and reading what is

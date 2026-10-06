@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
 	"github.com/brhelwig/bambu-util/internal/settings"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 type fakeCommander struct {
@@ -79,7 +81,7 @@ func (f *fakeCommander) ResumePrint() { f.record("resume") }
 func (f *fakeCommander) StopPrint()   { f.record("stop") }
 
 func openTestStore() *history.Store {
-	store, err := history.Open(":memory:")
+	store, err := history.New(memDB())
 	if err != nil {
 		panic(err)
 	}
@@ -92,11 +94,10 @@ func testSettings() settings.Values { return settings.Defaults }
 
 func openTestSettings(t *testing.T) *settings.Store {
 	t.Helper()
-	store, err := settings.Open(":memory:")
+	store, err := settings.New(memDB())
 	if err != nil {
 		t.Fatalf("open settings: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 	return store
 }
 
@@ -104,15 +105,24 @@ func openTestSettings(t *testing.T) *settings.Store {
 // never interferes with what is being checked. The tests that are about
 // trimming live in the activity package and set their own.
 func openTestLog() *activity.Log {
-	log, err := activity.Open(":memory:", func() int64 { return 1 << 20 })
+	log, err := activity.New(memDB(), func() int64 { return 1 << 20 })
 	if err != nil {
 		panic(err)
 	}
 	return log
 }
 
+// memDB opens a throwaway in-memory database.
+func memDB() *sql.DB {
+	db, err := sqlitedb.Open(":memory:")
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
 func openTestNotifier() *push.Sender {
-	store, err := push.Open(":memory:")
+	store, err := push.New(memDB())
 	if err != nil {
 		panic(err)
 	}

@@ -19,11 +19,10 @@ import (
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(":memory:")
+	store, err := New(openDB(t, ":memory:"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 	return store
 }
 
@@ -295,7 +294,8 @@ func TestSenderRespectsACancelledContext(t *testing.T) {
 
 func TestSenderReusesTheStoredIdentityAcrossRestarts(t *testing.T) {
 	path := t.TempDir() + "/push.db"
-	first, err := Open(path)
+	firstDB := openDB(t, path)
+	first, err := New(firstDB)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -304,13 +304,12 @@ func TestSenderReusesTheStoredIdentityAcrossRestarts(t *testing.T) {
 		t.Fatalf("NewSender: %v", err)
 	}
 	firstKey := a.PublicKey()
-	first.Close()
+	firstDB.Close()
 
-	second, err := Open(path)
+	second, err := New(openDB(t, path))
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer second.Close()
 	b, err := NewSender(second)
 	if err != nil {
 		t.Fatalf("NewSender: %v", err)

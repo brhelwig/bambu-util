@@ -154,34 +154,3 @@ func TestWritesFromBothStoresInterleave(t *testing.T) {
 		t.Errorf("subscriptions = %d (err %v), want some to have survived", n, err)
 	}
 }
-
-// A store handed a database it does not own must not close it.
-func TestClosingASharedStoreLeavesTheDatabaseUp(t *testing.T) {
-	_, frames, subs := shared(t, filepath.Join(t.TempDir(), "bambu-util.db"))
-	if err := subs.Close(); err != nil {
-		t.Fatalf("close push store: %v", err)
-	}
-	if err := frames.InsertFrame(1, []byte("jpeg")); err != nil {
-		t.Errorf("recording stopped after the other store was closed: %v", err)
-	}
-	if err := frames.Close(); err != nil {
-		t.Fatalf("close history store: %v", err)
-	}
-	if _, err := subs.Count(); err != nil {
-		t.Errorf("subscriptions unreadable after the other store was closed: %v", err)
-	}
-}
-
-// A store that opened its own database still closes it.
-func TestAStoreThatOwnsItsDatabaseClosesIt(t *testing.T) {
-	store, err := push.Open(filepath.Join(t.TempDir(), "push.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	if _, err := store.Count(); err == nil {
-		t.Error("the database is still usable after Close")
-	}
-}

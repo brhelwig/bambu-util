@@ -8,11 +8,10 @@ import (
 
 func openTest(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(":memory:")
+	store, err := New(openDB(t, ":memory:"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 	return store
 }
 
@@ -109,20 +108,20 @@ func TestTimersSurviveReopeningTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "timers.db")
 	at := time.Unix(1_700_000_000, 0)
 
-	first, err := Open(path)
+	firstDB := openDB(t, path)
+	first, err := New(firstDB)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if err := first.Set(LampOff, at); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	first.Close()
+	firstDB.Close()
 
-	second, err := Open(path)
+	second, err := New(openDB(t, path))
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer second.Close()
 	pending, err := second.All()
 	if err != nil {
 		t.Fatalf("All: %v", err)

@@ -9,11 +9,10 @@ import (
 
 func openTest(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(":memory:")
+	store, err := New(openDB(t, ":memory:"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 	return store
 }
 
@@ -59,20 +58,20 @@ func TestEverySettingCanBeChanged(t *testing.T) {
 
 func TestSettingsSurviveReopeningTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.db")
-	first, err := Open(path)
+	firstDB := openDB(t, path)
+	first, err := New(firstDB)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if err := first.Set(KeyLampOffAfter, 90*60); err != nil {
 		t.Fatalf("SetDuration: %v", err)
 	}
-	first.Close()
+	firstDB.Close()
 
-	second, err := Open(path)
+	second, err := New(openDB(t, path))
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer second.Close()
 	if got := second.Values().LampOffAfter; got != 90*time.Minute {
 		t.Errorf("after reopening, lamp delay = %s, want 90m", got)
 	}

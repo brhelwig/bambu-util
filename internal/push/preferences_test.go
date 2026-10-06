@@ -1,20 +1,31 @@
 package push
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/brhelwig/bambu-util/internal/activity"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 // openTestLog gives a budget far above anything a test records, so trimming
 // never interferes with what is being checked.
 func openTestLog() *activity.Log {
-	log, err := activity.Open(":memory:", func() int64 { return 1 << 20 })
+	log, err := activity.New(memDB(), func() int64 { return 1 << 20 })
 	if err != nil {
 		panic(err)
 	}
 	return log
+}
+
+// memDB opens a throwaway in-memory database.
+func memDB() *sql.DB {
+	db, err := sqlitedb.Open(":memory:")
+	if err != nil {
+		panic(err)
+	}
+	return db
 }
 
 func testSender(t *testing.T) *Sender {

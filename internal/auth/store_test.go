@@ -8,11 +8,10 @@ import (
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := OpenStore(":memory:")
+	store, err := NewStore(openDB(t, ":memory:"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 	return store
 }
 
