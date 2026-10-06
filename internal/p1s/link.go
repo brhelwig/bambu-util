@@ -26,14 +26,9 @@ func (c Config) Complete() bool {
 // camera loop retries on error, so it simply keeps asking until one is.
 var ErrUnconfigured = errors.New("p1s: no printer configured")
 
-// Link is the connection to one printer, which can be pointed at another while
-// the process runs.
-//
-// It stands in for the client everywhere the app used to hold one directly, so
-// that reconfiguring is a matter of swapping what is behind the link rather
-// than rebuilding everything that refers to it. Commands sent while no printer
-// is configured go nowhere; the state cache reports not connected, so the
-// existing guards already refuse them with a reason.
+// Link is the connection to the configured printer, which can be changed while
+// the process runs. With no printer configured, commands go nowhere and the
+// state cache reports not connected.
 type Link struct {
 	mu           sync.Mutex
 	cache        *StateCache

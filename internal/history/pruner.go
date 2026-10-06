@@ -13,10 +13,8 @@ type Policy struct {
 	KeptJobs int
 }
 
-// RunPruner deletes frames (and fully-expired job rows) that the policy no
-// longer covers, on every tick of interval, until ctx is cancelled. The policy
-// is read each tick rather than captured, so changing it in the settings takes
-// effect without a restart. Call once, from main.
+// RunPruner applies the retention policy, read fresh each tick, on every tick
+// of interval until ctx is cancelled.
 func RunPruner(ctx context.Context, store *Store, policy func() Policy, interval time.Duration, now func() time.Time) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

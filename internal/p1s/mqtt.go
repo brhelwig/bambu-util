@@ -35,7 +35,6 @@ type subscriber interface {
 }
 
 // Client is the MQTT link to the printer: cached merged state plus commands.
-// Port of the Python TUI's PrinterClient.
 type Client struct {
 	serial string
 	cache  *StateCache
@@ -65,8 +64,7 @@ func NewClient(ip, serial, accessCode string, cache *StateCache, log *activity.L
 }
 
 // onConnect subscribes to the printer's reports and asks for a full state dump,
-// because the printer otherwise sends only what changes and a fresh connection
-// would know nothing until something did.
+// since the printer otherwise only sends changes.
 func (c *Client) onConnect(sub subscriber) {
 	c.cache.SetConnected(true)
 	sub.Subscribe(fmt.Sprintf("device/%s/report", c.serial), 0, func(_ mqtt.Client, msg mqtt.Message) {
@@ -93,12 +91,9 @@ func HandleReport(cache *StateCache, payload []byte) {
 	}
 }
 
-// Delivery levels. Most commands go out unacknowledged: they are either
-// self-correcting (a temperature the next status report will contradict) or
-// unsafe to repeat (an extrude, which at-least-once delivery could run twice).
-// Pause, resume, stop and unload are neither — losing a Stop is worse than
-// sending it twice, and the printer refuses the second one — so they are
-// acknowledged and the broker retries until it is.
+// MQTT QoS levels. Most commands use QoS 0, since they are either harmless to
+// lose (a temperature) or unsafe to repeat (extrude). Pause, resume, stop and
+// unload use QoS 1: losing a Stop is worse than sending it twice.
 const (
 	qosUnacknowledged = 0
 	qosAcknowledged   = 1
@@ -111,8 +106,7 @@ func (c *Client) publish(payload string) {
 func (c *Client) publishAt(qos byte, payload string) mqtt.Token {
 	entry := c.log.Record(activity.Command, summarize(payload), payload)
 	token := c.pub.Publish(fmt.Sprintf("device/%s/request", c.serial), qos, false, payload)
-	// Waiting here would make every command block on the printer answering, so
-	// the answer is recorded as it arrives and the entry fills in behind it.
+	// Record the acknowledgement in the background rather than blocking.
 	go func() {
 		if !token.WaitTimeout(ackTimeout) {
 			c.log.Acknowledge(entry, time.Time{}, errNoAcknowledgement)
@@ -123,9 +117,8 @@ func (c *Client) publishAt(qos byte, payload string) mqtt.Token {
 	return token
 }
 
-// ackTimeout is how long to wait for the printer's broker to confirm before
-// recording that it never did. Nothing is retried here — the broker does that
-// itself for the commands worth repeating.
+// ackTimeout is how long to wait for the broker to confirm before recording
+// that it didn't.
 const ackTimeout = 30 * time.Second
 
 var errNoAcknowledgement = errors.New("no acknowledgement")
@@ -153,14 +146,22 @@ func summarize(payload string) string {
 	return "command"
 }
 
+// request builds a command payload: {namespace: {sequence_id, command, ...fields}}.
+func request(seq int64, namespace, command string, fields map[string]any) string {
+	body := map[string]any{"sequence_id": strconv.FormatInt(seq, 10), "command": command}
+	for k, v := range fields {
+		body[k] = v
+	}
+	b, _ := json.Marshal(map[string]any{namespace: body})
+	return string(b)
+}
+
+func (c *Client) send(namespace, command string, fields map[string]any) {
+	c.publish(request(c.seq.Add(1), namespace, command, fields))
+}
+
 func (c *Client) SendGcode(gcode string) {
-	req := map[string]any{"print": map[string]any{
-		"sequence_id": strconv.FormatInt(c.seq.Add(1), 10),
-		"command":     "gcode_line",
-		"param":       gcode,
-	}}
-	b, _ := json.Marshal(req)
-	c.publish(string(b))
+	c.send("print", "gcode_line", map[string]any{"param": gcode})
 }
 
 func (c *Client) LowerBed()           { c.SendGcode(BedDropGcode) }
@@ -186,9 +187,7 @@ func (c *Client) UnloadFilament() { c.sendPrintCommand("unload_filament") }
 // (ams_filament_setting), so every field is sent, not just the changed one.
 // Payload from OpenBambuAPI mqtt.md; unverified against this printer.
 func (c *Client) SetAmsFilament(amsID, trayID int, trayInfoIdx, color, trayType string, tempMin, tempMax int) {
-	req := map[string]any{"print": map[string]any{
-		"sequence_id":     strconv.FormatInt(c.seq.Add(1), 10),
-		"command":         "ams_filament_setting",
+	c.send("print", "ams_filament_setting", map[string]any{
 		"ams_id":          amsID,
 		"tray_id":         trayID,
 		"tray_info_idx":   trayInfoIdx,
@@ -196,9 +195,7 @@ func (c *Client) SetAmsFilament(amsID, trayID int, trayInfoIdx, color, trayType 
 		"nozzle_temp_min": tempMin,
 		"nozzle_temp_max": tempMax,
 		"tray_type":       trayType,
-	}}
-	b, _ := json.Marshal(req)
-	c.publish(string(b))
+	})
 }
 
 // SetChamberLight turns the chamber LED on or off. "ledctrl" is a system-level
@@ -209,33 +206,20 @@ func (c *Client) SetChamberLight(on bool) {
 	if on {
 		mode = "on"
 	}
-	req := map[string]any{"system": map[string]any{
-		"sequence_id":   strconv.FormatInt(c.seq.Add(1), 10),
-		"command":       "ledctrl",
+	c.send("system", "ledctrl", map[string]any{
 		"led_node":      "chamber_light",
 		"led_mode":      mode,
 		"led_on_time":   500,
 		"led_off_time":  500,
 		"loop_times":    1,
 		"interval_time": 1000,
-	}}
-	b, _ := json.Marshal(req)
-	c.publish(string(b))
+	})
 }
 
-// printCommandPayload builds a print-flow command (pause/resume/stop) —
-// payload shape verified against ha-bambulab's pybambu commands.
-func printCommandPayload(seq int64, command string) string {
-	req := map[string]any{"print": map[string]any{
-		"sequence_id": strconv.FormatInt(seq, 10),
-		"command":     command,
-	}}
-	b, _ := json.Marshal(req)
-	return string(b)
-}
-
+// sendPrintCommand sends an acknowledged command in the "print" namespace
+// (pause, resume, stop, unload_filament). Shape matches ha-bambulab's pybambu.
 func (c *Client) sendPrintCommand(command string) {
-	c.publishAt(qosAcknowledged, printCommandPayload(c.seq.Add(1), command))
+	c.publishAt(qosAcknowledged, request(c.seq.Add(1), "print", command, nil))
 }
 
 func (c *Client) PausePrint()  { c.sendPrintCommand("pause") }

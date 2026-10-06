@@ -23,13 +23,10 @@ const (
 	defaultMaxRetryDelay = 30 * time.Second
 )
 
-// Hub connects to the printer camera once, at Start, and holds that
-// connection for the process's lifetime, writing every frame to the
-// history store. Every view (live-follow, scrub, per-job timelapse) is
-// served from that store via /camera/history/frame, so there's no separate
-// live stream here to fan out to — the printer's camera port is held
-// exclusively by this process the whole time it runs (Bambu Studio's own
-// camera view will not work while this app is running).
+// Hub holds the printer's camera connection for the life of the process and
+// writes every frame to the history store, which all camera views read from.
+// The printer serves one camera client, so Bambu Studio's view won't work
+// while this runs.
 type Hub struct {
 	source                       CameraSource
 	store                        FrameSink
@@ -58,19 +55,17 @@ func (h *Hub) Start(ctx context.Context) {
 		err := h.source(ctx, func(frame []byte) {
 			gotFrame = true
 			if err := h.store.InsertFrame(h.now().Unix(), frame); err != nil {
-				log.Printf("history: insert frame: %v", err)
+				log.Printf("camera: storing frame: %v", err)
 			}
 		})
 		if ctx.Err() != nil {
 			return
 		}
 		if gotFrame {
-			// The connection was live for a while before dropping — a
-			// transient blip, not a struggling printer/network. Don't
-			// carry a long backoff into the next attempt.
+			// It was working before it dropped; reset the backoff.
 			delay = h.minRetryDelay
 		}
-		log.Printf("camera stream ended, retrying in %s: %v", delay, err)
+		log.Printf("camera: stream ended, retrying in %s: %v", delay, err)
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():

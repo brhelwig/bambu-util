@@ -49,8 +49,7 @@ func Open(path string) (*Store, error) {
 	return store, nil
 }
 
-// Close closes the database, unless it belongs to whoever passed it in —
-// closing a shared handle would take every other store down with it.
+// Close closes the database if this store opened it.
 func (s *Store) Close() error {
 	if !s.owned {
 		return nil

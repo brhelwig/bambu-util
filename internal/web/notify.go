@@ -30,7 +30,7 @@ func (s *Server) pushKey(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) pushSubscribe(w http.ResponseWriter, r *http.Request) {
 	var req subscribeRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		http.Error(w, "invalid subscription", http.StatusBadRequest)
 		return
 	}
@@ -62,7 +62,7 @@ func (s *Server) pushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Endpoint string `json:"endpoint"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Endpoint == "" {
+	if err := readJSON(w, r, &req); err != nil || req.Endpoint == "" {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -91,6 +91,11 @@ func (s *Server) pushTest(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+// readJSON decodes a small JSON request body into v.
+func readJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(v)
 }
 
 // preferencesRequest is what the settings screen sends when a device changes
@@ -133,7 +138,7 @@ func (s *Server) pushPreferences(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) setPushPreferences(w http.ResponseWriter, r *http.Request) {
 	var req preferencesRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Endpoint == "" {
+	if err := readJSON(w, r, &req); err != nil || req.Endpoint == "" {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}

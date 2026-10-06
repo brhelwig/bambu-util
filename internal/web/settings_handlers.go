@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,9 +19,8 @@ type settingsWriter interface {
 // writableText is the text settings this endpoint will write.
 var writableText = map[string]bool{settings.KeyDashboard: true}
 
-// getSettings reports the current values as whole numbers: seconds for a
-// length of time, a plain count otherwise, leaving units to whatever displays
-// them.
+// getSettings reports the current values in their stored units: seconds,
+// megabytes or a count, plus the dashboard layout as text.
 func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 	v := s.settings()
 	writeJSON(w, map[string]any{
@@ -92,8 +90,7 @@ type printerRequest struct {
 }
 
 // getPrinter reports the configured printer. The access code is never sent
-// back — only whether there is one — because the page has no authentication and
-// a credential that is never served cannot be read off it.
+// back, only whether one is set.
 func (s *Server) getPrinter(w http.ResponseWriter, _ *http.Request) {
 	conf := s.printer.Config()
 	writeJSON(w, map[string]any{
@@ -110,7 +107,7 @@ func (s *Server) setPrinter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req printerRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -148,14 +145,10 @@ func (s *Server) setPrinter(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// shownEvents is how many entries the Events screen is sent. The log itself is
-// bounded by a size and holds far more than a page can usefully draw, so this
-// is what one response is worth rather than what is kept.
+// shownEvents is how many entries the Events screen is sent.
 const shownEvents = 500
 
-// events reports what has recently gone to the printer, come back from it, or
-// been sent to a phone — newest first, because that is what is being looked
-// for.
+// getEvents reports the most recent activity log entries, newest first.
 func (s *Server) getEvents(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"events": s.activity.Entries(shownEvents)})
 }

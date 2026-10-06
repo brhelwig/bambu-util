@@ -1,5 +1,5 @@
-// Package settings holds the app's configuration, so changing it is an edit on
-// the page rather than a redeployment.
+// Package settings stores the app's configuration in the database, so it can
+// be changed from the page.
 package settings
 
 import (
@@ -50,11 +50,8 @@ var texts = map[string]bool{
 // Text reports whether a setting holds words.
 func Text(name string) bool { return texts[name] }
 
-// Values is one complete set of settings.
-//
-// AccessCode is a credential. It is here because the connection needs it, and
-// it must never reach the browser — see the settings endpoint, which reports
-// only whether one is set.
+// Values is one complete set of settings. AccessCode is a credential and must
+// never be sent to the browser.
 type Values struct {
 	PrinterIP     string
 	PrinterSerial string
@@ -67,9 +64,8 @@ type Values struct {
 	NozzleOffAfter time.Duration
 	LampOffAfter   time.Duration
 
-	// ActivityLimit and DatabaseLimit are in bytes, converted from the megabytes
-	// stored, because every consultation of them is a comparison against a size
-	// in bytes. DatabaseLimit is zero when the cap is switched off.
+	// ActivityLimit and DatabaseLimit are in bytes (stored as megabytes).
+	// DatabaseLimit is zero when the cap is off.
 	ActivityLimit int64
 	DatabaseLimit int64
 
@@ -77,7 +73,7 @@ type Values struct {
 	SessionLength time.Duration
 }
 
-// BytesPerMB converts the stored megabytes to the bytes the log counts in.
+// BytesPerMB converts the stored megabytes to bytes.
 const BytesPerMB = 1 << 20
 
 // Defaults are what an unconfigured app runs with, and what a value that cannot
@@ -101,14 +97,8 @@ const (
 	megabytes
 )
 
-// Every setting is stored as a whole number: seconds for a length of time,
-// megabytes for a size, a plain count otherwise. The bounds keep a value from
-// being useless — a recording window of a year fills the disk, a shut-off
-// window of a year is not a safety shut-off, and keeping every print ever made
-// defeats the retention it is meant to work alongside.
-//
-// A few settings can also be switched off, which is written as zero and sits
-// below their useful range rather than inside it.
+// spec is a numeric setting's unit and allowed range. offAtNil settings also
+// accept 0, meaning off.
 type spec struct {
 	unit     unit
 	min, max int
@@ -132,8 +122,7 @@ func (s spec) refuse(name string) error {
 	return fmt.Errorf("%s must be between %s and %s", name, s.show(s.min), s.show(s.max))
 }
 
-// show renders a bound the way the setting is written, so a refusal reads in
-// the units the field uses rather than in raw seconds or bytes.
+// show renders a bound in the setting's units.
 func (s spec) show(value int) string {
 	switch s.unit {
 	case seconds:
@@ -144,31 +133,19 @@ func (s spec) show(value int) string {
 	return strconv.Itoa(value)
 }
 
-// The event log's ceiling is deliberately well short of a whole disk: this runs
-// on a Pi whose database also holds the camera buffer.
 var specs = map[string]spec{
 	KeyRetention: {unit: seconds, min: 3600, max: 30 * 24 * 3600},
 	KeyKeptJobs:  {unit: count, min: 0, max: 50},
-	// The floors match the units the Settings screen shows: the bed and lamp
-	// are set in whole hours there, so anything shorter would read as 0 and
-	// every save from that screen would then be refused.
+	// The bed and lamp are set in whole hours on the Settings screen.
 	KeyBedOffAfter:    {unit: seconds, min: 3600, max: 7 * 24 * 3600},
 	KeyNozzleOffAfter: {unit: seconds, min: 60, max: 7 * 24 * 3600},
 	KeyLampOffAfter:   {unit: seconds, min: 3600, max: 7 * 24 * 3600},
 	KeyActivityLimit:  {unit: megabytes, min: 1, max: 512},
-
-	// A login that lasts a year is not much of a login, and one that lasts
-	// minutes makes a phone on the home screen useless.
-	KeySessionLength: {unit: seconds, min: 24 * 3600, max: 365 * 24 * 3600},
-
-	// The floor is not fussiness: a cap of a few megabytes would delete almost
-	// everything and rebuild the file on every pass. Off is the default, since
-	// this deletes footage the other settings promised to keep.
-	KeyDatabaseLimit: {unit: megabytes, min: 256, max: 64 * 1024, offAtNil: true},
+	KeySessionLength:  {unit: seconds, min: 24 * 3600, max: 365 * 24 * 3600},
+	KeyDatabaseLimit:  {unit: megabytes, min: 256, max: 64 * 1024, offAtNil: true},
 }
 
-// Store reads and writes the settings, keeping the current set in memory so the
-// hot paths that consult them are not querying the database every few seconds.
+// Store reads and writes the settings, caching the current values in memory.
 type Store struct {
 	db     *sql.DB
 	owned  bool
@@ -192,8 +169,7 @@ func Open(path string) (*Store, error) {
 	return store, nil
 }
 
-// Close closes the database, unless it belongs to whoever passed it in —
-// closing a shared handle would take every other store down with it.
+// Close closes the database if this store opened it.
 func (s *Store) Close() error {
 	if !s.owned {
 		return nil
@@ -221,8 +197,8 @@ func (s *Store) Values() Values {
 	return s.values
 }
 
-// Set stores one setting: seconds for a length of time, a plain count
-// otherwise.
+// Set stores one numeric setting, in seconds, megabytes or a count depending on
+// the setting.
 func (s *Store) Set(name string, value int) error {
 	spec, ok := specs[name]
 	if !ok {
@@ -231,12 +207,7 @@ func (s *Store) Set(name string, value int) error {
 	if !spec.allows(value) {
 		return spec.refuse(name)
 	}
-	if _, err := s.db.Exec(`
-		INSERT INTO settings (name, value) VALUES (?, ?)
-		ON CONFLICT(name) DO UPDATE SET value = excluded.value`, name, strconv.Itoa(value)); err != nil {
-		return err
-	}
-	return s.reload()
+	return s.put(name, strconv.Itoa(value))
 }
 
 // SetText stores one setting that holds words. An empty value clears it, which
@@ -254,6 +225,10 @@ func (s *Store) SetText(name, value string) error {
 		}
 		return s.reload()
 	}
+	return s.put(name, value)
+}
+
+func (s *Store) put(name, value string) error {
 	if _, err := s.db.Exec(`
 		INSERT INTO settings (name, value) VALUES (?, ?)
 		ON CONFLICT(name) DO UPDATE SET value = excluded.value`, name, value); err != nil {
@@ -262,10 +237,8 @@ func (s *Store) SetText(name, value string) error {
 	return s.reload()
 }
 
-// reload reads every setting back into memory. A value that cannot be read
-// falls back to its default rather than stopping the app: the settings table is
-// the obvious thing to edit by hand, and one bad row should cost that setting,
-// not the printer.
+// reload reads every setting back into memory. An invalid stored value falls
+// back to its default.
 func (s *Store) reload() error {
 	rows, err := s.db.Query(`SELECT name, value FROM settings`)
 	if err != nil {
