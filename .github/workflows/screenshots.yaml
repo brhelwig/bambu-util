@@ -29,9 +29,13 @@ jobs:
           # The base commit is built too, to compare against.
           fetch-depth: 0
 
+      - uses: Swatinem/rust-cache@v2
+
+      # Only for comparing against a base branch from before the Rust rewrite,
+      # which builds with Go. Remove once every open base is Rust.
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
 
       - uses: actions/setup-node@v7
         with:
@@ -61,13 +65,21 @@ jobs:
             curl -sf "http://127.0.0.1:$2/healthz"
           }
 
-          go build -o /tmp/bambu-util ./cmd/bambu-util
+          build() { # source dir, output binary
+            if [ -f "$1/Cargo.toml" ]; then
+              (cd "$1" && cargo build --locked --target-dir "$GITHUB_WORKSPACE/target" && cp "$GITHUB_WORKSPACE/target/debug/bambu-util" "$2")
+            else
+              (cd "$1" && go build -o "$2" ./cmd/bambu-util)
+            fi
+          }
+
+          build . /tmp/bambu-util
           serve /tmp/bambu-util 8081
 
           # The base branch is only something to compare against. If it cannot
           # be built or started, every shot is shown rather than none.
           git worktree add --detach /tmp/base "$BASE_SHA"
-          if (cd /tmp/base && go build -o /tmp/bambu-util-base ./cmd/bambu-util) &&
+          if build /tmp/base /tmp/bambu-util-base &&
              serve /tmp/bambu-util-base 8082; then
             echo "BASELINE=true" >> "$GITHUB_ENV"
           else

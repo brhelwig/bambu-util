@@ -7,7 +7,7 @@ use rust_embed::RustEmbed;
 use super::text;
 
 #[derive(RustEmbed)]
-#[folder = "internal/web/static/"]
+#[folder = "static/"]
 struct Static;
 
 pub async fn serve(method: Method, uri: Uri) -> Response {

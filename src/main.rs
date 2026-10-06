@@ -225,6 +225,8 @@ async fn main() {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,rumqttc=warn")),
         )
+        // Colour only for a person at a terminal, not in a container's log.
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
         .init();
     let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
     let addr = env("LISTEN_ADDR").unwrap_or_else(|| ":8081".into());

@@ -7,8 +7,8 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-page=internal/web/static/index.html
-worker=internal/web/static/sw.js
+page=static/index.html
+worker=static/sw.js
 capture=.github/screenshots/capture.mjs
 compare=.github/screenshots/compare.mjs
 
