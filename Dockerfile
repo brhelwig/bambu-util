@@ -4,7 +4,7 @@ FROM --platform=$BUILDPLATFORM python:3.13-slim AS zig
 COPY .github/zigbuild/requirements.txt /tmp/zigbuild.txt
 RUN pip install --no-cache-dir --target /opt/zigbuild -r /tmp/zigbuild.txt
 
-FROM --platform=$BUILDPLATFORM rust:1.97-bookworm AS build
+FROM --platform=$BUILDPLATFORM rust:1.98-bookworm AS build
 ARG TARGETARCH
 COPY --from=zig /opt/zigbuild /opt/zigbuild
 RUN ln -s /opt/zigbuild/ziglang/zig /usr/local/bin/zig && \
