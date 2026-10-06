@@ -69,16 +69,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: .github/scripts/build-dist.sh "$TAG"
-      - name: Extract changelog section
-        run: |
-          # Every merge is released, so the notes are whatever is under
-          # Unreleased.
-          awk '
-            /^## \[Unreleased\]/ {found=1; next}
-            found && /^## \[/ {exit}
-            found {print}
-          ' CHANGELOG.md > release-notes.md
-          [ -s release-notes.md ] || echo "See CHANGELOG.md" > release-notes.md
+      # The notes list the pull requests merged since the previous release,
+      # grouped by .github/release.yml.
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,7 +78,7 @@ jobs:
           gh release create "$TAG" dist/* \
             --title "$TAG" \
             --verify-tag \
-            --notes-file release-notes.md
+            --generate-notes
 
   # The released version is a new name for the exact manifest ci built and
   # tested for this commit, not a rebuild. Rebuilding would silently pick up
