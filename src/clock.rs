@@ -40,9 +40,6 @@ mod fake {
             let t = self.0.clone();
             Arc::new(move || t.load(Ordering::SeqCst))
         }
-        pub fn now(&self) -> i64 {
-            self.0.load(Ordering::SeqCst)
-        }
         pub fn advance_ms(&self, ms: i64) {
             self.0.fetch_add(ms, Ordering::SeqCst);
         }

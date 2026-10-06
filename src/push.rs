@@ -109,7 +109,7 @@ fn encrypt(
     padded.push(0x02);
     let sealed = Aes128Gcm::new_from_slice(&cek)
         .expect("16-byte key")
-        .encrypt(Nonce::from_slice(&nonce), padded.as_slice())
+        .encrypt(&Nonce::from(nonce), padded.as_slice())
         .map_err(|_| "encryption failed".to_string())?;
 
     let mut out = Vec::with_capacity(16 + 4 + 1 + KEY_LENGTH + sealed.len());

@@ -129,7 +129,7 @@ mod tests {
         let bad_end = encode(&[0xFF, 0xD8, 1, 0, 0]);
         assert!(read_frame(&mut &bad_end[..]).await.is_err());
 
-        let mut huge = vec![0u8; 16];
+        let mut huge = [0u8; 16];
         huge[0..4].copy_from_slice(&100_000_000u32.to_le_bytes());
         let err = read_frame(&mut &huge[..]).await.unwrap_err();
         assert!(err.to_string().contains("implausible"));

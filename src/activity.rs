@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{OptionalExtension, params};
+use rusqlite::params;
 use serde::Serialize;
 
 use crate::capacity::{Item, Source};
@@ -264,19 +264,6 @@ impl Source for Log {
         *bytes = total(&self.db)?;
         Ok(())
     }
-}
-
-/// The newest entry's id, for tests elsewhere.
-#[cfg(test)]
-pub fn last(db: &Db) -> Option<(String, String, String)> {
-    db.lock()
-        .query_row(
-            "SELECT kind, summary, payload FROM activity ORDER BY id DESC LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()
-        .unwrap()
 }
 
 #[cfg(test)]

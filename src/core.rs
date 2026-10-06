@@ -109,8 +109,11 @@ impl Reactor {
         self.auto_off(snap.connected, state, now, &mut out);
 
         // A disconnected printer reports nothing rather than its last known
-        // state, so a dropped link cannot look like a print ending.
-        if snap.connected {
+        // state, so a dropped link cannot look like a print ending. Nor does
+        // one that has connected but not yet said what it is doing: the
+        // moment between connecting and the first report would otherwise read
+        // as idle, and the report after it as a print starting.
+        if snap.connected && state != "unknown" {
             let first = !self.observed;
             self.observed = true;
             if !first {
@@ -314,7 +317,7 @@ impl Runner {
                     tracing::warn!("notify: clearing bed reminders: {err}");
                 }
             }
-            Effect::JobsChanged => self.jobs_changed.notify_waiters(),
+            Effect::JobsChanged => self.jobs_changed.notify_one(),
         }
         None
     }
@@ -507,6 +510,24 @@ mod tests {
                 push::KIND_PRINTER_ERROR
             ))
         ));
+    }
+
+    #[test]
+    fn connecting_before_the_first_report_is_not_a_change() {
+        let mut f = fixture();
+        let effects = f.at(0, &snap(true, json!({})));
+        assert!(
+            effects
+                .iter()
+                .all(|e| !matches!(e, Effect::Lamp(_) | Effect::Notify(_)))
+        );
+        let running = f.at(1, &printer("RUNNING", "a"));
+        assert!(
+            titles(&running).is_empty(),
+            "the first report is the first look"
+        );
+        assert!(has(&running, &Effect::Lamp(true)));
+        assert_eq!(f.timers.get(timers::LAMP_OFF), None);
     }
 
     #[test]

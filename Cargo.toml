@@ -35,6 +35,7 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 bytes = "1.12.1"
+tokio-tungstenite = "0.28"
 
 [profile.release]
 strip = true
