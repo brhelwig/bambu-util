@@ -94,5 +94,6 @@ jobs:
           cache-to: type=gha,mode=max
           tags: |
             ghcr.io/brhelwig/bambu-util:${{ github.sha }}
+            ghcr.io/brhelwig/bambu-util:latest
           labels: |
             org.opencontainers.image.source=https://github.com/brhelwig/bambu-util
