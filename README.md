@@ -1,159 +1,177 @@
 # bambu-util
 
-Utilities for Bambu Lab printers on the local network.
+A web bridge for controlling a Bambu Lab P1S from a phone browser.
 
-## P1S web bridge
+Browsers can't talk to the printer directly (MQTT over TLS on :8883, a
+proprietary camera stream on :6000), so bambu-util runs on a machine on the
+same network, holds those connections, and serves a mobile web page.
 
-A single-binary web app for controlling a Bambu P1S from a phone browser.
-Browsers can't speak the printer's protocols (MQTT over TLS on :8883, a
-proprietary camera stream on :6000), so this bridge runs on a machine on the
-same network, holds those connections, and serves a plain mobile web page.
+## Features
 
-Features:
+**Controls**
 
-- **Bed down** (absolute move to Z200), **Home** (`G28`), **Extrude**, and
-  **Unload** — the manual bed and filament actions
-- Bed-drying and nozzle-cleaning temperature sliders, each with material
-  presets and a safety auto-off
-- Live status: connection, printer state, bed/nozzle temperatures
-  (actual/target), print progress, job name, layer, and time remaining
-- Filament (AMS): per-tray colour, material, and nozzle temperature range,
-  plus the unit's desiccant dryness as Bambu Studio's A-E grade
-- Chamber camera (~1 fps), recorded continuously into a rolling buffer
-  (24h by default, set in Settings) — the bridge holds the camera
-  connection the whole time it runs, not just while someone is watching,
-  so Bambu Studio's own camera view will not work while bambu-util is
-  running (the printer only serves one camera client at a time). One view
-  shows it all: it follows the live tail of the buffer by default, and a
-  scrub bar drags back through earlier footage. While the printer is idle
-  the bar reaches back exactly as far as the history window keeps frames,
-  so nothing is recorded that can't be scrubbed to; during a print it starts
-  five minutes before the print did, so the whole job is one drag and nothing
-  earlier is in the way. A `● LIVE` badge on the image shows whether the view
-  is following the tail, and tapping it returns there
-- Recent print jobs are listed under the camera, each with its start time so
-  two runs of the same file can be told apart. Pick one to play its
-  footage as a timelapse at 30x, 60x, 300x, or 600x. The five most recently
-  finished prints keep their footage regardless of the retention window,
-  thinned to one frame every 10 seconds once it ages out — enough for a
-  timelapse without holding whole prints at the full recording rate
-- Bed actions are refused server-side unless the printer is idle
-  (IDLE/FINISH/FAILED) — nothing can move the bed or change temperatures
-  mid-print
-- Print controls: **Pause** (while printing), **Resume** (while paused), and
-  **Stop** (either; needs a second confirming tap). Guarded server-side to the
-  matching printer states
-- Chamber lamp automation: turns on automatically the moment a job starts
-  running or the bed/nozzle is commanded hot, and off automatically 8h
-  after it goes idle. The manual toggle always works and is never
-  overridden — automation only ever acts on the active/idle transitions
-  themselves
-- A Settings screen — the gear in the top corner — holds notifications, the
-  camera history window, and the automatic-off delays for the bed, nozzle and
-  chamber lamp. It is a separate screen, not more cards below the status, so
-  the printer controls stay at the top of the page. The values are stored in
-  the database and take effect as soon as they are saved
-- An Events screen shows what was sent to the printer and whether the printer
-  acknowledged it, what the printer reported back, and what notifications went
-  out — each with its raw message, for working out why something did not happen.
-  It is kept in the database, so it is still there after a restart, which is
-  when it is most wanted. How much it may hold is a size in megabytes set on the
-  Settings screen; the oldest entries go once it is reached
-- An optional cap on the database file itself, off by default. With one set, the
-  oldest data goes — camera frames and event-log entries alike, whichever is
-  older — until the file is back under it, and the space is returned to the disk
-  a little at a time rather than in one long pause. It overrules the camera
-  window and the prints-kept setting, because a full disk stops everything
-- Light, dark, or follow-the-system theme, and the printer screen's sections
-  can be hidden and reordered from Settings
-- iOS "Add to Home Screen" gives an app-like full-screen page
-- Notifications to the phone, so the page does not have to be open: a print
-  starting, finishing or ending without finishing; any error the printer
-  raises, which is how filament runout arrives; and a repeating reminder of how
-  long the bed has been on with no print running. Each subscribed device picks
-  which of those it wants and how often to be reminded, so a phone and a tablet
-  can differ. Turn them on from
-  the Notifications card; a test button confirms the whole path before waiting
-  on the printer. Requires the app to be served over HTTPS.
-  On iPhone and iPad it additionally requires iOS 16.4 or later **and the app
-  added to the Home Screen** — a Safari tab cannot receive notifications, and
-  the page says so rather than failing quietly
+- Bed down (absolute move to Z200), Home (`G28`), Extrude and Unload
+- Bed-drying and nozzle temperature sliders with material presets
+- Pause, Resume and Stop for a running print (Stop asks for a second tap)
+- Chamber lamp toggle
 
-### Configuration
+Bed, temperature and filament actions are refused server-side unless the
+printer is idle (`IDLE`, `FINISH` or `FAILED`), and print controls are refused
+unless they match the printer's state.
 
-The app cannot read from a database it has not been told how to find, serve a
-page before it knows where to listen, or put a login in front of itself using
-settings that are behind that login. Everything else — including the printer —
-is set on the Settings screen and kept in the database.
+**Status and camera**
 
-**The app will not start until it is told what to do about authentication.**
-Either configure a provider or say expressly that you want none. There is no
-default, so an app that is running is one whose exposure was chosen rather than
-overlooked.
+- Connection, printer state, bed/nozzle temperatures, progress, job name,
+  layer and time remaining
+- AMS trays (colour, material, nozzle range) and desiccant grade (A–E)
+- Printer errors shown as readable messages, translated from HMS and
+  `print_error` codes
+- Chamber camera at ~1 fps, recorded into a rolling buffer (24h by default).
+  The view follows the live image; a scrub bar goes back through the buffer.
+  During a print it starts 5 minutes before the print did.
+- Recent prints are listed under the camera and can be played back as a
+  timelapse at 30x, 60x, 300x or 600x. The most recent finished prints (5 by
+  default) keep their footage past the buffer window, thinned to one frame
+  every 10 seconds.
 
-| Variable | Required | Description |
-|---|---|---|
-| `OIDC_ISSUER` | to require a login | The provider's base URL, e.g. `https://id.example.com`. Its configuration is read from `/.well-known/openid-configuration` under this, at startup, so a wrong URL stops the app rather than surfacing at the first login |
-| `OIDC_CLIENT_ID` | to require a login | From the provider |
-| `OIDC_CLIENT_SECRET` | to require a login | From the provider. This is a server-side app, so it is a confidential client |
-| `PUBLIC_URL` | to require a login | Where the app is reached from a browser, e.g. `https://printer.example.com`. The redirect URI is this plus `/auth/callback`, and that exact URL is what the provider must have registered. It is given rather than worked out from the request, because a redirect built from a header the browser controls is how a login ends up being sent somewhere else. It has to be just a scheme and host, with no path, and it is checked at startup. A login begun on any other address for the app is moved here first, and cookies are marked `Secure` when it is `https` |
-| `AUTH_DISABLED` | instead of the four above | Set to `true` to run with no login at all. Anything that can reach the port can then drive the printer and watch the camera |
-| `LISTEN_ADDR` | no | Listen address, default `:8081` |
-| `DATA_DIR` | no | Directory for the database, default `./data`. It also holds the pending heater and lamp countdowns, so they survive a restart. Mount a volume here so the history buffer survives restarts — and so notification subscriptions do, since losing the server's identity silently unsubscribes every phone. Write-ahead logging means the directory also holds `-wal` and `-shm` files; a backup taken while the app runs needs all three, not just the `.db`. |
+bambu-util keeps the camera connection open the whole time it runs. The
+printer serves only one camera client, so Bambu Studio's camera view won't
+work alongside it.
 
-Any OpenID Connect provider works — nothing here is written against a
-particular one. It was built against [Pocket ID](https://pocket-id.org), where
-the client needs the redirect URI above and a client secret, and its "Restrict
-User Groups" decides who may log in. The app trusts the provider on that: a
-valid login for its client gets in, so access is managed in one place rather
-than two that can disagree.
+**Automation**
 
-How long a login lasts is on the Settings screen, counted from the last time the
-page was used, and is 14 days by default.
+- Heaters turn off automatically after a delay (bed 24h, nozzle 15m by
+  default)
+- The chamber lamp turns on when a print starts or a heater is set, and off
+  8h (by default) after the printer goes idle. The manual toggle is never
+  overridden.
 
-### Run
+**Notifications**
+
+Web push to subscribed devices: print started, finished or failed; printer
+errors (including filament runout); and a repeating reminder while the bed is
+hot with no print running. Each device chooses which it wants. Requires HTTPS;
+on iPhone/iPad it also requires iOS 16.4+ and the page added to the Home
+Screen.
+
+**Settings and diagnostics**
+
+- A Settings screen for the printer connection, notifications, camera history
+  window, prints kept, auto-off delays, event log size, an optional database
+  size cap, login length, theme (light/dark/system), and which status sections
+  are shown and in what order. Changes apply when saved.
+- An Events screen listing commands sent, printer acknowledgements and
+  reports, and notifications sent, each with the raw message. It is stored in
+  the database (64 MB by default) so it survives restarts.
+- The optional database size cap (off by default, minimum 256 MB) deletes the
+  oldest camera frames and events until the file fits, overriding the history
+  window and prints-kept settings.
+- Can be added to the iOS Home Screen as a full-screen app.
+
+## Printer setup
+
+Recent P1 firmware rejects third-party G-code unless **LAN Only Mode** and
+**Developer Mode** are both enabled on the printer. Status and camera work
+without them; the controls need them.
+
+You will need the printer's IP address and access code (printer screen,
+Settings → WLAN) and its serial number (Settings → Device). These are entered
+on the Settings page, not in the environment.
+
+## Running
+
+From source:
 
 ```sh
 AUTH_DISABLED=true go run ./cmd/bambu-util
 ```
 
-Then open the page, go to Settings, and enter the printer's address, serial and
-access code — from the printer screen, Settings → WLAN for the address and
-access code, Settings → Device for the serial.
+Then open `http://<host>:8081`, go to Settings and enter the printer details.
 
-Or the container image: `ghcr.io/brhelwig/bambu-util` (linux/arm64), tagged
-three ways:
+Prebuilt binaries for Linux, macOS and Windows (amd64 and arm64) are attached
+to each [GitHub release](https://github.com/brhelwig/bambu-util/releases).
 
-| Tag | Points at |
+A container image is published for linux/arm64:
+
+```sh
+mkdir -p data
+docker run -d -p 8081:8081 --user "$(id -u):$(id -g)" \
+  -e AUTH_DISABLED=true -e DATA_DIR=/data \
+  -v "$PWD/data:/data" \
+  ghcr.io/brhelwig/bambu-util:latest
+```
+
+The image runs as a non-root user, so the mounted directory must be writable
+by the user it runs as.
+
+| Tag | Meaning |
 |---|---|
-| `latest` | The newest `main` build. Deployments that follow it pick up new code by restarting. |
-| `YY.DOY.MMMM` | A released version — the same manifest as the `main` build it was cut from, not a rebuild. Use it to pin or roll back. |
-| `<commit sha>` | One specific `main` build. |
+| `latest` | The newest build of `main` |
+| `YY.DOY.M` | A release, e.g. `26.279.907`: year, day of year, minute of day (UTC) |
+| `<commit sha>` | The build of that commit on `main` |
 
-### Printer prerequisites
+Every commit to `main` that passes CI is released.
 
-Recent P1 firmware rejects third-party G-code unless **LAN Only Mode** and
-**Developer Mode** are enabled on the printer screen. Status and camera work
-either way; the four actions need Developer Mode.
+## Configuration
 
-### Protocol notes
+Everything except the following is set on the Settings page and stored in the
+database.
 
-- MQTT: TLS :8883, username `bblp`, password = LAN access code, self-signed
-  certificate. Status arrives on `device/<serial>/report`; after the initial
-  `pushall` dump the printer only sends changed fields, so reports are merged
-  into a cached state.
-- Camera: TLS :6000. An 80-byte auth packet (magic words `0x40`, `0x3000`,
-  then username and access code zero-padded to 32 bytes each), then framed
-  JPEGs: a 16-byte header whose first four bytes are the little-endian image
-  size. Layout learned from
+| Variable | Default | Description |
+|---|---|---|
+| `LISTEN_ADDR` | `:8081` | Address to listen on |
+| `DATA_DIR` | `./data` | Directory for the SQLite database |
+| `OIDC_ISSUER` | | OpenID Connect issuer URL, e.g. `https://id.example.com` |
+| `OIDC_CLIENT_ID` | | OIDC client ID |
+| `OIDC_CLIENT_SECRET` | | OIDC client secret |
+| `PUBLIC_URL` | | The URL the app is reached at, e.g. `https://printer.example.com` (scheme and host only) |
+| `AUTH_DISABLED` | | Set to `true` to run without a login |
+
+**The app will not start until authentication is configured.** Either set all
+four of `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `PUBLIC_URL`,
+or set `AUTH_DISABLED=true`.
+
+### Login
+
+Any OpenID Connect provider should work; it was developed against
+[Pocket ID](https://pocket-id.org). Register a confidential client with the
+redirect URI `<PUBLIC_URL>/auth/callback`. Anyone the provider lets log in to
+that client gets in, so restrict access at the provider (in Pocket ID, with
+the client's allowed user groups).
+
+The issuer is checked at startup, so a wrong URL fails immediately. Cookies
+are marked `Secure` when `PUBLIC_URL` is `https`. Logins last 14 days from
+last use by default (configurable in Settings).
+
+### Data
+
+`DATA_DIR` holds the camera buffer, event log, settings (including the
+printer's access code), notification subscriptions and pending auto-off
+timers. Put it on a persistent volume: losing it also loses the push signing
+key, which unsubscribes every device. The database uses WAL mode, so back up
+the `-wal` and `-shm` files along with the `.db`.
+
+## Security
+
+With OIDC configured, everything requires a login except `/healthz` and the
+few static files a phone fetches before logging in (service worker, manifest,
+icons). With
+`AUTH_DISABLED=true`, anyone who can reach the port can control the printer and
+watch the camera, so only run it that way on a trusted network (LAN or
+tailnet).
+
+The printer's access code is stored in the database, so treat `DATA_DIR` as
+sensitive. The page is never sent the code back, only whether one is set.
+
+## Protocol notes
+
+- **MQTT:** TLS on :8883, username `bblp`, password is the LAN access code,
+  self-signed certificate. Status arrives on `device/<serial>/report`. After
+  the initial `pushall` the printer only sends changed fields, so reports are
+  merged into a cached state.
+- **Camera:** TLS on :6000. The client sends an 80-byte auth packet (`0x40`,
+  `0x3000`, then the username and access code, each zero-padded to 32 bytes).
+  The printer then sends JPEG frames, each preceded by a 16-byte header whose
+  first four bytes are the little-endian image size. Based on
   [ha-bambulab](https://github.com/greghesp/ha-bambulab)'s chamber-image
   client.
-
-### Security
-
-The page has no authentication — run it only on a trusted network (LAN or
-tailnet). The printer's access code is stored in the database under `DATA_DIR`,
-so that directory is as sensitive as the credential itself and belongs on a
-volume you would not share. The page is never sent the code back, only whether
-one is set, so it cannot be read off a screen — but anyone who can reach the
-page can replace it.
