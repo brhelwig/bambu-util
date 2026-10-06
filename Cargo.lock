@@ -171,7 +171,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures-util",
- "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "hkdf",
  "http-body-util",
  "openidconnect",
