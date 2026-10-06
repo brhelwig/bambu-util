@@ -29,9 +29,3 @@ updates:
       interval: monthly
     cooldown:
       default-days: 14
-  - package-ecosystem: pip
-    directory: /.github/zigbuild
-    schedule:
-      interval: monthly
-    cooldown:
-      default-days: 14
