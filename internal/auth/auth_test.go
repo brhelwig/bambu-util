@@ -41,11 +41,10 @@ func setup(t *testing.T) (*httptest.Server, *provider, *Authenticator, *Store) {
 	t.Helper()
 	p := newProvider(t)
 
-	store, err := OpenStore(":memory:")
+	store, err := NewStore(openDB(t, ":memory:"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 
 	// The redirect URL has to be the app's own address, which is not known until
 	// it is listening, so the handler is filled in once it is.

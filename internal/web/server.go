@@ -59,16 +59,32 @@ type Server struct {
 	tick time.Duration
 }
 
-// NewServer builds the HTTP layer. cur answers what the settings are at the
-// moment they are consulted, so an edit takes effect without a restart. timers
-// persists the countdowns across a restart; pass nil to keep them in memory
-// only.
-func NewServer(cache *p1s.StateCache, cmd Commander, store *history.Store, notify *push.Sender, timers timerStore, cur current, write settingsWriter, printer printerConfigurer, events *activity.Log) *Server {
+// Options is what NewServer wires together.
+type Options struct {
+	Cache     *p1s.StateCache
+	Commander Commander
+	History   *history.Store
+	Notifier  *push.Sender
+	Activity  *activity.Log
+	// Settings returns the settings at the moment they are consulted, so an
+	// edit takes effect without a restart.
+	Settings func() settings.Values
+	// SettingsWriter saves edits from the page; nil makes them read-only.
+	SettingsWriter settingsWriter
+	Printer        printerConfigurer
+	// Timers persists the countdowns across a restart; nil keeps them in
+	// memory only.
+	Timers timerStore
+}
+
+// NewServer builds the HTTP layer.
+func NewServer(o Options) *Server {
 	return &Server{
-		cache: cache, cmd: cmd, store: store, notify: notify, printer: printer, activity: events,
-		events:  newPrintEvents(timers),
-		autoOff: newAutoOff(timers, cur), lamp: newLampAuto(timers, cur),
-		settings: cur, writeSettings: write, now: time.Now,
+		cache: o.Cache, cmd: o.Commander, store: o.History, notify: o.Notifier,
+		printer: o.Printer, activity: o.Activity,
+		events:  newPrintEvents(o.Timers),
+		autoOff: newAutoOff(o.Timers, o.Settings), lamp: newLampAuto(o.Timers, o.Settings),
+		settings: o.Settings, writeSettings: o.SettingsWriter, now: time.Now,
 	}
 }
 

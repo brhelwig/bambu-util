@@ -21,7 +21,7 @@ func settingsTestServer(t *testing.T) (*httptest.Server, *settings.Store) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, testPrinter(), openTestLog())
+	srv := testServer(cache, &fakeCommander{}, func(o *Options) { o.Settings = config.Values; o.SettingsWriter = config })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, config
@@ -158,7 +158,7 @@ func TestBadSettingWritesAreRefused(t *testing.T) {
 func TestAServerWithNoWritableSettingsSaysSo(t *testing.T) {
 	cache := p1s.NewStateCache()
 	cache.SetConnected(true)
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
+	srv := testServer(cache, &fakeCommander{})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -175,7 +175,7 @@ func printerTestServer(t *testing.T) (*httptest.Server, *settings.Store, *fakePr
 	config := openTestSettings(t)
 	printer := &fakePrinter{}
 	cache := p1s.NewStateCache()
-	srv := NewServer(cache, &fakeCommander{}, openTestStore(), openTestNotifier(), nil, config.Values, config, printer, openTestLog())
+	srv := testServer(cache, &fakeCommander{}, func(o *Options) { o.Settings = config.Values; o.SettingsWriter = config; o.Printer = printer })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, config, printer

@@ -30,11 +30,7 @@ func requireStopped(t *testing.T, stopped <-chan struct{}) {
 }
 
 func TestPrunerDeletesOnEveryTickAndStopsWhenCancelled(t *testing.T) {
-	s, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := openTest(t)
 	for _, ts := range []int64{100, 200, 5000} {
 		if err := s.InsertFrame(ts, []byte{1}); err != nil {
 			t.Fatal(err)
@@ -63,11 +59,7 @@ func TestPrunerDeletesOnEveryTickAndStopsWhenCancelled(t *testing.T) {
 // The policy is read on every tick rather than captured once, so that changing
 // the retention on the settings page takes effect without a restart.
 func TestPrunerRereadsThePolicyEachTick(t *testing.T) {
-	s, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := openTest(t)
 	for _, ts := range []int64{1000, 3000, 5000} {
 		if err := s.InsertFrame(ts, []byte{1}); err != nil {
 			t.Fatal(err)
@@ -113,11 +105,7 @@ func TestPrunerRereadsThePolicyEachTick(t *testing.T) {
 }
 
 func TestJobWatcherPollsWhatItIsGivenAndStopsWhenCancelled(t *testing.T) {
-	s, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := openTest(t)
 
 	var mu sync.Mutex
 	state, name := "IDLE", ""

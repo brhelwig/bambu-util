@@ -7,8 +7,6 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-
-	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -29,32 +27,7 @@ const (
 
 // Store holds the pending timers.
 type Store struct {
-	db    *sql.DB
-	owned bool
-}
-
-// Open makes a store over a database of its own at path. The app shares one
-// database across stores and calls New instead.
-func Open(path string) (*Store, error) {
-	db, err := sqlitedb.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	store, err := New(db)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	store.owned = true
-	return store, nil
-}
-
-// Close closes the database if this store opened it.
-func (s *Store) Close() error {
-	if !s.owned {
-		return nil
-	}
-	return s.db.Close()
+	db *sql.DB
 }
 
 // New returns a store over db, creating its table if needed.

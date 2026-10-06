@@ -134,8 +134,7 @@ func TestPollLampForcesOnWhenJobRunning(t *testing.T) {
 	cache.Merge(map[string]any{"gcode_state": "RUNNING"})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
+	s := testServer(cache, cmd, func(o *Options) { o.History = store })
 
 	s.pollLamp()
 
@@ -149,8 +148,7 @@ func TestPollLampDoesNothingWhenDisconnected(t *testing.T) {
 	cache.SetConnected(false)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
+	s := testServer(cache, cmd, func(o *Options) { o.History = store })
 
 	s.pollLamp()
 
@@ -165,8 +163,7 @@ func TestStatusExposesLampOffCountdown(t *testing.T) {
 	cache.Merge(map[string]any{"gcode_state": "IDLE"})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	defer store.Close()
-	s := NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog())
+	s := testServer(cache, cmd, func(o *Options) { o.History = store })
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 

@@ -10,11 +10,7 @@ import (
 const keptJobs = 5
 
 func TestInsertAndFrameAtOrAfter(t *testing.T) {
-	s, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := openTest(t)
 
 	if err := s.InsertFrame(100, []byte{1}); err != nil {
 		t.Fatal(err)
@@ -33,8 +29,7 @@ func TestInsertAndFrameAtOrAfter(t *testing.T) {
 }
 
 func TestFrameAtOrAfterExactMatch(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.InsertFrame(100, []byte{1})
 
 	_, ts, err := s.FrameAtOrAfter(100)
@@ -47,8 +42,7 @@ func TestFrameAtOrAfterExactMatch(t *testing.T) {
 }
 
 func TestFrameAtOrAfterNoneFound(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.InsertFrame(100, []byte{1})
 
 	if _, _, err := s.FrameAtOrAfter(200); !errors.Is(err, ErrNoFrame) {
@@ -57,8 +51,7 @@ func TestFrameAtOrAfterNoneFound(t *testing.T) {
 }
 
 func TestRangeEmpty(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 
 	oldest, newest, err := s.Range()
 	if err != nil {
@@ -70,8 +63,7 @@ func TestRangeEmpty(t *testing.T) {
 }
 
 func TestRangeWithFrames(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.InsertFrame(100, []byte{1})
 	s.InsertFrame(300, []byte{2})
 	s.InsertFrame(200, []byte{3})
@@ -86,8 +78,7 @@ func TestRangeWithFrames(t *testing.T) {
 }
 
 func TestPruneDeletesOldFrames(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.InsertFrame(100, []byte{1})
 	s.InsertFrame(500, []byte{2})
 
@@ -101,8 +92,7 @@ func TestPruneDeletesOldFrames(t *testing.T) {
 }
 
 func TestJobLifecycle(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 
 	id, err := s.OpenJob("benchy.3mf", 100)
 	if err != nil {
@@ -126,8 +116,7 @@ func TestJobLifecycle(t *testing.T) {
 }
 
 func TestPrunePreservesOngoingJobRegardlessOfStartAge(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.OpenJob("old-but-running.3mf", 0)
 
 	if err := s.Prune(1000, keptJobs); err != nil {
@@ -140,8 +129,7 @@ func TestPrunePreservesOngoingJobRegardlessOfStartAge(t *testing.T) {
 }
 
 func TestPruneKeepsTheNewestFinishedJobsAndDropsTheRest(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// keptJobs+1 finished jobs, all long expired. Only the oldest should go.
 	for i := 0; i <= keptJobs; i++ {
 		start := int64(100 + i*10)
@@ -164,8 +152,7 @@ func TestPruneKeepsTheNewestFinishedJobsAndDropsTheRest(t *testing.T) {
 }
 
 func TestPruneKeepsAndThinsFootageOfKeptJobs(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// One finished job spanning 1000..1099, recorded once a second.
 	id, _ := s.OpenJob("kept.3mf", 1000)
 	s.CloseJob(id, 1099)
@@ -193,8 +180,7 @@ func TestPruneKeepsAndThinsFootageOfKeptJobs(t *testing.T) {
 }
 
 func TestPruneDeletesFramesOutsideEveryKeptJob(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	id, _ := s.OpenJob("kept.3mf", 1000)
 	s.CloseJob(id, 1099)
 	s.InsertFrame(1000, []byte{1}) // inside the kept job
@@ -210,8 +196,7 @@ func TestPruneDeletesFramesOutsideEveryKeptJob(t *testing.T) {
 }
 
 func TestPruneLeavesFramesNewerThanCutoffAtFullRate(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// A job still in progress, all of whose footage is newer than the cutoff.
 	s.OpenJob("running.3mf", 1000)
 	for ts := int64(1000); ts <= 1099; ts++ {
@@ -227,8 +212,7 @@ func TestPruneLeavesFramesNewerThanCutoffAtFullRate(t *testing.T) {
 }
 
 func TestPruneThinsOnlyTheExpiredPartOfARunningJob(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.OpenJob("long.3mf", 1000)
 	for ts := int64(1000); ts <= 1099; ts++ {
 		s.InsertFrame(ts, []byte{1})
@@ -249,8 +233,7 @@ func TestPruneThinsOnlyTheExpiredPartOfARunningJob(t *testing.T) {
 }
 
 func TestActiveJobEmpty(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 
 	job, err := s.ActiveJob()
 	if err != nil {
@@ -262,8 +245,7 @@ func TestActiveJobEmpty(t *testing.T) {
 }
 
 func TestActiveJobIgnoresFinishedJobs(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	id, _ := s.OpenJob("done.3mf", 100)
 	s.CloseJob(id, 200)
 
@@ -277,8 +259,7 @@ func TestActiveJobIgnoresFinishedJobs(t *testing.T) {
 }
 
 func TestActiveJobReturnsTheOpenOne(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	done, _ := s.OpenJob("done.3mf", 100)
 	s.CloseJob(done, 200)
 	open, _ := s.OpenJob("running.3mf", 300)
@@ -293,8 +274,7 @@ func TestActiveJobReturnsTheOpenOne(t *testing.T) {
 }
 
 func TestPruneBoundsHowFarBackAnOpenJobProtectsFootage(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// A printer that drops off the network mid-print leaves RUNNING as the last
 	// state it reported, so this row never closes. Without a bound it would
 	// exempt everything from its start onward from retention, forever.
@@ -324,8 +304,7 @@ func TestPruneBoundsHowFarBackAnOpenJobProtectsFootage(t *testing.T) {
 }
 
 func TestPruneKeepsAWholeLongRunningPrint(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// A print longer than the retention window keeps its early footage, which is
 	// the reason the in-progress job is protected at all.
 	const hour = int64(3600)
@@ -345,8 +324,7 @@ func TestPruneKeepsAWholeLongRunningPrint(t *testing.T) {
 }
 
 func TestCloseOrphanJobsLeavesASingleOpenRowAlone(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.OpenJob("running.3mf", 1000)
 
 	n, err := s.CloseOrphanJobs()
@@ -363,8 +341,7 @@ func TestCloseOrphanJobsLeavesASingleOpenRowAlone(t *testing.T) {
 }
 
 func TestCloseOrphanJobsClosesStrandedRowsAtTheirLastFrame(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// What the old restart bug left behind: two rows for the same file, both
 	// open, plus a genuinely running third print.
 	s.OpenJob("pencil.3mf", 1000)
@@ -400,8 +377,7 @@ func TestCloseOrphanJobsClosesStrandedRowsAtTheirLastFrame(t *testing.T) {
 }
 
 func TestCloseOrphanJobsFallsBackToStartWithoutFootage(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	s.OpenJob("footage-already-pruned.3mf", 1000)
 	s.OpenJob("running.3mf", 5000)
 
@@ -416,8 +392,7 @@ func TestCloseOrphanJobsFallsBackToStartWithoutFootage(t *testing.T) {
 }
 
 func TestPruneIgnoresAllButTheNewestOpenRow(t *testing.T) {
-	s, _ := Open(":memory:")
-	defer s.Close()
+	s := openTest(t)
 	// A stranded open row must not shield every later frame from the cutoff.
 	s.OpenJob("stranded.3mf", 100)
 	s.OpenJob("running.3mf", 9000)

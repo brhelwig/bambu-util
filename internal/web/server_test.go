@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/brhelwig/bambu-util/internal/p1s"
 	"github.com/brhelwig/bambu-util/internal/push"
 	"github.com/brhelwig/bambu-util/internal/settings"
+	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 type fakeCommander struct {
@@ -78,8 +80,26 @@ func (f *fakeCommander) PausePrint()  { f.record("pause") }
 func (f *fakeCommander) ResumePrint() { f.record("resume") }
 func (f *fakeCommander) StopPrint()   { f.record("stop") }
 
+// testServer builds a Server over throwaway stores, with the default
+// settings and a fake printer. Each override adjusts the options first.
+func testServer(cache *p1s.StateCache, cmd Commander, overrides ...func(*Options)) *Server {
+	o := Options{
+		Cache:     cache,
+		Commander: cmd,
+		History:   openTestStore(),
+		Notifier:  openTestNotifier(),
+		Activity:  openTestLog(),
+		Settings:  testSettings,
+		Printer:   testPrinter(),
+	}
+	for _, override := range overrides {
+		override(&o)
+	}
+	return NewServer(o)
+}
+
 func openTestStore() *history.Store {
-	store, err := history.Open(":memory:")
+	store, err := history.New(memDB())
 	if err != nil {
 		panic(err)
 	}
@@ -92,11 +112,10 @@ func testSettings() settings.Values { return settings.Defaults }
 
 func openTestSettings(t *testing.T) *settings.Store {
 	t.Helper()
-	store, err := settings.Open(":memory:")
+	store, err := settings.New(memDB())
 	if err != nil {
 		t.Fatalf("open settings: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
 	return store
 }
 
@@ -104,15 +123,24 @@ func openTestSettings(t *testing.T) *settings.Store {
 // never interferes with what is being checked. The tests that are about
 // trimming live in the activity package and set their own.
 func openTestLog() *activity.Log {
-	log, err := activity.Open(":memory:", func() int64 { return 1 << 20 })
+	log, err := activity.New(memDB(), func() int64 { return 1 << 20 })
 	if err != nil {
 		panic(err)
 	}
 	return log
 }
 
+// memDB opens a throwaway in-memory database.
+func memDB() *sql.DB {
+	db, err := sqlitedb.Open(":memory:")
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
 func openTestNotifier() *push.Sender {
-	store, err := push.Open(":memory:")
+	store, err := push.New(memDB())
 	if err != nil {
 		panic(err)
 	}
@@ -131,7 +159,7 @@ func buildTestServer(connected bool, state string) (*httptest.Server, *fakeComma
 	}
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler()), cmd, store
+	return httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler()), cmd, store
 }
 
 func newTestServer(connected bool, state string) (*httptest.Server, *fakeCommander) {
@@ -340,7 +368,7 @@ func newTestServerWithFields(fields map[string]any) (*httptest.Server, *fakeComm
 	cache.Merge(fields)
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	return httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler()), cmd
+	return httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler()), cmd
 }
 
 func TestExtrudeAllowedWhenHotAndIdle(t *testing.T) {
@@ -508,7 +536,7 @@ func TestStatusIncludesJobFields(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler())
+	ts := httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -553,7 +581,7 @@ func TestStatusHMSPopulated(t *testing.T) {
 	})
 	cmd := &fakeCommander{}
 	store := openTestStore()
-	ts := httptest.NewServer(NewServer(cache, cmd, store, openTestNotifier(), nil, testSettings, nil, testPrinter(), openTestLog()).Handler())
+	ts := httptest.NewServer(testServer(cache, cmd, func(o *Options) { o.History = store }).Handler())
 	defer ts.Close()
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/status")
@@ -597,7 +625,7 @@ func seekTestServer(state string, now int64) (*httptest.Server, *history.Store) 
 		v.Retention = seekWindowUnderTest
 		return v
 	}
-	srv := NewServer(cache, &fakeCommander{}, store, openTestNotifier(), nil, cur, nil, testPrinter(), openTestLog())
+	srv := testServer(cache, &fakeCommander{}, func(o *Options) { o.History = store; o.Settings = cur })
 	srv.now = func() time.Time { return time.Unix(now, 0) }
 	return httptest.NewServer(srv.Handler()), store
 }

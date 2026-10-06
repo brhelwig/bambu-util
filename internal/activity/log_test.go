@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 // generous is a budget no test reaches by accident, so only the tests that are
@@ -17,11 +15,11 @@ const generous = 1 << 20
 
 func openTest(t *testing.T, limit int64) *Log {
 	t.Helper()
-	l, err := Open(":memory:", func() int64 { return limit })
+	lDB := openDB(t, ":memory:")
+	l, err := New(lDB, func() int64 { return limit })
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
 	return l
 }
 
@@ -59,20 +57,21 @@ func TestEntriesSurviveReopeningTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bambu-util.db")
 	limit := func() int64 { return generous }
 
-	first, err := Open(path, limit)
+	firstDB := openDB(t, path)
+	first, err := New(firstDB, limit)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	first.Record(Command, "stop", `{"print":{"command":"stop"}}`)
-	if err := first.Close(); err != nil {
+	if err := firstDB.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
-	second, err := Open(path, limit)
+	secondDB := openDB(t, path)
+	second, err := New(secondDB, limit)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer second.Close()
 
 	got := second.Entries(10)
 	if len(got) != 1 {
@@ -92,7 +91,8 @@ func TestAReopenedLogCountsWhatIsAlreadyThere(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bambu-util.db")
 	limit := func() int64 { return generous }
 
-	first, err := Open(path, limit)
+	firstDB := openDB(t, path)
+	first, err := New(firstDB, limit)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -100,13 +100,13 @@ func TestAReopenedLogCountsWhatIsAlreadyThere(t *testing.T) {
 		first.Record(Report, "report", strings.Repeat("x", 500))
 	}
 	stored := first.bytes
-	first.Close()
+	firstDB.Close()
 
-	second, err := Open(path, limit)
+	secondDB := openDB(t, path)
+	second, err := New(secondDB, limit)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer second.Close()
 	if second.bytes != stored {
 		t.Errorf("counted %d bytes after reopening, want the %d already stored", second.bytes, stored)
 	}
@@ -167,11 +167,11 @@ func TestAHugePayloadIsCutDown(t *testing.T) {
 // Lowering the setting has to take hold without a restart.
 func TestLoweringTheLimitShrinksTheLogOnTheNextEntry(t *testing.T) {
 	limit := int64(generous)
-	l, err := Open(":memory:", func() int64 { return limit })
+	lDB := openDB(t, ":memory:")
+	l, err := New(lDB, func() int64 { return limit })
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer l.Close()
 
 	for range 50 {
 		l.Record(Report, "report", strings.Repeat("x", 500))
@@ -272,29 +272,6 @@ func TestANilLogIsHarmless(t *testing.T) {
 	l.Acknowledge(entry, time.Now(), nil)
 	if got := l.Entries(10); got != nil {
 		t.Errorf("Entries = %v, want nothing", got)
-	}
-}
-
-// The log shares the app's one database rather than opening its own.
-func TestItSharesTheAppDatabase(t *testing.T) {
-	db, err := sqlitedb.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	defer db.Close()
-
-	l, err := New(db, func() int64 { return generous })
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	l.Record(Command, "stop", "")
-	if err := l.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	// Closing a log it does not own must leave the database up for everything
-	// else sharing it.
-	if _, err := db.Exec(`SELECT 1`); err != nil {
-		t.Errorf("the shared database went down with the log: %v", err)
 	}
 }
 

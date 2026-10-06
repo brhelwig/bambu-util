@@ -19,8 +19,7 @@ import (
 func serverWithNotifier(t *testing.T) (*httptest.Server, *push.Sender) {
 	t.Helper()
 	notify := openTestNotifier()
-	srv := NewServer(p1s.NewStateCache(), &fakeCommander{}, openTestStore(), notify,
-		nil, testSettings, nil, testPrinter(), openTestLog())
+	srv := testServer(p1s.NewStateCache(), &fakeCommander{}, func(o *Options) { o.Notifier = notify })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, notify
@@ -190,8 +189,7 @@ func TestSetPushPreferencesRejectsWhatItShould(t *testing.T) {
 // to be at the top.
 func TestEventsAreReportedNewestFirst(t *testing.T) {
 	log := openTestLog()
-	srv := NewServer(p1s.NewStateCache(), &fakeCommander{}, openTestStore(), openTestNotifier(),
-		nil, testSettings, nil, testPrinter(), log)
+	srv := testServer(p1s.NewStateCache(), &fakeCommander{}, func(o *Options) { o.Activity = log })
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

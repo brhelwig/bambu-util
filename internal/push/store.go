@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -57,24 +55,7 @@ func (s Subscription) Wants(kind string) bool {
 
 // Store holds subscriptions and this server's identity.
 type Store struct {
-	db    *sql.DB
-	owned bool
-}
-
-// Open makes a store over a database of its own at path, which Close then
-// closes. The app shares one database across stores and calls New instead.
-func Open(path string) (*Store, error) {
-	db, err := sqlitedb.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	store, err := New(db)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	store.owned = true
-	return store, nil
+	db *sql.DB
 }
 
 // New returns a store over db, creating its tables if needed. The caller keeps
@@ -84,14 +65,6 @@ func New(db *sql.DB) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db}, nil
-}
-
-// Close closes the database if this store opened it.
-func (s *Store) Close() error {
-	if !s.owned {
-		return nil
-	}
-	return s.db.Close()
 }
 
 // Key returns this server's VAPID key, generating and storing one the first

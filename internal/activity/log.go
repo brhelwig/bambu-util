@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/brhelwig/bambu-util/internal/capacity"
-	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 // Times are in milliseconds, since a command and its reply often land in the
@@ -66,28 +65,11 @@ var sizeExpr = fmt.Sprintf(
 // Log records what happened, in the database, bounded by a size in bytes.
 type Log struct {
 	db    *sql.DB
-	owned bool
 	limit func() int64
 
 	mu    sync.Mutex
 	bytes int64 // what the stored entries currently come to
 	now   func() time.Time
-}
-
-// Open makes a log over a database of its own at path, which Close then closes.
-// The app shares one database across stores and calls New instead.
-func Open(path string, limit func() int64) (*Log, error) {
-	db, err := sqlitedb.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	l, err := New(db, limit)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	l.owned = true
-	return l, nil
 }
 
 // New returns a log over db, creating its table if needed. limit returns the
@@ -102,14 +84,6 @@ func New(db *sql.DB, limit func() int64) (*Log, error) {
 		return nil, err
 	}
 	return l, nil
-}
-
-// Close closes the database if this store opened it.
-func (a *Log) Close() error {
-	if !a.owned {
-		return nil
-	}
-	return a.db.Close()
 }
 
 // Record adds an entry and returns it, so it can be acknowledged later. A nil

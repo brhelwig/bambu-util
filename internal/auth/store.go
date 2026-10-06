@@ -9,8 +9,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"time"
-
-	"github.com/brhelwig/bambu-util/internal/sqlitedb"
 )
 
 const schema = `
@@ -35,24 +33,7 @@ CREATE INDEX IF NOT EXISTS pending_logins_expires ON pending_logins(expires);
 
 // Store holds who is logged in, and the logins that are part-way through.
 type Store struct {
-	db    *sql.DB
-	owned bool
-}
-
-// OpenStore makes a store over a database of its own at path, which Close then
-// closes. The app shares one database across stores and calls NewStore instead.
-func OpenStore(path string) (*Store, error) {
-	db, err := sqlitedb.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	store, err := NewStore(db)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	store.owned = true
-	return store, nil
+	db *sql.DB
 }
 
 // NewStore returns a store over db, creating its tables if needed. The caller
@@ -62,14 +43,6 @@ func NewStore(db *sql.DB) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db}, nil
-}
-
-// Close closes the database if this store opened it.
-func (s *Store) Close() error {
-	if !s.owned {
-		return nil
-	}
-	return s.db.Close()
 }
 
 // Session is one logged-in browser.
