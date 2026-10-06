@@ -27,6 +27,7 @@ jobs:
             exit 1
           fi
       - run: go vet ./...
+      - run: .github/scripts/check-go-version.sh
       # The race detector needs cgo, which the rest of the build deliberately
       # does without.
       - run: go test -race ./...
