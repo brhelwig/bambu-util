@@ -11,7 +11,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use hkdf::Hkdf;
 use p256::ecdsa::{Signature, SigningKey, signature::Signer};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::Generate;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use p256::{PublicKey, SecretKey};
 use rusqlite::{OptionalExtension, params};
@@ -95,7 +96,7 @@ fn encrypt(
     let ua_key = PublicKey::from_sec1_bytes(ua_public)
         .map_err(|_| "subscription key is not a P-256 point".to_string())?;
     let shared = p256::ecdh::diffie_hellman(as_key.to_nonzero_scalar(), ua_key.as_affine());
-    let as_public = as_key.public_key().to_encoded_point(false);
+    let as_public = as_key.public_key().to_sec1_point(false);
     let (cek, nonce) = derive_keys(
         shared.raw_secret_bytes(),
         auth_secret,
@@ -153,12 +154,12 @@ fn encrypt_fresh(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, String> {
     let mut salt = [0u8; 16];
-    getrandom::getrandom(&mut salt).map_err(|e| e.to_string())?;
+    getrandom::fill(&mut salt).map_err(|e| e.to_string())?;
     encrypt(
         ua_public,
         auth_secret,
         plaintext,
-        &SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng),
+        &SecretKey::generate(),
         &salt,
     )
 }
@@ -173,7 +174,7 @@ pub struct Key(SecretKey);
 impl Key {
     /// The key the browser needs when subscribing, base64url.
     pub fn public(&self) -> String {
-        B64.encode(self.0.public_key().to_encoded_point(false).as_bytes())
+        B64.encode(self.0.public_key().to_sec1_point(false).as_bytes())
     }
 
     /// The header proving this message came from the holder of the key the
@@ -543,7 +544,7 @@ fn load_key(db: &Db) -> Result<Key, String> {
     let der = match read(&conn).map_err(|e| e.to_string())? {
         Some(der) => der,
         None => {
-            let key = SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+            let key = SecretKey::generate();
             let der = key.to_pkcs8_der().map_err(|e| e.to_string())?;
             conn.execute(
                 "INSERT OR IGNORE INTO server_key (id, der) VALUES (1, ?)",
@@ -589,7 +590,7 @@ mod tests {
     fn rfc_key() -> SecretKey {
         let key = SecretKey::from_slice(&b64(AS_PRIVATE)).unwrap();
         assert_eq!(
-            B64.encode(key.public_key().to_encoded_point(false).as_bytes()),
+            B64.encode(key.public_key().to_sec1_point(false).as_bytes()),
             AS_PUBLIC
         );
         key

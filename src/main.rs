@@ -34,7 +34,7 @@ use crate::p1s::{Config, Link, Ports, StateCache};
 pub fn random_token() -> String {
     use base64::Engine;
     let mut raw = [0u8; 32];
-    getrandom::getrandom(&mut raw).expect("random bytes");
+    getrandom::fill(&mut raw).expect("random bytes");
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
 }
 

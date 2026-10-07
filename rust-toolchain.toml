@@ -2,6 +2,6 @@
 # .github/scripts/check-rust-version.sh fails CI if the Dockerfile's rust image
 # names a different version.
 [toolchain]
-channel = "1.97"
+channel = "1.98"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
