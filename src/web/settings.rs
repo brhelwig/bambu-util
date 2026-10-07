@@ -19,13 +19,11 @@ const SHOWN_EVENTS: usize = 500;
 pub async fn get(State(app): State<App>) -> Response {
     let v = app.settings.values();
     json_reply(&json!({
-        keys::RETENTION: v.retention,
-        keys::KEPT_JOBS: v.kept_jobs,
+        keys::CAMERA_STORAGE: v.camera_storage / BYTES_PER_MB,
         keys::BED_OFF_AFTER: v.bed_off_after,
         keys::NOZZLE_OFF_AFTER: v.nozzle_off_after,
         keys::LAMP_OFF_AFTER: v.lamp_off_after,
         keys::ACTIVITY_LIMIT: v.activity_limit / BYTES_PER_MB,
-        keys::DATABASE_LIMIT: v.database_limit / BYTES_PER_MB,
         keys::SESSION_LENGTH: v.session_length,
         keys::DASHBOARD: v.dashboard,
     }))
@@ -79,6 +77,10 @@ struct PrinterRequest {
     serial: String,
     #[serde(default)]
     access_code: String,
+    /// Saves without first checking the printer answers, for one that is
+    /// switched off.
+    #[serde(default)]
+    skip_check: bool,
 }
 
 pub async fn set_printer(State(app): State<App>, body: Bytes) -> Response {
@@ -100,6 +102,17 @@ pub async fn set_printer(State(app): State<App>, body: Bytes) -> Response {
             "the printer's address, serial and access code are all needed",
         );
     }
+    if !req.skip_check
+        && let Err(problem) = crate::p1s::mqtt::probe(
+            &conf.ip,
+            app.link.mqtt_port(),
+            &conf.serial,
+            &conf.access_code,
+        )
+        .await
+    {
+        return text(StatusCode::UNPROCESSABLE_ENTITY, problem);
+    }
     for (name, value) in [
         (keys::PRINTER_IP, &conf.ip),
         (keys::PRINTER_SERIAL, &conf.serial),
@@ -109,9 +122,8 @@ pub async fn set_printer(State(app): State<App>, body: Bytes) -> Response {
             return text(StatusCode::BAD_REQUEST, err);
         }
     }
-    // Saving is not the same as reaching it: connecting happens in the
-    // background and the status reports how it went, so a printer that is
-    // merely switched off can still be set up.
+    // Checked above unless asked not to; either way the connection itself
+    // runs in the background and the status says how it is going.
     app.link.configure(conf);
     StatusCode::NO_CONTENT.into_response()
 }

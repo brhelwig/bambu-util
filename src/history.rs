@@ -7,16 +7,6 @@ use crate::capacity::{Item, Source};
 use crate::db::Db;
 use crate::p1s;
 
-/// The spacing, in seconds, that kept footage is reduced to once it ages past
-/// the cutoff. Timelapses play at 30x or faster, so a frame every 10s is enough.
-pub const THIN_INTERVAL: i64 = 10;
-
-/// Bounds, in seconds, how far back from the cutoff an in-progress print's
-/// footage is protected. A printer that vanishes mid-print can leave its job
-/// row open forever; this stops that row exempting all later footage from
-/// retention.
-pub const MAX_OPEN_JOB_SPAN: i64 = 48 * 60 * 60;
-
 /// One print's recorded time range, in unix seconds. `end` is None while it is
 /// still in progress.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -31,13 +21,6 @@ pub struct Job {
 #[derive(Clone)]
 pub struct Store {
     db: Db,
-}
-
-/// A span whose frames survive the cutoff. `end` is None for a print still in
-/// progress, meaning the span has no upper bound yet.
-struct Window {
-    start: i64,
-    end: Option<i64>,
 }
 
 impl Store {
@@ -76,74 +59,14 @@ impl Store {
             })
     }
 
-    /// Enforces retention. Frames older than `cutoff` are deleted unless they
-    /// belong to a kept print — the one still in progress, or one of the
-    /// `kept_jobs` most recently finished — whose footage is instead thinned to
-    /// one frame per THIN_INTERVAL. Job rows go only once they are both older
-    /// than the cutoff and no longer among the kept ones.
-    pub fn prune(&self, cutoff: i64, kept_jobs: i64) -> rusqlite::Result<()> {
-        let kept = self.kept_windows(cutoff, kept_jobs)?;
-        let conn = self.db.lock();
-
-        // Pre-cutoff frames inside none of the kept windows.
-        let mut sql = String::from("DELETE FROM frames WHERE ts < ?");
-        let mut args = vec![cutoff];
-        for w in &kept {
-            match w.end {
-                None => {
-                    sql.push_str(" AND ts < ?");
-                    args.push(w.start);
-                }
-                Some(end) => {
-                    sql.push_str(" AND NOT (ts >= ? AND ts <= ?)");
-                    args.extend([w.start, end]);
-                }
-            }
-        }
-        conn.execute(&sql, rusqlite::params_from_iter(args))?;
-
-        // The pre-cutoff part of each kept window, down to its earliest frame
-        // per interval. Newer frames are left alone.
-        for w in &kept {
-            let end = w.end.map_or(cutoff - 1, |end| end.min(cutoff - 1));
-            if end < w.start {
-                continue;
-            }
-            conn.execute(
-                "DELETE FROM frames WHERE ts >= ?1 AND ts <= ?2 AND id NOT IN (
-                   SELECT MIN(id) FROM frames WHERE ts >= ?1 AND ts <= ?2 GROUP BY ts / ?3)",
-                params![w.start, end, THIN_INTERVAL],
-            )?;
-        }
-
-        conn.execute(
-            "DELETE FROM jobs WHERE end_ts IS NOT NULL AND end_ts < ? AND id NOT IN (
-               SELECT id FROM jobs WHERE end_ts IS NOT NULL ORDER BY start_ts DESC, id DESC LIMIT ?)",
-            params![cutoff, kept_jobs],
-        )?;
-        Ok(())
-    }
-
-    fn kept_windows(&self, cutoff: i64, kept_jobs: i64) -> rusqlite::Result<Vec<Window>> {
-        let conn = self.db.lock();
-        let mut stmt = conn.prepare(
-            "SELECT start_ts, end_ts FROM (
-               SELECT start_ts, end_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC, id DESC LIMIT 1)
-             UNION ALL
-             SELECT start_ts, end_ts FROM (
-               SELECT start_ts, end_ts FROM jobs WHERE end_ts IS NOT NULL ORDER BY start_ts DESC, id DESC LIMIT ?)",
-        )?;
-        stmt.query_map([kept_jobs], |r| {
-            let (start, end): (i64, Option<i64>) = (r.get(0)?, r.get(1)?);
-            // See MAX_OPEN_JOB_SPAN.
-            let start = if end.is_none() {
-                start.max(cutoff - MAX_OPEN_JOB_SPAN)
-            } else {
-                start
-            };
-            Ok(Window { start, end })
-        })?
-        .collect()
+    /// Forgets prints whose footage has all been deleted to make room, so the
+    /// list only offers what can still be played.
+    pub fn forget_unrecorded_jobs(&self) -> rusqlite::Result<usize> {
+        self.db.lock().execute(
+            "DELETE FROM jobs WHERE end_ts IS NOT NULL
+               AND end_ts < COALESCE((SELECT MIN(ts) FROM frames), end_ts + 1)",
+            [],
+        )
     }
 
     /// Records the start of a print and returns its id.
@@ -214,7 +137,7 @@ impl Store {
     }
 
     /// Every stored job, newest-started first (ties by insertion order).
-    /// Pruning keeps this bounded.
+    /// `forget_unrecorded_jobs` keeps this bounded.
     pub fn recent_jobs(&self) -> rusqlite::Result<Vec<Job>> {
         let conn = self.db.lock();
         let mut stmt = conn.prepare(
@@ -253,13 +176,20 @@ impl Source for Store {
         .collect()
     }
 
-    /// Removes every frame up to and including `id`, including footage
-    /// retention would keep.
+    /// Removes every frame up to and including `id`, a running print's too.
     fn delete_through(&self, id: i64) -> rusqlite::Result<()> {
         self.db
             .lock()
             .execute("DELETE FROM frames WHERE id <= ?", [id])?;
         Ok(())
+    }
+
+    fn total_bytes(&self) -> rusqlite::Result<i64> {
+        self.db.lock().query_row(
+            "SELECT COALESCE(SUM(octet_length(jpeg)), 0) FROM frames",
+            [],
+            |r| r.get(0),
+        )
     }
 }
 
@@ -345,21 +275,8 @@ impl JobTracker {
 mod tests {
     use super::*;
 
-    const KEPT: i64 = 5;
-
     fn store() -> Store {
         Store::new(Db::memory())
-    }
-
-    fn timestamps(s: &Store) -> Vec<i64> {
-        let conn = s.db.lock();
-        let mut stmt = conn
-            .prepare("SELECT ts FROM frames ORDER BY ts ASC")
-            .unwrap();
-        stmt.query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap()
     }
 
     #[test]
@@ -382,12 +299,27 @@ mod tests {
     }
 
     #[test]
-    fn prune_deletes_old_frames() {
+    fn jobs_go_once_their_footage_has() {
         let s = store();
-        s.insert_frame(100, &[1]).unwrap();
-        s.insert_frame(500, &[2]).unwrap();
-        s.prune(300, KEPT).unwrap();
-        assert_eq!(s.range().unwrap(), (Some(500), Some(500)));
+        let gone = s.open_job("gone.3mf", 100).unwrap();
+        s.close_job(gone, 200).unwrap();
+        let kept = s.open_job("kept.3mf", 300).unwrap();
+        s.close_job(kept, 400).unwrap();
+        s.open_job("running.3mf", 500).unwrap();
+        s.insert_frame(350, &[1]).unwrap();
+        assert_eq!(s.forget_unrecorded_jobs().unwrap(), 1);
+        let names: Vec<_> = s
+            .recent_jobs()
+            .unwrap()
+            .into_iter()
+            .map(|j| j.name)
+            .collect();
+        assert_eq!(names, ["running.3mf", "kept.3mf"]);
+        // With no footage at all, only the running print is left.
+        s.delete_through(i64::MAX).unwrap();
+        s.forget_unrecorded_jobs().unwrap();
+        assert_eq!(s.recent_jobs().unwrap().len(), 1);
+        assert_eq!(s.total_bytes().unwrap(), 0);
     }
 
     #[test]
@@ -408,79 +340,6 @@ mod tests {
     }
 
     #[test]
-    fn prune_preserves_an_ongoing_job_however_old() {
-        let s = store();
-        s.open_job("old-but-running.3mf", 0).unwrap();
-        s.prune(1000, KEPT).unwrap();
-        assert_eq!(s.recent_jobs().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn prune_keeps_the_newest_finished_jobs_and_drops_the_rest() {
-        let s = store();
-        for i in 0..=KEPT {
-            let start = 100 + i * 10;
-            let id = s.open_job(&format!("job{i}.3mf"), start).unwrap();
-            s.close_job(id, start + 5).unwrap();
-        }
-        s.prune(100_000, KEPT).unwrap();
-        let jobs = s.recent_jobs().unwrap();
-        assert_eq!(jobs.len() as i64, KEPT);
-        assert!(jobs.iter().all(|j| j.name != "job0.3mf"));
-    }
-
-    #[test]
-    fn prune_keeps_and_thins_footage_of_kept_jobs() {
-        let s = store();
-        let id = s.open_job("kept.3mf", 1000).unwrap();
-        s.close_job(id, 1099).unwrap();
-        for ts in 1000..=1099 {
-            s.insert_frame(ts, &[1]).unwrap();
-        }
-        s.prune(5000, KEPT).unwrap();
-        let want: Vec<i64> = (0..100 / THIN_INTERVAL)
-            .map(|i| 1000 + i * THIN_INTERVAL)
-            .collect();
-        assert_eq!(timestamps(&s), want);
-    }
-
-    #[test]
-    fn prune_deletes_frames_outside_every_kept_job() {
-        let s = store();
-        let id = s.open_job("kept.3mf", 1000).unwrap();
-        s.close_job(id, 1099).unwrap();
-        for ts in [1000, 500, 2000] {
-            s.insert_frame(ts, &[1]).unwrap();
-        }
-        s.prune(5000, KEPT).unwrap();
-        assert_eq!(timestamps(&s), vec![1000]);
-    }
-
-    #[test]
-    fn prune_leaves_frames_newer_than_cutoff_at_full_rate() {
-        let s = store();
-        s.open_job("running.3mf", 1000).unwrap();
-        for ts in 1000..=1099 {
-            s.insert_frame(ts, &[1]).unwrap();
-        }
-        s.prune(900, KEPT).unwrap();
-        assert_eq!(timestamps(&s).len(), 100);
-    }
-
-    #[test]
-    fn prune_thins_only_the_expired_part_of_a_running_job() {
-        let s = store();
-        s.open_job("long.3mf", 1000).unwrap();
-        for ts in 1000..=1099 {
-            s.insert_frame(ts, &[1]).unwrap();
-        }
-        s.prune(1050, KEPT).unwrap();
-        let got = timestamps(&s);
-        assert_eq!(got.len() as i64, 50 / THIN_INTERVAL + 50);
-        assert_eq!(*got.last().unwrap(), 1099);
-    }
-
-    #[test]
     fn active_job() {
         let s = store();
         assert_eq!(s.active_job().unwrap(), None);
@@ -497,37 +356,6 @@ mod tests {
                 end: None
             })
         );
-    }
-
-    #[test]
-    fn prune_bounds_how_far_back_an_open_job_protects_footage() {
-        let s = store();
-        const DAY: i64 = 86400;
-        const NOW: i64 = 100 * DAY;
-        s.open_job("stuck-open.3mf", NOW - 30 * DAY).unwrap();
-        for d in (0..=30).rev() {
-            s.insert_frame(NOW - d * DAY, &[1]).unwrap();
-        }
-        s.prune(NOW - DAY, KEPT).unwrap();
-        let got = timestamps(&s);
-        assert!(!got.is_empty());
-        assert!(
-            got[0] > NOW - 29 * DAY,
-            "stuck-open row still exempts old footage: {got:?}"
-        );
-    }
-
-    #[test]
-    fn prune_keeps_a_whole_long_running_print() {
-        let s = store();
-        const HOUR: i64 = 3600;
-        const NOW: i64 = 1_000_000;
-        s.open_job("36h-print.3mf", NOW - 36 * HOUR).unwrap();
-        for h in (0..=36).rev() {
-            s.insert_frame(NOW - h * HOUR, &[1]).unwrap();
-        }
-        s.prune(NOW - 24 * HOUR, KEPT).unwrap();
-        assert_eq!(timestamps(&s)[0], NOW - 36 * HOUR);
     }
 
     #[test]
@@ -562,17 +390,6 @@ mod tests {
         s.close_orphan_jobs().unwrap();
         let jobs = s.recent_jobs().unwrap();
         assert_eq!(jobs[1].end, Some(1000));
-    }
-
-    #[test]
-    fn prune_ignores_all_but_the_newest_open_row() {
-        let s = store();
-        s.open_job("stranded.3mf", 100).unwrap();
-        s.open_job("running.3mf", 9000).unwrap();
-        s.insert_frame(500, &[1]).unwrap();
-        s.insert_frame(9500, &[2]).unwrap();
-        s.prune(5000, KEPT).unwrap();
-        assert_eq!(timestamps(&s), vec![9500]);
     }
 
     // The tracker, which replaces the old polling job watcher.

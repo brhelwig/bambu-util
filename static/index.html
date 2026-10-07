@@ -146,6 +146,8 @@
   .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
   .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.95rem; }
   .row span:first-child { color: var(--muted); }
+  #conn { text-align: right; max-width: 70%; }
+  #printerMsg.bad { color: var(--bad); }
   .ok { color: var(--ok); }
   .bad { color: var(--bad); }
   button {
@@ -177,7 +179,7 @@
   .topicon svg { width: 22px; height: 22px; display: block; }
   /* One grid, so every box lands in the same column whatever the unit beside
      it is called. */
-  .setrow { display: grid; grid-template-columns: 1fr 72px 4.5em; align-items: center; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
+  .setrow { display: grid; grid-template-columns: 1fr 72px 5.5em; align-items: center; gap: 10px; padding: 7px 0; font-size: 0.9rem; }
   .setrow label { color: var(--muted); }
   .setrow .unit { color: var(--muted); }
   .setrow select { grid-column: 2 / -1; width: 100%; }
@@ -396,44 +398,26 @@
     <input type="text" id="setPrinterSerial" placeholder="01P00A000000000"><span class="unit"></span></div>
   <div class="setrow"><label for="setPrinterCode">Access code</label>
     <input type="password" id="setPrinterCode" placeholder="unchanged" autocomplete="off"><span class="unit"></span></div>
-  <div class="notifywhat">From the printer screen: Settings → WLAN for the address and
-    access code, Settings → Device for the serial. The access code is never sent back to
-    this page, so leaving it blank keeps the one already stored.</div>
+  <div class="notifywhat">On the printer: Settings → WLAN for the address and access
+    code, Settings → Device for the serial.</div>
   <button id="printerSave">Save printer</button>
   <div id="printerMsg" class="notifywhat" style="margin:8px 0 0"></div>
+  <button id="printerSaveAnyway" style="display:none; margin-top:8px">Save anyway</button>
 </div>
 <div class="card">
-  <h2>Timings</h2>
-  <div class="setrow"><label for="setRetention">Camera history</label>
-    <input type="number" id="setRetention" min="1" max="720" step="1"><span class="unit">hours</span></div>
-  <div class="setrow"><label for="setKeptJobs">Prints kept</label>
-    <input type="number" id="setKeptJobs" min="0" max="50" step="1"><span class="unit">jobs</span></div>
-  <div class="setrow"><label for="setBedOff">Bed auto-off</label>
+  <h2>General</h2>
+  <div class="setrow"><label for="setCameraStorage">Camera history</label>
+    <input type="number" id="setCameraStorage" min="0.25" max="64" step="0.25"><span class="unit">GB</span></div>
+  <div class="setrow"><label for="setBedOff">Bed heater auto-off</label>
     <input type="number" id="setBedOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
-  <div class="setrow"><label for="setNozzleOff">Nozzle auto-off</label>
+  <div class="setrow"><label for="setNozzleOff">Nozzle heater auto-off</label>
     <input type="number" id="setNozzleOff" min="1" max="10080" step="1"><span class="unit">minutes</span></div>
-  <div class="setrow"><label for="setLampOff">Lamp off after idle</label>
-    <input type="number" id="setLampOff" min="1" max="168" step="1"><span class="unit">hours</span></div>
+  <div class="setrow"><label for="setLampOff">Chamber light auto-off</label>
+    <input type="number" id="setLampOff" min="1" max="168" step="1"><span class="unit">hours idle</span></div>
   <div class="setrow"><label for="setActivityLimit">Event log</label>
     <input type="number" id="setActivityLimit" min="1" max="512" step="1"><span class="unit">MB</span></div>
-  <div class="setrow"><label for="setDatabaseLimit">Database cap</label>
-    <input type="number" id="setDatabaseLimit" min="0" max="65536" step="1"><span class="unit">MB</span></div>
   <div class="setrow"><label for="setSessionLength">Stay logged in</label>
     <input type="number" id="setSessionLength" min="1" max="365" step="1"><span class="unit">days</span></div>
-  <div class="notifywhat">The camera history window is also how far back the scrub
-    bar reaches. Prints kept hold their footage past that window, thinned to one frame
-    every 10 seconds. Auto-off countdowns already running keep the window they started with.
-    The event log keeps the oldest entries only while it is under its size; printer reports
-    are much the largest part of it, so how far back it reaches depends on how much the
-    printer has to say. The figure counts what the log itself holds, not the size of the
-    database file, which also holds the camera buffer and does not shrink on disk when
-    entries go. The database cap is the one bound on that file: 0 switches it off, and
-    with it set the oldest data goes — frames and log entries alike, whichever is older —
-    until the file is under it. It overrules everything above, so it will delete footage
-    that Prints kept was holding on to. It measures the database file, not the small
-    write-ahead file beside it. Staying logged in counts from the last time the page was
-    used, so a phone on the home screen only has to log in again after that long away
-    from it.</div>
   <button id="settingsSave" disabled>Save</button>
   <div id="settingsMsg" class="notifywhat" style="margin:8px 0 0"></div>
 </div>
@@ -818,7 +802,9 @@ function refresh() {
 
 function renderStatus(s) {
   try {
-    $("conn").textContent = s.connected ? "connected" : "disconnected";
+    $("conn").textContent = s.connected ? "connected"
+      : s.configured === false ? "no printer set up (see Settings)"
+      : s.problem || "connecting…";
     $("conn").className = s.connected ? "ok" : "bad";
     $("state").textContent = s.gcodeState;
     $("bed").textContent = `${fmt(s.bedTemp)} / ${fmt(s.bedTarget)}°C`;
@@ -1682,9 +1668,13 @@ async function refreshPrinter() {
   }
 }
 
-$("printerSave").addEventListener("click", async () => {
+// Save first checks the printer answers with these details, and says what is
+// wrong if it doesn't. Save anyway skips that, for a printer that is off.
+async function savePrinter(skipCheck) {
   $("printerSave").disabled = true;
-  $("printerMsg").textContent = "Saving…";
+  $("printerSaveAnyway").style.display = "none";
+  $("printerMsg").className = "notifywhat";
+  $("printerMsg").textContent = skipCheck ? "Saving…" : "Checking the printer answers…";
   try {
     const r = await fetch("/api/printer", {
       method: "POST",
@@ -1693,35 +1683,37 @@ $("printerSave").addEventListener("click", async () => {
         ip: $("setPrinterIP").value.trim(),
         serial: $("setPrinterSerial").value.trim(),
         accessCode: $("setPrinterCode").value,
+        skipCheck,
       }),
     });
-    if (!r.ok) {
-      $("printerMsg").textContent = (await r.text()).trim();
-    } else {
-      // Saved is not the same as reached — the connection row on the printer
-      // screen is what says whether it answered.
-      $("printerMsg").textContent = "Saved. Connecting…";
+    if (r.ok) {
       await refreshPrinter();
-      $("printerMsg").textContent = "Saved. See the connection row for whether it answered.";
+      $("printerMsg").textContent = skipCheck ? "Saved." : "Connected and saved.";
+    } else {
+      $("printerMsg").className = "notifywhat bad";
+      $("printerMsg").textContent = (await r.text()).trim();
+      // Only a printer that didn't answer can be saved regardless.
+      if (r.status === 422) $("printerSaveAnyway").style.display = "";
     }
   } catch (e) {
     $("printerMsg").textContent = `could not save: ${e.message || e}`;
   }
   $("printerSave").disabled = false;
-});
+}
+
+$("printerSave").addEventListener("click", () => savePrinter(false));
+$("printerSaveAnyway").addEventListener("click", () => savePrinter(true));
 
 // --- Settings ---------------------------------------------------------------
 // Each field edits one setting; Save sends the ones that changed. The server
 // validates, and a refused field is put back to the stored value.
 const SETTINGS = [
-  { id: "setRetention", name: "retention", perUnit: 3600 },
-  { id: "setKeptJobs", name: "kept-jobs", perUnit: 1 },
+  { id: "setCameraStorage", name: "camera-storage", perUnit: 1024 },
   { id: "setBedOff", name: "bed-off-after", perUnit: 3600 },
   { id: "setNozzleOff", name: "nozzle-off-after", perUnit: 60 },
   { id: "setLampOff", name: "lamp-off-after", perUnit: 3600 },
   { id: "setSessionLength", name: "session-length", perUnit: 86400 },
   { id: "setActivityLimit", name: "activity-limit", perUnit: 1 },
-  { id: "setDatabaseLimit", name: "database-limit", perUnit: 1 },
 ];
 
 // What the server last told us, so Save knows what actually changed and a
@@ -1729,7 +1721,7 @@ const SETTINGS = [
 let savedSettings = {};
 
 function settingsDirty() {
-  return SETTINGS.some(s => Number($(s.id).value) * s.perUnit !== savedSettings[s.name]);
+  return SETTINGS.some(s => Math.round(Number($(s.id).value) * s.perUnit) !== savedSettings[s.name]);
 }
 
 function markSettingsDirty() {
@@ -1745,7 +1737,8 @@ async function refreshSettings() {
   } catch {
     return; // leave whatever is on screen
   }
-  for (const s of SETTINGS) $(s.id).value = Math.round(savedSettings[s.name] / s.perUnit);
+  // Up to two decimals, for camera history in fractions of a GB.
+  for (const s of SETTINGS) $(s.id).value = +(savedSettings[s.name] / s.perUnit).toFixed(2);
   $("settingsMsg").textContent = "";
   markSettingsDirty();
 }

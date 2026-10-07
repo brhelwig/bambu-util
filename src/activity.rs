@@ -264,6 +264,10 @@ impl Source for Log {
         *bytes = total(&self.db)?;
         Ok(())
     }
+
+    fn total_bytes(&self) -> rusqlite::Result<i64> {
+        total(&self.db)
+    }
 }
 
 #[cfg(test)]

@@ -100,6 +100,10 @@ impl Link {
         self.config.subscribe()
     }
 
+    pub fn mqtt_port(&self) -> u16 {
+        self.ports.mqtt
+    }
+
     pub fn camera_port(&self) -> u16 {
         self.ports.camera
     }

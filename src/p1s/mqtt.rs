@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rumqttc::{
-    AsyncClient, Event, EventLoop, MqttOptions, Outgoing, Packet, QoS, TlsConfiguration, Transport,
+    AsyncClient, ConnectReturnCode, ConnectionError, Event, EventLoop, MqttOptions, Outgoing,
+    Packet, QoS, TlsConfiguration, Transport,
 };
 use serde_json::{Value, json};
 
@@ -27,6 +28,126 @@ const PUSHALL: &str = r#"{"pushing":{"sequence_id":"0","command":"pushall"}}"#;
 /// How long to wait for the broker to confirm before recording that it didn't.
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(15);
+
+/// How long a connection check waits for the printer to answer at all, and
+/// then for its first report.
+const PROBE_CONNECT: Duration = Duration::from_secs(8);
+const PROBE_REPORT: Duration = Duration::from_secs(5);
+
+/// The connection settings for one printer.
+fn options(host: &str, port: u16, access_code: &str) -> MqttOptions {
+    let id = format!("bambu-util-{}", &crate::random_token()[..8]);
+    let mut options = MqttOptions::new(id, host, port);
+    options
+        .set_credentials("bblp", access_code)
+        .set_keep_alive(Duration::from_secs(30))
+        // The first report after connecting is the printer's whole state.
+        .set_max_packet_size(4 << 20, 1 << 20)
+        .set_transport(Transport::tls_with_config(TlsConfiguration::Rustls(
+            super::tls::client_config(),
+        )));
+    options
+}
+
+/// Says in plain words why the printer could not be reached.
+pub fn describe(err: &ConnectionError, host: &str) -> String {
+    use std::io::ErrorKind;
+    let io = |e: &std::io::Error| match e.kind() {
+        ErrorKind::ConnectionRefused => format!(
+            "{host} refused the connection. Check the address, and that LAN mode is on in the printer's network settings."
+        ),
+        ErrorKind::TimedOut | ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable => {
+            format!(
+                "No answer from {host}. Check the address, and that the printer is on and on this network."
+            )
+        }
+        ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::UnexpectedEof => {
+            "The printer closed the connection. Check the access code.".into()
+        }
+        _ => format!("Could not reach {host}: {e}"),
+    };
+    match err {
+        ConnectionError::NetworkTimeout => {
+            format!(
+                "No answer from {host}. Check the address, and that the printer is on and on this network."
+            )
+        }
+        ConnectionError::Io(e) => io(e),
+        ConnectionError::Tls(rumqttc::TlsError::Io(e)) => io(e),
+        ConnectionError::Tls(e) => {
+            format!("{host} answered, but not like a Bambu printer ({e}). Check the address.")
+        }
+        ConnectionError::ConnectionRefused(
+            ConnectReturnCode::BadUserNamePassword | ConnectReturnCode::NotAuthorized,
+        ) => "The printer rejected the access code.".into(),
+        ConnectionError::ConnectionRefused(code) => {
+            format!("The printer refused the connection ({code:?}).")
+        }
+        other => format!("Lost the connection to the printer: {other}"),
+    }
+}
+
+/// Connects once with `conf` and waits for the printer's first report, so a
+/// wrong address, access code or serial is caught before it is saved.
+pub async fn probe(host: &str, port: u16, serial: &str, access_code: &str) -> Result<(), String> {
+    let mut opts = options(host, port, access_code);
+    opts.set_clean_session(true);
+    let (client, mut events) = AsyncClient::new(opts, 8);
+    events
+        .network_options
+        .set_connection_timeout(PROBE_CONNECT.as_secs());
+    let report_topic = format!("device/{serial}/report");
+    let result = async {
+        // Connected and signed in.
+        loop {
+            match events.poll().await {
+                Ok(Event::Incoming(Packet::ConnAck(_))) => break,
+                Ok(_) => {}
+                Err(err) => return Err(describe(&err, host)),
+            }
+        }
+        client
+            .subscribe(&report_topic, QoS::AtMostOnce)
+            .await
+            .map_err(|e| e.to_string())?;
+        client
+            .publish(
+                format!("device/{serial}/request"),
+                QoS::AtMostOnce,
+                false,
+                PUSHALL,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let wrong_serial = || {
+            format!(
+                "Signed in, but the printer didn't answer for serial {serial}. Check the serial."
+            )
+        };
+        let answer = async {
+            loop {
+                match events.poll().await {
+                    Ok(Event::Incoming(Packet::Publish(msg))) if msg.topic == report_topic => {
+                        return Ok(());
+                    }
+                    Ok(_) => {}
+                    // A printer drops a client that asks about another serial.
+                    Err(_) => return Err(wrong_serial()),
+                }
+            }
+        };
+        tokio::time::timeout(PROBE_REPORT, answer)
+            .await
+            .unwrap_or_else(|_| Err(wrong_serial()))
+    };
+    let result = tokio::time::timeout(PROBE_CONNECT + PROBE_REPORT, result)
+        .await
+        .unwrap_or_else(|_| {
+            Err(format!("No answer from {host}. Check the address, and that the printer is on and on this network."))
+        });
+    let _ = client.try_disconnect();
+    result
+}
 
 /// A command payload: `{namespace: {sequence_id, command, ...fields}}`, keys in
 /// alphabetical order.
@@ -83,6 +204,7 @@ struct Pending {
 }
 
 struct Shared {
+    host: String,
     serial: String,
     cache: StateCache,
     log: Log,
@@ -115,18 +237,9 @@ impl Client {
         log: Log,
         clock: Clock,
     ) -> Client {
-        let id = format!("bambu-util-{}", &crate::random_token()[..8]);
-        let mut options = MqttOptions::new(id, host, port);
-        options
-            .set_credentials("bblp", access_code)
-            .set_keep_alive(Duration::from_secs(30))
-            // The first report after connecting is the printer's whole state.
-            .set_max_packet_size(4 << 20, 1 << 20)
-            .set_transport(Transport::tls_with_config(TlsConfiguration::Rustls(
-                super::tls::client_config(),
-            )));
-        let (client, events) = AsyncClient::new(options, 64);
+        let (client, events) = AsyncClient::new(options(host, port, access_code), 64);
         let shared = Arc::new(Shared {
+            host: host.to_string(),
             serial: serial.to_string(),
             cache,
             log,
@@ -345,7 +458,7 @@ async fn run(shared: Arc<Shared>, mut events: EventLoop) {
                     shared.on_event(event);
                 }
                 Err(err) => {
-                    shared.cache.set_connected(false);
+                    shared.cache.set_disconnected(describe(&err, &shared.host));
                     tracing::info!("mqtt: {err}; retrying in {delay:?}");
                     tokio::time::sleep(delay).await;
                     delay = (delay * 2).min(MAX_RECONNECT_DELAY);

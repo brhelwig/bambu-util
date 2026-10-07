@@ -6,7 +6,6 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
 use super::{App, Query, json_reply, text};
-use crate::clock;
 use crate::p1s;
 
 /// How far before a running print's start the scrub bar begins, so the whole
@@ -14,7 +13,7 @@ use crate::p1s;
 pub const JOB_LEAD_IN: i64 = 5 * 60;
 
 /// The unix second a served frame was actually captured: the first at or after
-/// the one requested, which retention gaps can make hours later.
+/// the one requested, which gaps in the footage can make hours later.
 pub const FRAME_TIMESTAMP: &str = "X-Frame-Timestamp";
 
 pub async fn range(State(app): State<App>) -> Response {
@@ -24,30 +23,28 @@ pub async fn range(State(app): State<App>) -> Response {
     }
 }
 
-/// The span the scrub bar covers. Footage held beyond it — kept prints'
-/// thinned timelapses — is reached by picking a job.
+/// The span the scrub bar covers: everything stored, or just the running
+/// print while there is one. Earlier prints are reached by picking a job.
 pub fn range_of(app: &App) -> rusqlite::Result<Value> {
     let (mut oldest, newest) = app.store.range()?;
-    if let (Some(old), Some(new)) = (oldest, newest) {
-        let start = seek_start(app);
-        if start > old {
-            // A print that started after the last recorded frame (camera down
-            // when it began) would otherwise put the start past the end.
-            oldest = Some(start.min(new));
-        }
+    if let (Some(old), Some(new), Some(start)) = (oldest, newest, running_job_start(app))
+        && start > old
+    {
+        // A print that started after the last recorded frame (camera down
+        // when it began) would otherwise put the start past the end.
+        oldest = Some(start.min(new));
     }
     Ok(json!({"oldest": oldest, "newest": newest}))
 }
 
-/// Just before the running print, or one retention window back when idle.
-fn seek_start(app: &App) -> i64 {
+/// Just before the running print began, if one is running.
+fn running_job_start(app: &App) -> Option<i64> {
     let snap = app.cache.snapshot();
-    if p1s::job_active(p1s::gcode_state(&snap.fields))
-        && let Ok(Some(job)) = app.store.active_job()
-    {
-        return job.start - JOB_LEAD_IN;
+    if !p1s::job_active(p1s::gcode_state(&snap.fields)) {
+        return None;
     }
-    clock::secs((app.clock)()) - app.settings.values().retention
+    let job = app.store.active_job().ok()??;
+    Some(job.start - JOB_LEAD_IN)
 }
 
 pub async fn frame(State(app): State<App>, query: Query) -> Response {
