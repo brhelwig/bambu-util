@@ -127,10 +127,12 @@ const states = [
   {
     name: "08-disconnected",
     title: "Disconnected",
-    note: "The printer is unreachable. Every action is refused rather than sent into the dark.",
+    note: "The printer is unreachable, and the Connection row says why. Every action is refused rather than sent into the dark.",
     status: {
       ...idle,
       connected: false,
+      configured: true,
+      problem: "No answer from 192.0.2.10. Check the address, and that the printer is on and on this network.",
       actionsAllowed: false,
       chamberLight: null,
       lampOffIn: null,
