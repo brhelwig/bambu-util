@@ -26,13 +26,13 @@ unless they match the printer's state.
 - AMS trays (colour, material, nozzle range) and desiccant grade (A–E)
 - Printer errors shown as readable messages, translated from HMS and
   `print_error` codes
-- Chamber camera at ~1 fps, recorded into a rolling buffer (24h by default).
-  The view follows the live image; a scrub bar goes back through the buffer.
-  During a print it starts 5 minutes before the print did.
+- Chamber camera at ~1 fps, recorded into a rolling buffer (1 GB by
+  default; the oldest frames go first). The view follows the live image; a
+  scrub bar goes back through the buffer. During a print it starts 5 minutes
+  before the print did.
 - Recent prints are listed under the camera and can be played back as a
-  timelapse at 30x, 60x, 300x or 600x. The most recent finished prints (5 by
-  default) keep their footage past the buffer window, thinned to one frame
-  every 10 seconds.
+  timelapse at 30x, 60x, 300x or 600x, for as long as their footage is still
+  in the buffer.
 
 bambu-util keeps the camera connection open the whole time it runs. The
 printer serves only one camera client, so Bambu Studio's camera view won't
