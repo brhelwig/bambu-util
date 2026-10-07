@@ -371,16 +371,18 @@ async fn settings_are_served_and_set_in_their_units() {
     let s = h.get("/api/settings").await.json();
     assert_eq!(
         s,
-        json!({"retention": 86400, "kept-jobs": 5, "bed-off-after": 86400, "nozzle-off-after": 900,
-               "lamp-off-after": 28800, "activity-limit": 64, "database-limit": 0, "session-length": 1209600,
+        json!({"camera-storage": 1024, "bed-off-after": 86400, "nozzle-off-after": 900,
+               "lamp-off-after": 28800, "activity-limit": 64, "session-length": 1209600,
                "dashboard": ""})
     );
     assert_eq!(
-        h.post("/api/settings/retention?value=7200").await.status,
+        h.post("/api/settings/camera-storage?value=2048")
+            .await
+            .status,
         StatusCode::NO_CONTENT
     );
     assert_eq!(
-        h.post("/api/settings/database-limit?value=1024")
+        h.post("/api/settings/bed-off-after?value=7200")
             .await
             .status,
         StatusCode::NO_CONTENT
@@ -394,11 +396,11 @@ async fn settings_are_served_and_set_in_their_units() {
     let s = h.get("/api/settings").await.json();
     assert_eq!(
         (
-            s["retention"].clone(),
-            s["database-limit"].clone(),
+            s["camera-storage"].clone(),
+            s["bed-off-after"].clone(),
             s["dashboard"].clone()
         ),
-        (json!(7200), json!(1024), json!("camCard,jobCard"))
+        (json!(2048), json!(7200), json!("camCard,jobCard"))
     );
     assert_eq!(
         h.post("/api/settings/dashboard?text=").await.status,
@@ -415,15 +417,15 @@ async fn bad_setting_writes_are_refused() {
             "/api/settings/chamber-temperature?value=3600",
             "settings: unknown setting \"chamber-temperature\"",
         ),
-        ("/api/settings/retention?value=soon", "invalid value"),
-        ("/api/settings/retention", "invalid value"),
+        ("/api/settings/camera-storage?value=lots", "invalid value"),
+        ("/api/settings/camera-storage", "invalid value"),
         (
-            "/api/settings/retention?value=1",
-            "retention must be between 1h0m0s and 720h0m0s",
+            "/api/settings/camera-storage?value=1",
+            "camera-storage must be between 64 MB and 65536 MB",
         ),
         (
-            "/api/settings/kept-jobs?value=5000",
-            "kept-jobs must be between 0 and 50",
+            "/api/settings/bed-off-after?value=1",
+            "bed-off-after must be between 1h0m0s and 168h0m0s",
         ),
         (
             "/api/settings/printer-ip?text=10.0.0.1",
@@ -437,7 +439,7 @@ async fn bad_setting_writes_are_refused() {
             "{uri}"
         );
     }
-    assert_eq!(h.get("/api/settings").await.json()["retention"], 86400);
+    assert_eq!(h.get("/api/settings").await.json()["camera-storage"], 1024);
 }
 
 #[tokio::test]
@@ -503,6 +505,68 @@ async fn setting_up_a_printer_connects_to_it_and_keeps_its_secret() {
     assert_eq!(again.get("/api/printer").await.json()["configured"], true);
 }
 
+#[tokio::test]
+async fn a_printer_that_does_not_answer_is_not_saved_and_says_why() {
+    let printer =
+        crate::testing::printer::FakePrinter::start("127.0.0.1", 0, 0, "SERIAL1", "secret").await;
+    let h = Harness::start_in(
+        crate::testing::tempdir(),
+        crate::auth::Decision::Disabled,
+        Some(printer),
+    )
+    .await;
+    let save = |ip: &str, serial: &str, code: &str| {
+        format!(r#"{{"ip":"{ip}","serial":"{serial}","accessCode":"{code}"}}"#)
+    };
+    for (body, want) in [
+        (
+            save("127.0.0.1", "SERIAL1", "wrong"),
+            "The printer rejected the access code.",
+        ),
+        (
+            save("127.0.0.1", "SERIAL2", "secret"),
+            "Signed in, but the printer didn't answer for serial SERIAL2. Check the serial.",
+        ),
+        (
+            // Nothing listens there.
+            save("127.0.0.2", "SERIAL1", "secret"),
+            "127.0.0.2 refused the connection. Check the address, and that LAN mode is on in the printer's network settings.",
+        ),
+    ] {
+        let r = h.request("POST", "/api/printer", &body).await;
+        assert_eq!(
+            (r.status, r.text()),
+            (StatusCode::UNPROCESSABLE_ENTITY, format!("{want}\n")),
+            "{body}"
+        );
+    }
+    assert_eq!(h.get("/api/printer").await.json()["configured"], false);
+
+    // Saved anyway, the status says why it isn't connected.
+    let r = h
+        .request(
+            "POST",
+            "/api/printer",
+            r#"{"ip":"127.0.0.1","serial":"SERIAL1","accessCode":"wrong","skipCheck":true}"#,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    h.wait(|s| s.problem.is_some()).await;
+    let status = h.get("/api/status").await.json();
+    assert_eq!(
+        (
+            status["connected"].clone(),
+            status["configured"].clone(),
+            status["problem"].clone()
+        ),
+        (
+            json!(false),
+            json!(true),
+            json!("The printer rejected the access code.")
+        )
+    );
+}
+
 // Camera.
 
 #[tokio::test]
@@ -515,19 +579,18 @@ async fn frames_jobs_and_the_range() {
     let now = crate::clock::secs(crate::clock::system()());
     let store =
         crate::history::Store::new(crate::db::Db::open(h.dir.join(crate::DB_FILE)).unwrap());
-    store.insert_frame(now - 48 * 3600, &[1]).unwrap(); // older than the window
+    store.insert_frame(now - 48 * 3600, &[1]).unwrap();
     store.insert_frame(now - 100, PIXEL_JPEG).unwrap();
     store.insert_frame(now - 50, &[3]).unwrap();
     let id = store.open_job("benchy.gcode", now - 200).unwrap();
     store.close_job(id, now - 10).unwrap();
 
     let range = h.get("/camera/history/range").await.json();
-    let oldest = range["oldest"].as_i64().unwrap();
-    assert!(
-        (now - 86400 - 2..=now - 86400 + 2).contains(&oldest),
-        "clamped to the retention window: {range}"
+    assert_eq!(
+        range,
+        json!({"oldest": now - 48 * 3600, "newest": now - 50}),
+        "idle, the bar reaches back to the oldest frame"
     );
-    assert_eq!(range["newest"], now - 50);
 
     let r = h
         .get(&format!("/camera/history/frame?ts={}", now - 120))
@@ -637,7 +700,7 @@ async fn cross_origin_posts_are_refused() {
     let post = |headers: &[(&str, &str)]| {
         let mut req = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/settings/kept-jobs?value=3");
+            .uri("/api/settings/camera-storage?value=512");
         for (k, v) in headers {
             req = req.header(*k, *v);
         }

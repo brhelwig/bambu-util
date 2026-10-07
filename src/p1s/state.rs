@@ -11,6 +11,9 @@ use super::Fields;
 pub struct Snapshot {
     pub fields: Arc<Fields>,
     pub connected: bool,
+    /// Why the last attempt to reach the printer failed, in plain words.
+    /// Cleared once it connects.
+    pub problem: Option<Arc<str>>,
 }
 
 /// Merges partial "print" reports into a full picture (after the initial
@@ -48,8 +51,20 @@ impl StateCache {
 
     /// A disconnect keeps the fields, stale but visible.
     pub fn set_connected(&self, connected: bool) {
-        self.tx
-            .send_if_modified(|s| std::mem::replace(&mut s.connected, connected) != connected);
+        self.tx.send_if_modified(|s| {
+            let cleared = connected && s.problem.take().is_some();
+            std::mem::replace(&mut s.connected, connected) != connected || cleared
+        });
+    }
+
+    /// Marks the printer unreachable, and says why.
+    pub fn set_disconnected(&self, problem: String) {
+        self.tx.send_if_modified(|s| {
+            let changed = s.connected || s.problem.as_deref() != Some(problem.as_str());
+            s.connected = false;
+            s.problem = Some(problem.into());
+            changed
+        });
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -131,6 +146,16 @@ mod tests {
         c.merge(&obj(json!({"a": 1})));
         c.set_connected(false);
         assert_eq!(c.snapshot().fields["a"], 1, "a disconnect keeps the fields");
+        c.set_disconnected("no answer".into());
+        assert_eq!(c.snapshot().problem.as_deref(), Some("no answer"));
+        rx.mark_unchanged();
+        c.set_disconnected("no answer".into());
+        assert!(
+            !rx.has_changed().unwrap(),
+            "the same problem should not wake watchers"
+        );
+        c.set_connected(true);
+        assert_eq!(c.snapshot().problem, None, "connecting clears the problem");
         c.reset();
         assert_eq!(c.snapshot(), Snapshot::default());
     }

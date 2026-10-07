@@ -1,8 +1,8 @@
-//! Caps the database file size by deleting the oldest data across all sources
-//! (camera frames, event log), overriding their own retention. Freed pages are
-//! returned to the disk with incremental vacuum, a chunk at a time so the
-//! database isn't locked for long. The database is created in incremental
-//! auto-vacuum mode, so there is nothing to convert first.
+//! Holds what its sources store (in practice the camera frames) to a number of
+//! bytes by deleting the oldest first. Freed pages are returned to the disk
+//! with incremental vacuum, a chunk at a time so the database isn't locked for
+//! long. The database is created in incremental auto-vacuum mode, so there is
+//! nothing to convert first.
 
 use crate::db::Db;
 
@@ -22,6 +22,8 @@ pub trait Source: Send + Sync {
     fn oldest(&self, n: usize) -> rusqlite::Result<Vec<Item>>;
     /// Removes every item up to and including `id`.
     fn delete_through(&self, id: i64) -> rusqlite::Result<()>;
+    /// How many bytes it holds, counted the way `oldest` counts each item.
+    fn total_bytes(&self) -> rusqlite::Result<i64>;
 }
 
 /// How far under the limit a pass cuts.
@@ -55,14 +57,12 @@ impl Enforcer {
         }
     }
 
-    /// Runs a single pass.
+    /// Runs a single pass. Whatever else freed space since the last one (the
+    /// event log trims itself) is returned to the disk too.
     pub fn once(&self) -> Result<(), String> {
         let limit = (self.limit)();
-        if limit <= 0 {
-            return Ok(()); // switched off: nothing is deleted and nothing is compacted
-        }
-        if self.size()? <= limit {
-            return Ok(());
+        if limit <= 0 || self.size()? <= limit {
+            return self.reclaim();
         }
         let target = (limit as f64 * LOW_WATER) as i64;
         for _ in 0..MAX_ROUNDS {
@@ -76,7 +76,7 @@ impl Enforcer {
                 let after = self.size()?;
                 if after > limit {
                     tracing::warn!(
-                        "capacity: database is {} MB against a {} MB limit and there is nothing left to delete",
+                        "capacity: {} MB stored against a {} MB limit and there is nothing left to delete",
                         after >> 20,
                         limit >> 20
                     );
@@ -87,16 +87,28 @@ impl Enforcer {
         Ok(())
     }
 
-    /// The main database file's size (not counting the WAL).
+    /// What the sources hold between them.
     fn size(&self) -> Result<i64, String> {
+        let mut total = 0;
+        for source in &self.sources {
+            total += source
+                .total_bytes()
+                .map_err(|e| format!("{}: {e}", source.name()))?;
+        }
+        Ok(total)
+    }
+
+    /// The database file's size (not counting the WAL).
+    #[cfg(test)]
+    fn file_size(&self) -> i64 {
         let conn = self.db.lock();
         let pages: i64 = conn
             .query_row("PRAGMA page_count", [], |r| r.get(0))
-            .map_err(|e| format!("page count: {e}"))?;
+            .unwrap();
         let size: i64 = conn
             .query_row("PRAGMA page_size", [], |r| r.get(0))
-            .map_err(|e| format!("page size: {e}"))?;
-        Ok(pages * size)
+            .unwrap();
+        pages * size
     }
 
     /// Removes the oldest items across all sources until `want` bytes are
@@ -206,17 +218,20 @@ mod tests {
         fn size(&self) -> i64 {
             self.enforcer.size().unwrap()
         }
+        fn file_size(&self) -> i64 {
+            self.enforcer.file_size()
+        }
     }
 
     #[test]
     fn deleting_alone_does_not_shrink_the_file_and_reclaiming_does() {
         let f = fixture();
         f.fill();
-        let before = f.size();
+        let before = f.file_size();
         f.frames.delete_through(300).unwrap();
-        assert_eq!(f.size(), before);
+        assert_eq!(f.file_size(), before);
         f.enforcer.reclaim().unwrap();
-        assert!(f.size() < before);
+        assert!(f.file_size() < before);
     }
 
     #[test]
@@ -245,6 +260,16 @@ mod tests {
     }
 
     #[test]
+    fn the_file_shrinks_with_what_it_holds() {
+        let f = fixture();
+        f.fill();
+        let before = f.file_size();
+        f.limit.store(f.size() / 4, Ordering::SeqCst);
+        f.enforcer.once().unwrap();
+        assert!(f.file_size() < before / 2);
+    }
+
+    #[test]
     fn under_its_limit_or_off_nothing_is_touched() {
         let f = fixture();
         f.fill();
@@ -268,19 +293,12 @@ mod tests {
     }
 
     #[test]
-    fn the_measurement_matches_the_file_on_disk() {
-        let path = crate::testing::tempdir().join("m.sqlite");
-        let db = Db::open(&path).unwrap();
-        Store::new(db.clone())
-            .insert_frame(1, &[0u8; 100_000])
-            .unwrap();
-        db.lock()
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
-            .unwrap();
-        let e = Enforcer::new(db, || 0, vec![]);
+    fn measures_what_the_sources_hold() {
+        let f = fixture();
+        f.fill();
         assert_eq!(
-            e.size().unwrap(),
-            std::fs::metadata(&path).unwrap().len() as i64
+            f.size(),
+            400 * 8000 + 40 * (2000 + "report".len() as i64 + 64)
         );
     }
 
@@ -296,6 +314,9 @@ mod tests {
             }
             fn delete_through(&self, _: i64) -> rusqlite::Result<()> {
                 Ok(())
+            }
+            fn total_bytes(&self) -> rusqlite::Result<i64> {
+                Ok(1 << 20)
             }
         }
         let f = fixture();

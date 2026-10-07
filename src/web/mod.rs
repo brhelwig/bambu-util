@@ -131,6 +131,8 @@ pub fn status_of(app: &App) -> Value {
     let allowed = |action| p1s::print_action_allowed(connected, state, action).is_ok();
     json!({
         "connected": connected,
+        "configured": app.link.config().complete(),
+        "problem": snap.problem.as_deref(),
         "gcodeState": state,
         "actionsAllowed": p1s::action_allowed(connected, state).is_ok(),
         "bedTemp": get("bed_temper"),

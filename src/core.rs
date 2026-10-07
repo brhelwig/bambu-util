@@ -363,6 +363,7 @@ mod tests {
         Snapshot {
             fields: Arc::new(fields.as_object().unwrap().clone()),
             connected,
+            problem: None,
         }
     }
 

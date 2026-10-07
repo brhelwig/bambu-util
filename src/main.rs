@@ -44,7 +44,7 @@ const DB_FILE: &str = "bambu-util.sqlite";
 /// starts afresh.
 const OLD_DB_FILE: &str = "bambu-util.db";
 
-/// How often retention and the size cap run.
+/// How often the camera footage is held to its size.
 const HOUSEKEEPING_EVERY: Duration = Duration::from_secs(5 * 60);
 
 /// The assembled program — everything below `main` — so it can be started
@@ -151,14 +151,7 @@ pub async fn start(
     tokio::spawn(hub.run());
     tokio::spawn(app.live.clone().run(app.clone()));
     tokio::spawn(logins.run_sweeper(clock.clone()));
-    tokio::spawn(housekeeping(
-        db,
-        store,
-        events,
-        settings,
-        jobs_changed,
-        clock,
-    ));
+    tokio::spawn(housekeeping(db, store, settings, jobs_changed));
 
     let mut router = web::router(app);
     if let Some(auth) = &authenticator {
@@ -175,39 +168,31 @@ pub async fn start(
     })
 }
 
-/// Retention, then the size cap — which only bites when what retention keeps
-/// is still too much — every few minutes, forever.
+/// Holds the camera footage to its size, oldest first, every few minutes,
+/// forever.
 async fn housekeeping(
     db: db::Db,
     store: history::Store,
-    events: activity::Log,
     settings: settings::Settings,
     jobs_changed: Arc<Notify>,
-    clock: Clock,
 ) {
     let limits = settings.clone();
     let enforcer = Arc::new(capacity::Enforcer::new(
         db,
-        move || limits.values().database_limit,
-        vec![Box::new(store.clone()), Box::new(events)],
+        move || limits.values().camera_storage,
+        vec![Box::new(store.clone())],
     ));
     let mut tick = tokio::time::interval(HOUSEKEEPING_EVERY);
     tick.tick().await;
     loop {
         tick.tick().await;
-        let (store, settings, enforcer, clock) = (
-            store.clone(),
-            settings.clone(),
-            enforcer.clone(),
-            clock.clone(),
-        );
+        let (store, enforcer) = (store.clone(), enforcer.clone());
         let done = tokio::task::spawn_blocking(move || {
-            let v = settings.values();
-            if let Err(err) = store.prune(clock::secs(clock()) - v.retention, v.kept_jobs) {
-                tracing::warn!("history: prune: {err}");
-            }
             if let Err(err) = enforcer.once() {
                 tracing::warn!("capacity: {err}");
+            }
+            if let Err(err) = store.forget_unrecorded_jobs() {
+                tracing::warn!("history: forgetting jobs: {err}");
             }
         })
         .await;

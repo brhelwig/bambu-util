@@ -10,13 +10,11 @@ use rusqlite::params;
 use crate::db::Db;
 
 // Names of the settings, as the page sends them.
-pub const RETENTION: &str = "retention";
-pub const KEPT_JOBS: &str = "kept-jobs";
+pub const CAMERA_STORAGE: &str = "camera-storage";
 pub const BED_OFF_AFTER: &str = "bed-off-after";
 pub const NOZZLE_OFF_AFTER: &str = "nozzle-off-after";
 pub const LAMP_OFF_AFTER: &str = "lamp-off-after";
 pub const ACTIVITY_LIMIT: &str = "activity-limit";
-pub const DATABASE_LIMIT: &str = "database-limit";
 pub const SESSION_LENGTH: &str = "session-length";
 
 pub const PRINTER_IP: &str = "printer-ip";
@@ -44,14 +42,12 @@ pub struct Values {
     pub access_code: String,
     pub dashboard: String,
 
-    pub retention: i64,
-    pub kept_jobs: i64,
+    /// Bytes of camera frames kept, across every print; the oldest go first.
+    pub camera_storage: i64,
     pub bed_off_after: i64,
     pub nozzle_off_after: i64,
     pub lamp_off_after: i64,
     pub activity_limit: i64,
-    /// Zero when the cap is off.
-    pub database_limit: i64,
     pub session_length: i64,
 }
 
@@ -64,13 +60,11 @@ impl Default for Values {
             printer_serial: String::new(),
             access_code: String::new(),
             dashboard: String::new(),
-            retention: 24 * 3600,
-            kept_jobs: 5,
+            camera_storage: 1024 * BYTES_PER_MB,
             bed_off_after: 24 * 3600,
             nozzle_off_after: 15 * 60,
             lamp_off_after: 8 * 3600,
             activity_limit: 64 * BYTES_PER_MB,
-            database_limit: 0,
             session_length: 14 * 24 * 3600,
         }
     }
@@ -78,48 +72,35 @@ impl Default for Values {
 
 #[derive(Clone, Copy)]
 enum Unit {
-    Count,
     Seconds,
     Megabytes,
 }
 
-/// A numeric setting's unit and allowed range. `off_at_zero` settings also
-/// accept 0, meaning off.
+/// A numeric setting's unit and allowed range.
 #[derive(Clone, Copy)]
 struct Spec {
     unit: Unit,
     min: i64,
     max: i64,
-    off_at_zero: bool,
 }
 
 impl Spec {
     const fn new(unit: Unit, min: i64, max: i64) -> Spec {
-        Spec {
-            unit,
-            min,
-            max,
-            off_at_zero: false,
-        }
+        Spec { unit, min, max }
     }
 
     fn allows(&self, value: i64) -> bool {
-        (self.off_at_zero && value == 0) || (self.min..=self.max).contains(&value)
+        (self.min..=self.max).contains(&value)
     }
 
     /// Says what the setting will take, in the units it is written in.
     fn refuse(&self, name: &str) -> String {
         let (min, max) = (self.show(self.min), self.show(self.max));
-        if self.off_at_zero {
-            format!("{name} must be 0 to switch it off, or between {min} and {max}")
-        } else {
-            format!("{name} must be between {min} and {max}")
-        }
+        format!("{name} must be between {min} and {max}")
     }
 
     fn show(&self, value: i64) -> String {
         match self.unit {
-            Unit::Count => value.to_string(),
             Unit::Seconds => show_duration(value),
             Unit::Megabytes => format!("{value} MB"),
         }
@@ -142,18 +123,13 @@ const DAY: i64 = 24 * 3600;
 
 fn spec(name: &str) -> Option<Spec> {
     Some(match name {
-        RETENTION => Spec::new(Unit::Seconds, 3600, 30 * DAY),
-        KEPT_JOBS => Spec::new(Unit::Count, 0, 50),
+        CAMERA_STORAGE => Spec::new(Unit::Megabytes, 64, 64 * 1024),
         // The bed and lamp are set in whole hours on the Settings screen.
         BED_OFF_AFTER => Spec::new(Unit::Seconds, 3600, 7 * DAY),
         NOZZLE_OFF_AFTER => Spec::new(Unit::Seconds, 60, 7 * DAY),
         LAMP_OFF_AFTER => Spec::new(Unit::Seconds, 3600, 7 * DAY),
         ACTIVITY_LIMIT => Spec::new(Unit::Megabytes, 1, 512),
         SESSION_LENGTH => Spec::new(Unit::Seconds, DAY, 365 * DAY),
-        DATABASE_LIMIT => Spec {
-            off_at_zero: true,
-            ..Spec::new(Unit::Megabytes, 256, 64 * 1024)
-        },
         _ => return None,
     })
 }
@@ -247,13 +223,11 @@ impl Settings {
             printer_serial: text(PRINTER_SERIAL),
             access_code: text(PRINTER_ACCESS_CODE),
             dashboard: text(DASHBOARD),
-            retention: num(RETENTION, d.retention),
-            kept_jobs: num(KEPT_JOBS, d.kept_jobs),
+            camera_storage: num(CAMERA_STORAGE, d.camera_storage / BYTES_PER_MB) * BYTES_PER_MB,
             bed_off_after: num(BED_OFF_AFTER, d.bed_off_after),
             nozzle_off_after: num(NOZZLE_OFF_AFTER, d.nozzle_off_after),
             lamp_off_after: num(LAMP_OFF_AFTER, d.lamp_off_after),
             activity_limit: num(ACTIVITY_LIMIT, d.activity_limit / BYTES_PER_MB) * BYTES_PER_MB,
-            database_limit: num(DATABASE_LIMIT, d.database_limit / BYTES_PER_MB) * BYTES_PER_MB,
             session_length: num(SESSION_LENGTH, d.session_length),
         };
         *self.values.write().unwrap_or_else(|p| p.into_inner()) = v;
@@ -277,15 +251,13 @@ mod tests {
     #[test]
     fn set_is_read_back_in_its_units() {
         let s = store();
-        s.set(RETENTION, 7200).unwrap();
-        s.set(KEPT_JOBS, 0).unwrap();
+        s.set(CAMERA_STORAGE, 2048).unwrap();
         s.set(ACTIVITY_LIMIT, 2).unwrap();
-        s.set(DATABASE_LIMIT, 256).unwrap();
+        s.set(BED_OFF_AFTER, 7200).unwrap();
         let v = s.values();
-        assert_eq!(v.retention, 7200);
-        assert_eq!(v.kept_jobs, 0);
+        assert_eq!(v.camera_storage, 2048 * BYTES_PER_MB);
         assert_eq!(v.activity_limit, 2 * BYTES_PER_MB);
-        assert_eq!(v.database_limit, 256 * BYTES_PER_MB);
+        assert_eq!(v.bed_off_after, 7200);
     }
 
     #[test]
@@ -302,24 +274,20 @@ mod tests {
     fn refusals_read_in_the_settings_units() {
         let s = store();
         assert_eq!(
-            s.set(RETENTION, 10).unwrap_err(),
-            "retention must be between 1h0m0s and 720h0m0s"
+            s.set(BED_OFF_AFTER, 10).unwrap_err(),
+            "bed-off-after must be between 1h0m0s and 168h0m0s"
         );
         assert_eq!(
             s.set(NOZZLE_OFF_AFTER, 1).unwrap_err(),
             "nozzle-off-after must be between 1m0s and 168h0m0s"
         );
         assert_eq!(
-            s.set(KEPT_JOBS, 51).unwrap_err(),
-            "kept-jobs must be between 0 and 50"
+            s.set(CAMERA_STORAGE, 10).unwrap_err(),
+            "camera-storage must be between 64 MB and 65536 MB"
         );
         assert_eq!(
             s.set(ACTIVITY_LIMIT, 0).unwrap_err(),
             "activity-limit must be between 1 MB and 512 MB"
-        );
-        assert_eq!(
-            s.set(DATABASE_LIMIT, 10).unwrap_err(),
-            "database-limit must be 0 to switch it off, or between 256 MB and 65536 MB"
         );
         assert_eq!(
             s.set("nope", 1).unwrap_err(),
@@ -329,22 +297,16 @@ mod tests {
     }
 
     #[test]
-    fn database_limit_zero_is_off() {
-        let s = store();
-        s.set(DATABASE_LIMIT, 1024).unwrap();
-        s.set(DATABASE_LIMIT, 0).unwrap();
-        assert_eq!(s.values().database_limit, 0);
-    }
-
-    #[test]
     fn invalid_stored_values_fall_back() {
         let db = Db::memory();
         db.lock()
-            .execute_batch("INSERT INTO settings VALUES ('retention', 'x'), ('kept-jobs', '999')")
+            .execute_batch(
+                "INSERT INTO settings VALUES ('camera-storage', 'x'), ('lamp-off-after', '1')",
+            )
             .unwrap();
         let v = Settings::new(db).unwrap().values();
-        assert_eq!(v.retention, Values::default().retention);
-        assert_eq!(v.kept_jobs, Values::default().kept_jobs);
+        assert_eq!(v.camera_storage, Values::default().camera_storage);
+        assert_eq!(v.lamp_off_after, Values::default().lamp_off_after);
     }
 
     #[test]
@@ -360,7 +322,7 @@ mod tests {
             s.set_text(DASHBOARD, &"x".repeat(513)).unwrap_err(),
             "dashboard is too long"
         );
-        assert!(s.set_text(RETENTION, "1").is_err());
-        assert!(is_text(PRINTER_ACCESS_CODE) && !is_text(RETENTION));
+        assert!(s.set_text(CAMERA_STORAGE, "1").is_err());
+        assert!(is_text(PRINTER_ACCESS_CODE) && !is_text(CAMERA_STORAGE));
     }
 }

@@ -127,10 +127,12 @@ const states = [
   {
     name: "08-disconnected",
     title: "Disconnected",
-    note: "The printer is unreachable. Every action is refused rather than sent into the dark.",
+    note: "The printer is unreachable, and the Connection row says why. Every action is refused rather than sent into the dark.",
     status: {
       ...idle,
       connected: false,
+      configured: true,
+      problem: "No answer from 192.0.2.10. Check the address, and that the printer is on and on this network.",
       actionsAllowed: false,
       chamberLight: null,
       lampOffIn: null,
@@ -289,7 +291,7 @@ async function main() {
     await page.addInitScript(`try { localStorage.setItem("theme", "light"); } catch {}`);
     await stubStatus(page, printing);
     await page.route("**/api/settings", route => route.fulfill({
-      json: { retention: 86400, "kept-jobs": 5, "bed-off-after": 86400,
+      json: { "camera-storage": 1024, "bed-off-after": 86400,
               "nozzle-off-after": 900, "lamp-off-after": 28800,
               dashboard: "machineCard,jobCard,controlsCard" },
     }));

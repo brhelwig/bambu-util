@@ -26,13 +26,13 @@ unless they match the printer's state.
 - AMS trays (colour, material, nozzle range) and desiccant grade (A–E)
 - Printer errors shown as readable messages, translated from HMS and
   `print_error` codes
-- Chamber camera at ~1 fps, recorded into a rolling buffer (24h by default).
-  The view follows the live image; a scrub bar goes back through the buffer.
-  During a print it starts 5 minutes before the print did.
+- Chamber camera at ~1 fps, recorded into a rolling buffer (1 GB by
+  default; the oldest frames go first). The view follows the live image; a
+  scrub bar goes back through the buffer. During a print it starts 5 minutes
+  before the print did.
 - Recent prints are listed under the camera and can be played back as a
-  timelapse at 30x, 60x, 300x or 600x. The most recent finished prints (5 by
-  default) keep their footage past the buffer window, thinned to one frame
-  every 10 seconds.
+  timelapse at 30x, 60x, 300x or 600x, for as long as their footage is still
+  in the buffer.
 
 bambu-util keeps the camera connection open the whole time it runs. The
 printer serves only one camera client, so Bambu Studio's camera view won't
@@ -56,16 +56,16 @@ Screen.
 
 **Settings and diagnostics**
 
-- A Settings screen for the printer connection, notifications, camera history
-  window, prints kept, auto-off delays, event log size, an optional database
-  size cap, login length, theme (light/dark/system), and which status sections
-  are shown and in what order. Changes apply when saved.
+- A Settings screen for the printer connection, notifications, how much
+  camera history to keep (1 GB by default), auto-off delays, event log size,
+  login length, theme (light/dark/system), and which status sections are shown
+  and in what order. Changes apply when saved.
+- Saving a printer first checks it answers, and says what is wrong if it
+  doesn't (address, access code or serial).
 - An Events screen listing commands sent, printer acknowledgements and
   reports, and notifications sent, each with the raw message. It is stored in
   the database (64 MB by default) so it survives restarts.
-- The optional database size cap (off by default, minimum 256 MB) deletes the
-  oldest camera frames and events until the file fits, overriding the history
-  window and prints-kept settings.
+- Once camera history reaches its size, the oldest frames are deleted first.
 - Can be added to the iOS Home Screen as a full-screen app.
 
 ## Printer setup
