@@ -14,6 +14,7 @@ use tokio::sync::{Notify, watch};
 use crate::clock::{self, Clock};
 use crate::history::JobTracker;
 use crate::p1s::{self, HmsEntry, Link, Snapshot};
+use crate::printers::Printers;
 use crate::push::{self, Notification, Sender};
 use crate::settings::Values;
 use crate::timers::{self, Timers};
@@ -283,13 +284,17 @@ impl Reactor {
     }
 }
 
-/// Carries out the reactor's effects.
+/// Carries out the reactor's effects, for printer `printer`.
 #[derive(Clone)]
 pub struct Runner {
     pub link: Link,
     pub sender: Sender,
     pub jobs_changed: Arc<Notify>,
     pub clock: Clock,
+    pub printer: i64,
+    /// For the printer's name, which starts each notification once there is
+    /// more than one printer.
+    pub printers: Printers,
 }
 
 impl Runner {
@@ -299,7 +304,10 @@ impl Runner {
             Effect::SetBedTemp(t) => self.link.set_bed_temp(t),
             Effect::SetNozzleTemp(t) => self.link.set_nozzle_temp(t),
             Effect::Lamp(on) => self.link.set_chamber_light(on),
-            Effect::Notify(n) => {
+            Effect::Notify(mut n) => {
+                n.title = format!("{}{}", self.printers.label(self.printer), n.title);
+                // So one printer's notification doesn't replace another's.
+                n.tag = format!("{}-{}", n.tag, self.printer);
                 let sender = self.sender.clone();
                 tokio::spawn(async move {
                     if let Err(err) = sender.send(&n).await {
@@ -308,12 +316,16 @@ impl Runner {
                 });
             }
             Effect::RemindBed { since, target } => {
-                return self
-                    .sender
-                    .remind_bed_on(since, target, clock::secs(now_ms));
+                return self.sender.remind_bed_on(
+                    self.printer,
+                    &self.printers.label(self.printer),
+                    since,
+                    target,
+                    clock::secs(now_ms),
+                );
             }
             Effect::ForgetBedReminders => {
-                if let Err(err) = self.sender.forget_bed_reminders() {
+                if let Err(err) = self.sender.forget_bed_reminders(self.printer) {
                     tracing::warn!("notify: clearing bed reminders: {err}");
                 }
             }

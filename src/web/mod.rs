@@ -5,48 +5,55 @@ mod camera;
 mod csrf;
 mod live;
 mod notify;
+mod printers;
 mod settings;
 mod statics;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::activity::Log;
+use crate::clock::Clock;
+use crate::p1s::{self, Snapshot};
+use crate::printers::{Printer, Printers};
+use crate::push::Sender;
+use crate::settings::Settings;
+use crate::timers;
 use axum::Router;
+use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde::Serialize;
 use serde_json::{Value, json};
-use tokio::sync::Notify;
-
-use crate::activity::Log;
-use crate::camera::Hub;
-use crate::clock::Clock;
-use crate::history::Store;
-use crate::p1s::{self, Link, StateCache};
-use crate::push::Sender;
-use crate::settings::Settings;
-use crate::timers::{self, Timers};
 
 pub use csrf::CrossOrigin;
-pub use live::Live;
+pub use live::Feed;
 
 /// Everything the handlers reach.
 #[derive(Clone)]
 pub struct App {
-    pub cache: StateCache,
-    pub link: Link,
-    pub store: Store,
+    pub printers: Printers,
     pub sender: Sender,
     pub settings: Settings,
-    pub timers: Timers,
     pub activity: Log,
-    pub hub: Hub,
-    pub live: Live,
-    /// Fires when a job row is opened, closed or pruned.
-    pub jobs_changed: Arc<Notify>,
     pub cross_origin: CrossOrigin,
     pub clock: Clock,
+}
+
+impl App {
+    /// The printer a request is about: `?printer=<id>`, or the first one when
+    /// it doesn't say. None when there are no printers and none was named.
+    fn printer(&self, query: &Query) -> Result<Option<Arc<Printer>>, Box<Response>> {
+        let Some(raw) = query.get("printer") else {
+            return Ok(self.printers.first());
+        };
+        raw.parse::<i64>()
+            .ok()
+            .and_then(|id| self.printers.get(id))
+            .map(Some)
+            .ok_or_else(|| Box::new(text(StatusCode::NOT_FOUND, "no such printer")))
+    }
 }
 
 pub fn router(app: App) -> Router {
@@ -58,9 +65,10 @@ pub fn router(app: App) -> Router {
         .route("/camera/history/frame", get(camera::frame))
         .route("/camera/history/jobs", get(camera::jobs))
         .route("/api/events", get(settings::events))
+        .route("/api/printers", get(printers::list).post(printers::add))
         .route(
-            "/api/printer",
-            get(settings::printer).post(settings::set_printer),
+            "/api/printers/{id}",
+            post(printers::update).delete(printers::remove),
         )
         .route("/api/settings", get(settings::get))
         .route("/api/settings/{name}", post(settings::set))
@@ -116,22 +124,28 @@ fn read_json<T: serde::de::DeserializeOwned>(body: &[u8]) -> Option<T> {
     serde_json::from_slice(body).ok()
 }
 
-async fn status(axum::extract::State(app): axum::extract::State<App>) -> Response {
-    json_reply(&status_of(&app))
+async fn status(State(app): State<App>, query: Query) -> Response {
+    match app.printer(&query) {
+        Ok(p) => json_reply(&status_of(p.as_deref(), (app.clock)())),
+        Err(refusal) => *refusal,
+    }
 }
 
-/// What the page shows about the printer, from its merged state and the
-/// app's own timers.
-pub fn status_of(app: &App) -> Value {
-    let snap = app.cache.snapshot();
+/// What the page shows about a printer, from its merged state and its timers,
+/// at `now` (unix milliseconds). With no printer, the same shape with nothing
+/// known.
+pub fn status_of(printer: Option<&Printer>, now: i64) -> Value {
+    let snap = printer.map(|p| p.cache.snapshot()).unwrap_or_default();
+    let snap: &Snapshot = &snap;
     let (f, connected) = (&snap.fields, snap.connected);
     let state = p1s::gcode_state(f);
     let get = |name: &str| f.get(name).cloned().unwrap_or(Value::Null);
-    let now = (app.clock)();
+    let remaining = |name| printer.and_then(|p| p.timers.remaining(name, now));
     let allowed = |action| p1s::print_action_allowed(connected, state, action).is_ok();
     json!({
+        "printer": printer.map(|p| p.id),
         "connected": connected,
-        "configured": app.link.config().complete(),
+        "configured": printer.is_some(),
         "problem": snap.problem.as_deref(),
         "gcodeState": state,
         "actionsAllowed": p1s::action_allowed(connected, state).is_ok(),
@@ -152,9 +166,9 @@ pub fn status_of(app: &App) -> Value {
         },
         "ams": get("ams"),
         "hms": p1s::hms_errors(f),
-        "bedOffIn": app.timers.remaining(timers::BED_OFF, now),
-        "nozzleOffIn": app.timers.remaining(timers::NOZZLE_OFF, now),
-        "lampOffIn": app.timers.remaining(timers::LAMP_OFF, now),
+        "bedOffIn": remaining(timers::BED_OFF),
+        "nozzleOffIn": remaining(timers::NOZZLE_OFF),
+        "lampOffIn": remaining(timers::LAMP_OFF),
         "printActions": {"pause": allowed("pause"), "resume": allowed("resume"), "stop": allowed("stop")},
     })
 }

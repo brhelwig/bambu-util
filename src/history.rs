@@ -17,22 +17,40 @@ pub struct Job {
     pub end: Option<i64>,
 }
 
-/// Camera frames and job boundaries.
+/// Camera frames and job boundaries. `new` reads and writes as printer 0,
+/// which only tests use; `for_printer` gives one printer's. Making room
+/// (`Source`) and forgetting jobs work across every printer.
 #[derive(Clone)]
 pub struct Store {
     db: Db,
+    printer: i64,
 }
 
 impl Store {
     pub fn new(db: Db) -> Store {
-        Store { db }
+        Store { db, printer: 0 }
+    }
+
+    pub fn for_printer(&self, id: i64) -> Store {
+        Store {
+            db: self.db.clone(),
+            printer: id,
+        }
+    }
+
+    /// Deletes this printer's footage and jobs, for a printer that is removed.
+    pub fn delete_all(&self) -> rusqlite::Result<()> {
+        let conn = self.db.lock();
+        conn.execute("DELETE FROM frames WHERE printer_id = ?", [self.printer])?;
+        conn.execute("DELETE FROM jobs WHERE printer_id = ?", [self.printer])?;
+        Ok(())
     }
 
     /// Records one camera frame at a unix-second timestamp.
     pub fn insert_frame(&self, ts: i64, jpeg: &[u8]) -> rusqlite::Result<()> {
         self.db.lock().execute(
-            "INSERT INTO frames (ts, jpeg) VALUES (?, ?)",
-            params![ts, jpeg],
+            "INSERT INTO frames (printer_id, ts, jpeg) VALUES (?, ?, ?)",
+            params![self.printer, ts, jpeg],
         )?;
         Ok(())
     }
@@ -43,8 +61,8 @@ impl Store {
         self.db
             .lock()
             .query_row(
-                "SELECT jpeg, ts FROM frames WHERE ts >= ? ORDER BY ts ASC LIMIT 1",
-                [ts],
+                "SELECT jpeg, ts FROM frames WHERE printer_id = ? AND ts >= ? ORDER BY ts ASC LIMIT 1",
+                [self.printer, ts],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()
@@ -52,11 +70,11 @@ impl Store {
 
     /// The oldest and newest frame timestamps stored.
     pub fn range(&self) -> rusqlite::Result<(Option<i64>, Option<i64>)> {
-        self.db
-            .lock()
-            .query_row("SELECT MIN(ts), MAX(ts) FROM frames", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+        self.db.lock().query_row(
+            "SELECT MIN(ts), MAX(ts) FROM frames WHERE printer_id = ?",
+            [self.printer],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 
     /// Forgets prints whose footage has all been deleted to make room, so the
@@ -64,7 +82,9 @@ impl Store {
     pub fn forget_unrecorded_jobs(&self) -> rusqlite::Result<usize> {
         self.db.lock().execute(
             "DELETE FROM jobs WHERE end_ts IS NOT NULL
-               AND end_ts < COALESCE((SELECT MIN(ts) FROM frames), end_ts + 1)",
+               AND end_ts < COALESCE(
+                 (SELECT MIN(ts) FROM frames WHERE frames.printer_id = jobs.printer_id),
+                 end_ts + 1)",
             [],
         )
     }
@@ -73,8 +93,8 @@ impl Store {
     pub fn open_job(&self, name: &str, start: i64) -> rusqlite::Result<i64> {
         let conn = self.db.lock();
         conn.execute(
-            "INSERT INTO jobs (name, start_ts, end_ts) VALUES (?, ?, NULL)",
-            params![name, start],
+            "INSERT INTO jobs (printer_id, name, start_ts, end_ts) VALUES (?, ?, ?, NULL)",
+            params![self.printer, name, start],
         )?;
         Ok(conn.last_insert_rowid())
     }
@@ -91,9 +111,17 @@ impl Store {
         self.db
             .lock()
             .query_row(
-                "SELECT id, name, start_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC, id DESC LIMIT 1",
-                [],
-                |r| Ok(Job { id: r.get(0)?, name: r.get(1)?, start: r.get(2)?, end: None }),
+                "SELECT id, name, start_ts FROM jobs WHERE printer_id = ? AND end_ts IS NULL
+                   ORDER BY start_ts DESC, id DESC LIMIT 1",
+                [self.printer],
+                |r| {
+                    Ok(Job {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        start: r.get(2)?,
+                        end: None,
+                    })
+                },
             )
             .optional()
     }
@@ -109,9 +137,10 @@ impl Store {
             // Bounded at the next print's start so one row can't claim the
             // footage of everything recorded after it.
             let last: Option<i64> = conn.query_row(
-                "SELECT MAX(ts) FROM frames WHERE ts >= ?1
-                   AND ts < COALESCE((SELECT MIN(start_ts) FROM jobs WHERE start_ts > ?1), ?2)",
-                params![start, i64::MAX],
+                "SELECT MAX(ts) FROM frames WHERE printer_id = ?3 AND ts >= ?1
+                   AND ts < COALESCE(
+                     (SELECT MIN(start_ts) FROM jobs WHERE printer_id = ?3 AND start_ts > ?1), ?2)",
+                params![start, i64::MAX, self.printer],
                 |r| r.get(0),
             )?;
             last.filter(|&last| last >= start).unwrap_or(fallback)
@@ -125,8 +154,8 @@ impl Store {
         let open: Vec<(i64, i64)> = {
             let conn = self.db.lock();
             let mut stmt =
-                conn.prepare("SELECT id, start_ts FROM jobs WHERE end_ts IS NULL ORDER BY start_ts DESC, id DESC")?;
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                conn.prepare("SELECT id, start_ts FROM jobs WHERE printer_id = ? AND end_ts IS NULL ORDER BY start_ts DESC, id DESC")?;
+            stmt.query_map([self.printer], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<rusqlite::Result<_>>()?
         };
         // [0] is the newest: leave it open.
@@ -141,9 +170,9 @@ impl Store {
     pub fn recent_jobs(&self) -> rusqlite::Result<Vec<Job>> {
         let conn = self.db.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, name, start_ts, end_ts FROM jobs ORDER BY start_ts DESC, id DESC",
+            "SELECT id, name, start_ts, end_ts FROM jobs WHERE printer_id = ? ORDER BY start_ts DESC, id DESC",
         )?;
-        stmt.query_map([], |r| {
+        stmt.query_map([self.printer], |r| {
             Ok(Job {
                 id: r.get(0)?,
                 name: r.get(1)?,
@@ -320,6 +349,26 @@ mod tests {
         s.forget_unrecorded_jobs().unwrap();
         assert_eq!(s.recent_jobs().unwrap().len(), 1);
         assert_eq!(s.total_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn each_printer_sees_its_own() {
+        let all = store();
+        let (one, two) = (all.for_printer(1), all.for_printer(2));
+        one.insert_frame(100, &[1]).unwrap();
+        two.insert_frame(200, &[2]).unwrap();
+        one.open_job("one.3mf", 90).unwrap();
+        two.open_job("two.3mf", 190).unwrap();
+        assert_eq!(one.range().unwrap(), (Some(100), Some(100)));
+        assert_eq!(two.frame_at_or_after(0).unwrap(), Some((vec![2], 200)));
+        assert_eq!(one.active_job().unwrap().unwrap().name, "one.3mf");
+        // Only one print runs per printer, not across them.
+        assert_eq!(two.close_orphan_jobs().unwrap(), 0);
+        assert_eq!(all.total_bytes().unwrap(), 2);
+        two.delete_all().unwrap();
+        assert_eq!(two.range().unwrap(), (None, None));
+        assert!(two.recent_jobs().unwrap().is_empty());
+        assert_eq!(one.recent_jobs().unwrap().len(), 1);
     }
 
     #[test]

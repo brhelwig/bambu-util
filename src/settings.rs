@@ -17,13 +17,10 @@ pub const LAMP_OFF_AFTER: &str = "lamp-off-after";
 pub const ACTIVITY_LIMIT: &str = "activity-limit";
 pub const SESSION_LENGTH: &str = "session-length";
 
-pub const PRINTER_IP: &str = "printer-ip";
-pub const PRINTER_SERIAL: &str = "printer-serial";
-pub const PRINTER_ACCESS_CODE: &str = "printer-access-code";
 /// The printer screen's sections, in order. Anything absent is hidden.
 pub const DASHBOARD: &str = "dashboard";
 
-const TEXTS: &[&str] = &[PRINTER_IP, PRINTER_SERIAL, PRINTER_ACCESS_CODE, DASHBOARD];
+const TEXTS: &[&str] = &[DASHBOARD];
 
 /// Whether a setting holds words rather than a number.
 pub fn is_text(name: &str) -> bool {
@@ -34,12 +31,9 @@ pub fn is_text(name: &str) -> bool {
 pub const BYTES_PER_MB: i64 = 1 << 20;
 
 /// One complete set of settings. Durations are in seconds, limits in bytes.
-/// `access_code` is a credential and must never be sent to the browser.
+/// The printers are kept in their own table.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Values {
-    pub printer_ip: String,
-    pub printer_serial: String,
-    pub access_code: String,
     pub dashboard: String,
 
     /// Bytes of camera frames kept, across every print; the oldest go first.
@@ -56,9 +50,6 @@ impl Default for Values {
     /// read falls back to.
     fn default() -> Self {
         Values {
-            printer_ip: String::new(),
-            printer_serial: String::new(),
-            access_code: String::new(),
             dashboard: String::new(),
             camera_storage: 1024 * BYTES_PER_MB,
             bed_off_after: 24 * 3600,
@@ -169,8 +160,7 @@ impl Settings {
         self.put(name, &value.to_string())
     }
 
-    /// Stores one setting that holds words. An empty value clears it, which is
-    /// how a printer is forgotten.
+    /// Stores one setting that holds words. An empty value clears it.
     pub fn set_text(&self, name: &str, value: &str) -> Result<(), String> {
         if !is_text(name) {
             return Err(format!("settings: {name:?} does not hold text"));
@@ -219,9 +209,6 @@ impl Settings {
         };
         let text = |name: &str| stored.get(name).cloned().unwrap_or_default();
         let v = Values {
-            printer_ip: text(PRINTER_IP),
-            printer_serial: text(PRINTER_SERIAL),
-            access_code: text(PRINTER_ACCESS_CODE),
             dashboard: text(DASHBOARD),
             camera_storage: num(CAMERA_STORAGE, d.camera_storage / BYTES_PER_MB) * BYTES_PER_MB,
             bed_off_after: num(BED_OFF_AFTER, d.bed_off_after),
@@ -312,17 +299,15 @@ mod tests {
     #[test]
     fn text_settings() {
         let s = store();
-        s.set_text(PRINTER_IP, "10.0.0.5").unwrap();
         s.set_text(DASHBOARD, "camCard,jobCard").unwrap();
-        assert_eq!(s.values().printer_ip, "10.0.0.5");
         assert_eq!(s.values().dashboard, "camCard,jobCard");
-        s.set_text(PRINTER_IP, "").unwrap();
-        assert_eq!(s.values().printer_ip, "");
+        s.set_text(DASHBOARD, "").unwrap();
+        assert_eq!(s.values().dashboard, "");
         assert_eq!(
             s.set_text(DASHBOARD, &"x".repeat(513)).unwrap_err(),
             "dashboard is too long"
         );
         assert!(s.set_text(CAMERA_STORAGE, "1").is_err());
-        assert!(is_text(PRINTER_ACCESS_CODE) && !is_text(CAMERA_STORAGE));
+        assert!(is_text(DASHBOARD) && !is_text(CAMERA_STORAGE));
     }
 }

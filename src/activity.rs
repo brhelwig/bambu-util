@@ -48,6 +48,9 @@ pub struct Entry {
     pub acked: Option<i64>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub error: String,
+    /// The printer it was about, if it was about one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub printer: Option<i64>,
 }
 
 fn to_rfc3339(ms: i64) -> String {
@@ -79,6 +82,8 @@ pub struct Log {
     /// count and the table move together.
     bytes: Arc<Mutex<i64>>,
     clock: Clock,
+    /// Which printer this handle records for, if any.
+    printer: Option<i64>,
 }
 
 impl Log {
@@ -95,7 +100,17 @@ impl Log {
             limit: Arc::new(limit),
             bytes: Arc::new(Mutex::new(bytes)),
             clock,
+            printer: None,
         })
+    }
+
+    /// The same log, with every entry recorded through it marked as being
+    /// about printer `id`.
+    pub fn for_printer(&self, id: i64) -> Log {
+        Log {
+            printer: Some(id),
+            ..self.clone()
+        }
     }
 
     /// Adds an entry and returns its id, so it can be acknowledged later. A
@@ -107,8 +122,8 @@ impl Log {
         let mut bytes = self.bytes.lock().unwrap_or_else(|p| p.into_inner());
         let conn = self.db.lock();
         let inserted = conn.execute(
-            "INSERT INTO activity (at, kind, summary, payload) VALUES (?, ?, ?, ?)",
-            params![at, kind, summary, payload],
+            "INSERT INTO activity (at, kind, summary, payload, printer_id) VALUES (?, ?, ?, ?, ?)",
+            params![at, kind, summary, payload, self.printer],
         );
         if let Err(err) = inserted {
             tracing::warn!("activity: recording {kind} {summary:?}: {err}");
@@ -188,7 +203,7 @@ impl Log {
         let conn = self.db.lock();
         let read = || -> rusqlite::Result<Vec<Entry>> {
             let mut stmt = conn.prepare(
-                "SELECT id, at, kind, summary, payload, acked, error FROM activity ORDER BY id DESC LIMIT ?",
+                "SELECT id, at, kind, summary, payload, acked, error, printer_id FROM activity ORDER BY id DESC LIMIT ?",
             )?;
             stmt.query_map([limit as i64], |row| {
                 Ok(Entry {
@@ -199,6 +214,7 @@ impl Log {
                     payload: row.get(4)?,
                     acked: row.get(5)?,
                     error: row.get(6)?,
+                    printer: row.get(7)?,
                 })
             })?
             .collect()

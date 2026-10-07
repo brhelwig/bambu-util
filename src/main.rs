@@ -1,5 +1,5 @@
-//! bambu-util serves a phone-friendly control page for a Bambu P1S on the
-//! local network: bed actions and live status over the printer's MQTT
+//! bambu-util serves a phone-friendly control page for Bambu P1S printers on the
+//! local network: bed actions and live status over each printer's MQTT
 //! interface, and its chamber camera, recorded continuously into a rolling
 //! history buffer.
 
@@ -12,6 +12,7 @@ mod core;
 mod db;
 mod history;
 mod p1s;
+mod printers;
 mod push;
 mod settings;
 #[cfg(test)]
@@ -24,10 +25,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use tokio::sync::Notify;
 
 use crate::clock::Clock;
-use crate::p1s::{Config, Link, Ports, StateCache};
+use crate::p1s::Ports;
+use crate::printers::Printers;
 
 /// 32 random bytes as unpadded base64url: long enough that guessing one is not
 /// worth attempting.
@@ -51,8 +52,7 @@ const HOUSEKEEPING_EVERY: Duration = Duration::from_secs(5 * 60);
 /// without a process around it.
 pub struct Started {
     pub router: Router,
-    pub link: Link,
-    pub cache: StateCache,
+    pub printers: Printers,
 }
 
 /// Opens the database under `data_dir`, wires everything to it and starts the
@@ -83,10 +83,7 @@ pub async fn start(
         clock.clone(),
     )
     .map_err(|e| format!("open event log: {e}"))?;
-    let cache = StateCache::new();
-    let link = Link::new(cache.clone(), events.clone(), clock.clone(), ports);
     let store = history::Store::new(db.clone());
-    let hub = camera::Hub::new(link.clone(), store.clone(), clock.clone());
     let sender = push::Sender::new(db.clone(), events.clone(), clock.clone())
         .map_err(|e| format!("load notification identity: {e}"))?;
     let timers =
@@ -109,49 +106,32 @@ pub async fn start(
         }
     };
 
-    // Whatever printer was set up last time. With none, the app still serves
-    // the page — that is where one is entered.
-    let v = settings.values();
-    link.configure(Config {
-        ip: v.printer_ip,
-        serial: v.printer_serial,
-        access_code: v.access_code,
-    });
+    // Whatever printers were set up last time. With none, the app still
+    // serves the page — that is where one is added.
+    let printers = Printers::load(printers::Deps {
+        db: db.clone(),
+        settings: settings.clone(),
+        log: events.clone(),
+        sender: sender.clone(),
+        store: store.clone(),
+        timers,
+        clock: clock.clone(),
+        ports,
+    })
+    .map_err(|e| format!("load printers: {e}"))?;
 
-    let jobs_changed = Arc::new(Notify::new());
     let cross_origin = auth::cross_origin(authenticator.as_ref());
     let app = web::App {
-        cache: cache.clone(),
-        link: link.clone(),
-        store: store.clone(),
-        sender: sender.clone(),
+        printers: printers.clone(),
+        sender,
         settings: settings.clone(),
-        timers: timers.clone(),
-        activity: events.clone(),
-        hub: hub.clone(),
-        live: web::Live::default(),
-        jobs_changed: jobs_changed.clone(),
+        activity: events,
         cross_origin: cross_origin.clone(),
         clock: clock.clone(),
     };
 
-    let s = settings.clone();
-    let reactor = core::Reactor::new(
-        timers.clone(),
-        history::JobTracker::new(store.clone()),
-        move || s.values(),
-    );
-    let runner = core::Runner {
-        link: link.clone(),
-        sender,
-        jobs_changed: jobs_changed.clone(),
-        clock: clock.clone(),
-    };
-    tokio::spawn(reactor.run(cache.subscribe(), runner));
-    tokio::spawn(hub.run());
-    tokio::spawn(app.live.clone().run(app.clone()));
     tokio::spawn(logins.run_sweeper(clock.clone()));
-    tokio::spawn(housekeeping(db, store, settings, jobs_changed));
+    tokio::spawn(housekeeping(db, store, settings, printers.clone()));
 
     let mut router = web::router(app);
     if let Some(auth) = &authenticator {
@@ -161,11 +141,7 @@ pub async fn start(
         cross_origin,
         web::CrossOrigin::layer,
     ));
-    Ok(Started {
-        router,
-        link,
-        cache,
-    })
+    Ok(Started { router, printers })
 }
 
 /// Holds the camera footage to its size, oldest first, every few minutes,
@@ -174,7 +150,7 @@ async fn housekeeping(
     db: db::Db,
     store: history::Store,
     settings: settings::Settings,
-    jobs_changed: Arc<Notify>,
+    printers: Printers,
 ) {
     let limits = settings.clone();
     let enforcer = Arc::new(capacity::Enforcer::new(
@@ -199,7 +175,7 @@ async fn housekeeping(
         if let Err(err) = done {
             tracing::warn!("housekeeping: {err}");
         }
-        jobs_changed.notify_one();
+        printers.jobs_changed();
     }
 }
 
@@ -245,7 +221,7 @@ async fn main() {
         .unwrap_or_else(|e| fatal(&format!("listen on {addr}: {e}")));
     tracing::info!(
         "bambu-util listening on {addr} ({})",
-        started.link.describe()
+        started.printers.describe()
     );
     // Open pages hold websockets, which would keep a graceful shutdown waiting
     // forever, so it gets a few seconds.
@@ -265,7 +241,7 @@ async fn main() {
             tokio::time::sleep(Duration::from_secs(3)).await;
         } => {}
     }
-    started.link.stop();
+    started.printers.stop();
 }
 
 async fn shutdown_signal() {

@@ -1,12 +1,22 @@
 # bambu-util
 
-A web bridge for controlling a Bambu Lab P1S from a phone browser.
+A web bridge for controlling Bambu Lab P1S printers from a phone browser.
 
 Browsers can't talk to the printer directly (MQTT over TLS on :8883, a
 proprietary camera stream on :6000), so bambu-util runs on a machine on the
 same network, holds those connections, and serves a mobile web page.
 
 ## Features
+
+**Printers**
+
+- Any number of printers, each with a name you choose and can change. A
+  switcher at the top of the page picks which one the dashboard, camera and
+  controls are about; each chip shows whether that printer is connected and
+  how far its print has got.
+- Every printer stays connected whichever one is shown, so each keeps
+  recording its camera and sending its notifications. Once there is more than
+  one, notifications start with the printer's name.
 
 **Controls**
 
@@ -56,7 +66,7 @@ Screen.
 
 **Settings and diagnostics**
 
-- A Settings screen for the printer connection, notifications, how much
+- A Settings screen for the printers, notifications, how much
   camera history to keep (1 GB by default), auto-off delays, event log size,
   login length, theme (light/dark/system), and which status sections are shown
   and in what order. Changes apply when saved.
@@ -74,9 +84,9 @@ Recent P1 firmware rejects third-party G-code unless **LAN Only Mode** and
 **Developer Mode** are both enabled on the printer. Status and camera work
 without them; the controls need them.
 
-You will need the printer's IP address and access code (printer screen,
+You will need each printer's IP address and access code (printer screen,
 Settings → WLAN) and its serial number (Settings → Device). These are entered
-on the Settings page, not in the environment.
+under Printers on the Settings page, not in the environment.
 
 ## Running
 
@@ -87,7 +97,7 @@ From source, with [Rust](https://rustup.rs) installed (the version is pinned in
 AUTH_DISABLED=true cargo run --release
 ```
 
-Then open `http://<host>:8081`, go to Settings and enter the printer details.
+Then open `http://<host>:8081`, go to Settings and add your printers.
 
 Prebuilt binaries for Linux, macOS and Windows (amd64 and arm64) are attached
 to each [GitHub release](https://github.com/brhelwig/bambu-util/releases).

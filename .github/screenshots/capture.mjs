@@ -141,15 +141,18 @@ const states = [
 // Answers the printer's status with `status`, however the page asks for it: the
 // live socket's status messages are swapped for it on their way to the page
 // (the rest — camera range, recent prints — come from the real server), and
-// /api/status is answered too, for a page that still polls.
-async function stubStatus(page, status) {
+// /api/status is answered too, for a page that still polls. `printers`, when
+// given, likewise replaces the list of printers the switcher shows.
+async function stubStatus(page, status, printers = null) {
   await page.route("**/api/status", route => route.fulfill({ json: status }));
   await page.routeWebSocket("**/api/live", ws => {
     const server = ws.connectToServer();
     server.onMessage(message => {
       let type = null;
       try { type = JSON.parse(message).type; } catch {}
-      ws.send(type === "status" ? JSON.stringify({ type: "status", ...status }) : message);
+      if (type === "status") ws.send(JSON.stringify({ type: "status", ...status }));
+      else if (type === "printers" && printers) ws.send(JSON.stringify({ type: "printers", printers }));
+      else ws.send(message);
     });
   });
 }
@@ -302,6 +305,25 @@ async function main() {
       note: "The light theme, with the dashboard reordered and the camera, drying, nozzle and filament sections hidden.",
     });
     console.log("captured Light theme");
+    await page.close();
+  }
+
+  // Two printers: the switcher above the dashboard.
+  {
+    const page = await context.newPage();
+    await stubStatus(page, printing, [
+      { id: 1, name: "Garage", connected: true, gcodeState: "RUNNING", progress: 42 },
+      { id: 2, name: "Office", connected: false, problem: "No answer from 192.0.2.11.", gcodeState: "unknown", progress: null },
+    ]);
+    await page.goto(BASE + "/", { waitUntil: "networkidle" });
+    await page.waitForTimeout(600);
+    const file = `${OUT}/13-two-printers.png`;
+    await page.screenshot({ path: file });
+    shots.push({
+      name: "13-two-printers", title: "Two printers", file,
+      note: "The switcher above the dashboard, with one printer printing and one that can't be reached.",
+    });
+    console.log("captured Two printers");
     await page.close();
   }
 
