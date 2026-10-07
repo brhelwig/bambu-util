@@ -26,10 +26,14 @@ const MARKS: &[&str] = &[BED_ON_SINCE];
 
 /// Pending timers, in unix seconds. Write failures are logged and ignored: the
 /// countdown still runs, it just won't survive a restart.
+///
+/// Each printer has its own set, from `for_printer`: the same names, stored as
+/// "<printer id>:<name>".
 #[derive(Clone)]
 pub struct Timers {
     db: Db,
     at: Arc<Mutex<HashMap<String, i64>>>,
+    prefix: Arc<str>,
     changed: Arc<Notify>,
 }
 
@@ -45,8 +49,36 @@ impl Timers {
         Ok(Timers {
             db,
             at: Arc::new(Mutex::new(at)),
+            prefix: "".into(),
             changed: Arc::default(),
         })
+    }
+
+    /// One printer's timers. Each call has its own `changed`, so a printer's
+    /// reactor wakes for its own timers.
+    pub fn for_printer(&self, id: i64) -> Timers {
+        Timers {
+            prefix: format!("{id}:").into(),
+            changed: Arc::default(),
+            ..self.clone()
+        }
+    }
+
+    fn key(&self, name: &str) -> String {
+        format!("{}{name}", self.prefix)
+    }
+
+    /// Forgets every timer in this set, for a printer that is removed.
+    pub fn clear_all(&self) {
+        let prefix = self.prefix.to_string();
+        self.map().retain(|name, _| !name.starts_with(&prefix));
+        if let Err(err) = self.db.lock().execute(
+            "DELETE FROM deadlines WHERE substr(name, 1, length(?1)) = ?1",
+            [&prefix],
+        ) {
+            tracing::warn!("timers: clearing {prefix}: {err}");
+        }
+        self.changed.notify_one();
     }
 
     fn map(&self) -> std::sync::MutexGuard<'_, HashMap<String, i64>> {
@@ -55,7 +87,8 @@ impl Timers {
 
     /// Sets a timer, replacing any earlier setting for it.
     pub fn set(&self, name: &str, at: i64) {
-        self.map().insert(name.to_string(), at);
+        let name = &self.key(name);
+        self.map().insert(name.clone(), at);
         if let Err(err) = self.db.lock().execute(
             "INSERT INTO deadlines (name, at) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET at = excluded.at",
             params![name, at],
@@ -67,6 +100,7 @@ impl Timers {
 
     /// Forgets a timer. Clearing one that is not set does nothing.
     pub fn clear(&self, name: &str) {
+        let name = &self.key(name);
         if self.map().remove(name).is_none() {
             return;
         }
@@ -81,7 +115,7 @@ impl Timers {
     }
 
     pub fn get(&self, name: &str) -> Option<i64> {
-        self.map().get(name).copied()
+        self.map().get(&self.key(name)).copied()
     }
 
     /// Whether `name` is set and has come due at `now`.
@@ -100,7 +134,8 @@ impl Timers {
     pub fn earliest(&self) -> Option<i64> {
         self.map()
             .iter()
-            .filter(|(name, _)| !MARKS.contains(&name.as_str()))
+            .filter_map(|(name, at)| Some((name.strip_prefix(&*self.prefix)?, at)))
+            .filter(|(name, _)| !name.contains(':') && !MARKS.contains(name))
             .map(|(_, at)| *at)
             .min()
     }
@@ -152,6 +187,23 @@ mod tests {
         assert_eq!(t.remaining(BED_OFF, 200_000), Some(0));
         assert!(!t.due(BED_OFF, 99));
         assert!(t.due(BED_OFF, 100));
+    }
+
+    #[test]
+    fn each_printer_has_its_own() {
+        let db = Db::memory();
+        let all = Timers::new(db.clone()).unwrap();
+        let (one, two) = (all.for_printer(1), all.for_printer(2));
+        one.set(BED_OFF, 100);
+        two.set(BED_OFF, 50);
+        two.set(LAMP_OFF, 70);
+        assert_eq!((one.get(BED_OFF), two.get(BED_OFF)), (Some(100), Some(50)));
+        assert_eq!((one.earliest(), two.earliest()), (Some(100), Some(50)));
+        two.clear_all();
+        assert_eq!((one.get(BED_OFF), two.get(LAMP_OFF)), (Some(100), None));
+        let again = Timers::new(db).unwrap();
+        assert_eq!(again.for_printer(1).get(BED_OFF), Some(100));
+        assert_eq!(again.for_printer(2).get(BED_OFF), None);
     }
 
     #[tokio::test]

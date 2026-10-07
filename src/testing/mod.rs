@@ -63,7 +63,6 @@ pub fn tempdir() -> std::path::PathBuf {
 pub struct Harness {
     pub app: crate::Started,
     pub printer: Option<printer::FakePrinter>,
-    pub dir: std::path::PathBuf,
 }
 
 pub struct Reply {
@@ -113,25 +112,38 @@ impl Harness {
         let app = crate::start(&dir, decision, ports, crate::clock::system())
             .await
             .unwrap();
-        Harness { app, printer, dir }
+        Harness { app, printer }
     }
 
-    /// Points the app at the fake printer, as the setup screen would.
-    pub fn configure(&self) {
-        self.app.link.configure(crate::p1s::Config {
-            ip: "127.0.0.1".into(),
-            serial: "SERIAL1".into(),
-            access_code: "secret".into(),
-        });
+    /// Adds the fake printer, as the setup screen would, and returns its id.
+    pub fn configure(&self) -> i64 {
+        self.app
+            .printers
+            .add(
+                "P1S",
+                crate::p1s::Config {
+                    ip: "127.0.0.1".into(),
+                    serial: "SERIAL1".into(),
+                    access_code: "secret".into(),
+                },
+            )
+            .unwrap()
     }
 
     pub fn printer(&self) -> &printer::FakePrinter {
         self.printer.as_ref().expect("a printer")
     }
 
-    /// Waits until the printer's state satisfies `want`.
+    /// Waits until the first printer's state satisfies `want`.
     pub async fn wait(&self, want: impl Fn(&crate::p1s::Snapshot) -> bool) {
-        let mut rx = self.app.cache.subscribe();
+        let first = self.app.printers.first().expect("a printer is set up");
+        self.wait_on(first.id, want).await;
+    }
+
+    /// Waits until printer `id`'s state satisfies `want`.
+    pub async fn wait_on(&self, id: i64, want: impl Fn(&crate::p1s::Snapshot) -> bool) {
+        let printer = self.app.printers.get(id).expect("no such printer");
+        let mut rx = printer.cache.subscribe();
         let wait = rx.wait_for(|s| want(s));
         tokio::time::timeout(std::time::Duration::from_secs(5), wait)
             .await

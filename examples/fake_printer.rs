@@ -1,10 +1,11 @@
-//! Runs a pretend P1S on 127.0.0.1:8883 (MQTT) and :6000 (camera), part-way
-//! through a print, so the app can be run and looked at without a printer.
+//! Runs two pretend P1Ss, so the app can be run and looked at without a
+//! printer: one on 127.0.0.1:8883 (MQTT) and :6000 (camera), part-way through
+//! a print, and an idle one on 127.0.0.2 at the same ports.
 //!
 //!     cargo run --example fake_printer
 //!
-//! Then point the app's Settings at 127.0.0.1, serial FAKE0001, access code
-//! 12345678.
+//! Then add them on the app's Settings screen: 127.0.0.1, serial FAKE0001,
+//! access code 12345678; and 127.0.0.2, serial FAKE0002, access code 87654321.
 
 #[allow(dead_code)]
 #[path = "../src/testing/printer.rs"]
@@ -51,6 +52,17 @@ async fn main() {
         "fake printer on 127.0.0.1: mqtt {} camera {}, serial FAKE0001, access code 12345678",
         printer.mqtt_port, printer.camera_port
     );
+    let idle = printer::FakePrinter::start("127.0.0.2", 8883, 6000, "FAKE0002", "87654321").await;
+    idle.set_state(json!({
+        "gcode_state": "IDLE",
+        "bed_temper": 23.1,
+        "bed_target_temper": 0,
+        "nozzle_temper": 24.5,
+        "nozzle_target_temper": 0,
+        "lights_report": [{"node": "chamber_light", "mode": "off"}],
+        "hms": [],
+    }));
+    println!("fake printer on 127.0.0.2: same ports, serial FAKE0002, access code 87654321");
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // A little life, so live updates have something to show.

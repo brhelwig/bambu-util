@@ -13,7 +13,8 @@ pub struct Db(Arc<Mutex<Connection>>);
 
 /// The schema, one entry per version. `PRAGMA user_version` records how many
 /// have been applied. Add new versions at the end; never edit an applied one.
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE settings (
   name  TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -85,7 +86,54 @@ CREATE TABLE pending_logins (
   expires  INTEGER NOT NULL
 );
 CREATE INDEX pending_logins_expires ON pending_logins(expires);
-"#];
+"#,
+    r#"
+-- Several printers, each named. The one printer of version 1, if it was set
+-- up, becomes printer 1 and keeps its footage, jobs, events and timers.
+CREATE TABLE printers (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  ip          TEXT NOT NULL,
+  serial      TEXT NOT NULL,
+  access_code TEXT NOT NULL
+);
+INSERT INTO printers (id, name, ip, serial, access_code)
+  SELECT 1, 'P1S', ip.value, serial.value, code.value
+  FROM settings ip, settings serial, settings code
+  WHERE ip.name = 'printer-ip' AND serial.name = 'printer-serial'
+    AND code.name = 'printer-access-code';
+DELETE FROM settings WHERE name IN ('printer-ip', 'printer-serial',
+  'printer-access-code', 'retention', 'kept-jobs', 'database-limit');
+
+ALTER TABLE frames ADD COLUMN printer_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN printer_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE activity ADD COLUMN printer_id INTEGER;
+UPDATE frames SET printer_id = 1;
+UPDATE jobs SET printer_id = 1;
+UPDATE activity SET printer_id = 1 WHERE kind IN ('command', 'report');
+DELETE FROM frames WHERE NOT EXISTS (SELECT 1 FROM printers);
+DELETE FROM jobs WHERE NOT EXISTS (SELECT 1 FROM printers);
+DROP INDEX frames_ts;
+CREATE INDEX frames_printer_ts ON frames(printer_id, ts);
+CREATE INDEX jobs_printer ON jobs(printer_id, start_ts);
+
+-- Timers are named "<printer id>:<timer>".
+UPDATE deadlines SET name = '1:' || name WHERE EXISTS (SELECT 1 FROM printers);
+DELETE FROM deadlines WHERE name NOT LIKE '%:%';
+
+-- When each device was last reminded about each printer's bed.
+CREATE TABLE bed_reminders (
+  endpoint   TEXT NOT NULL,
+  printer_id INTEGER NOT NULL,
+  at         INTEGER NOT NULL,
+  PRIMARY KEY (endpoint, printer_id)
+);
+INSERT INTO bed_reminders (endpoint, printer_id, at)
+  SELECT endpoint, 1, bed_reminded_ts FROM subscriptions
+  WHERE bed_reminded_ts > 0 AND EXISTS (SELECT 1 FROM printers);
+ALTER TABLE subscriptions DROP COLUMN bed_reminded_ts;
+"#,
+];
 
 impl Db {
     /// Opens (creating if needed) the database at `path` and brings its schema
@@ -145,6 +193,76 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version as usize, MIGRATIONS.len());
+    }
+
+    /// A version 1 database, with `sql` run against it.
+    fn version_one(sql: &str) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!("{}; PRAGMA user_version = 1;", MIGRATIONS[0]))
+            .unwrap();
+        conn.execute_batch(sql).unwrap();
+        migrate(&conn).unwrap();
+        conn
+    }
+
+    const OLD_DATA: &str = "
+        INSERT INTO frames (ts, jpeg) VALUES (1, x'00');
+        INSERT INTO jobs (name, start_ts) VALUES ('a', 1);
+        INSERT INTO activity (at, kind, summary) VALUES (1, 'report', 'r'), (2, 'notification', 'n');
+        INSERT INTO deadlines VALUES ('bed-off', 5);
+        INSERT INTO subscriptions (endpoint, p256dh, auth, created_ts, bed_reminded_ts)
+          VALUES ('e', x'00', x'00', 1, 9);";
+
+    fn all(conn: &Connection, sql: &str) -> Vec<String> {
+        let mut stmt = conn.prepare(sql).unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn version_two_makes_the_one_printer_printer_one() {
+        let conn = version_one(&format!(
+            "INSERT INTO settings VALUES ('printer-ip', '10.0.0.5'), ('printer-serial', 'S1'),
+               ('printer-access-code', 'c'), ('retention', '3600'), ('bed-off-after', '7200');
+             {OLD_DATA}"
+        ));
+        assert_eq!(
+            all(
+                &conn,
+                "SELECT id || ' ' || name || ' ' || ip || ' ' || serial || ' ' || access_code FROM printers"
+            ),
+            ["1 P1S 10.0.0.5 S1 c"]
+        );
+        assert_eq!(all(&conn, "SELECT name FROM settings"), ["bed-off-after"]);
+        assert_eq!(all(&conn, "SELECT printer_id || '' FROM frames"), ["1"]);
+        assert_eq!(all(&conn, "SELECT printer_id || '' FROM jobs"), ["1"]);
+        assert_eq!(
+            all(
+                &conn,
+                "SELECT kind || ' ' || COALESCE(printer_id, '-') FROM activity ORDER BY id"
+            ),
+            ["report 1", "notification -"]
+        );
+        assert_eq!(all(&conn, "SELECT name FROM deadlines"), ["1:bed-off"]);
+        assert_eq!(
+            all(
+                &conn,
+                "SELECT endpoint || ' ' || printer_id || ' ' || at FROM bed_reminders"
+            ),
+            ["e 1 9"]
+        );
+    }
+
+    #[test]
+    fn version_two_without_a_printer_drops_what_belonged_to_none() {
+        let conn = version_one(OLD_DATA);
+        assert!(all(&conn, "SELECT name FROM printers").is_empty());
+        assert!(all(&conn, "SELECT ts || '' FROM frames").is_empty());
+        assert!(all(&conn, "SELECT name FROM jobs").is_empty());
+        assert!(all(&conn, "SELECT name FROM deadlines").is_empty());
+        assert!(all(&conn, "SELECT endpoint FROM bed_reminders").is_empty());
     }
 
     #[test]

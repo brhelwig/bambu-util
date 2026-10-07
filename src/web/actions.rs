@@ -7,6 +7,7 @@ use axum::response::Response;
 use super::{App, Query, text};
 use crate::core::arm_heater;
 use crate::p1s;
+use crate::printers::Printer;
 use crate::timers;
 
 /// The P1S bed tops out near 100°C and the nozzle near 300°C; the small
@@ -39,8 +40,33 @@ fn parse_temp(raw: &str, max: i64) -> Result<i64, String> {
     Ok(t)
 }
 
+/// Every action there is.
+const ACTIONS: &[&str] = &[
+    "set-bed-temp",
+    "set-nozzle-temp",
+    "extrude",
+    "set-filament",
+    "lamp-on",
+    "lamp-off",
+    "lower-bed",
+    "home",
+    "unload",
+    "pause",
+    "resume",
+    "stop",
+];
+
 pub async fn action(State(app): State<App>, Path(name): Path<String>, query: Query) -> Response {
-    let snap = app.cache.snapshot();
+    if !ACTIONS.contains(&name.as_str()) {
+        return text(StatusCode::NOT_FOUND, "unknown action");
+    }
+    let printer = match app.printer(&query) {
+        Ok(Some(p)) => p,
+        Ok(None) => return blocked("no printer set up".into()),
+        Err(refusal) => return *refusal,
+    };
+    let p = &*printer;
+    let snap = p.cache.snapshot();
     let (connected, state) = (snap.connected, p1s::gcode_state(&snap.fields));
     let arg = |key: &str| query.get(key).map(String::as_str).unwrap_or("");
     // A refusal when bed, temperature and filament actions may not run.
@@ -64,17 +90,11 @@ pub async fn action(State(app): State<App>, Path(name): Path<String>, query: Que
             let v = app.settings.values();
             let now = crate::clock::secs((app.clock)());
             if bed {
-                app.link.set_bed_temp(temp);
-                arm_heater(&app.timers, timers::BED_OFF, temp, now, v.bed_off_after);
+                p.link.set_bed_temp(temp);
+                arm_heater(&p.timers, timers::BED_OFF, temp, now, v.bed_off_after);
             } else {
-                app.link.set_nozzle_temp(temp);
-                arm_heater(
-                    &app.timers,
-                    timers::NOZZLE_OFF,
-                    temp,
-                    now,
-                    v.nozzle_off_after,
-                );
+                p.link.set_nozzle_temp(temp);
+                arm_heater(&p.timers, timers::NOZZLE_OFF, temp, now, v.nozzle_off_after);
             }
             sent(format!("{name} {temp}"))
         }
@@ -85,16 +105,16 @@ pub async fn action(State(app): State<App>, Path(name): Path<String>, query: Que
             if p1s::number(&snap.fields, "nozzle_temper").is_none_or(|t| t < EXTRUDE_MIN_TEMP) {
                 return blocked(format!("nozzle below {EXTRUDE_MIN_TEMP:.0}°C"));
             }
-            app.link.extrude();
+            p.link.extrude();
             sent(name)
         }
-        "set-filament" => set_filament(&app, &query).unwrap_or_else(|refusal| *refusal),
+        "set-filament" => set_filament(p, &query).unwrap_or_else(|refusal| *refusal),
         // The lamp is safe in any state; it only needs the printer reachable.
         "lamp-on" | "lamp-off" => {
             if !connected {
                 return blocked("not connected to printer".into());
             }
-            app.link.set_chamber_light(name == "lamp-on");
+            p.link.set_chamber_light(name == "lamp-on");
             sent(name)
         }
         "lower-bed" | "home" | "unload" => {
@@ -102,9 +122,9 @@ pub async fn action(State(app): State<App>, Path(name): Path<String>, query: Que
                 return refusal;
             }
             match name.as_str() {
-                "lower-bed" => app.link.lower_bed(),
-                "home" => app.link.home(),
-                _ => app.link.unload_filament(),
+                "lower-bed" => p.link.lower_bed(),
+                "home" => p.link.home(),
+                _ => p.link.unload_filament(),
             }
             sent(name)
         }
@@ -113,9 +133,9 @@ pub async fn action(State(app): State<App>, Path(name): Path<String>, query: Que
                 return blocked(reason);
             }
             match name.as_str() {
-                "pause" => app.link.pause(),
-                "resume" => app.link.resume(),
-                _ => app.link.stop_print(),
+                "pause" => p.link.pause(),
+                "resume" => p.link.resume(),
+                _ => p.link.stop_print(),
             }
             sent(name)
         }
@@ -127,7 +147,7 @@ pub async fn action(State(app): State<App>, Path(name): Path<String>, query: Que
 /// tray's existing type, temperatures and profile id alongside the field it
 /// changed — otherwise the printer would blank them. Everything is checked
 /// before the printer's state is.
-fn set_filament(app: &App, query: &Query) -> Result<Response, Box<Response>> {
+fn set_filament(p: &Printer, query: &Query) -> Result<Response, Box<Response>> {
     let arg = |key: &str| query.get(key).map(String::as_str).unwrap_or("");
     let refuse = |msg: &str| Box::new(bad(msg));
     let index = |raw: &str, max: i64| raw.parse::<i64>().ok().filter(|n| (0..=max).contains(n));
@@ -149,10 +169,10 @@ fn set_filament(app: &App, query: &Query) -> Result<Response, Box<Response>> {
     if info_idx.len() > 32 {
         return Err(refuse("invalid tray_info_idx"));
     }
-    let snap = app.cache.snapshot();
+    let snap = p.cache.snapshot();
     p1s::action_allowed(snap.connected, p1s::gcode_state(&snap.fields))
         .map_err(|r| Box::new(blocked(r)))?;
-    app.link
+    p.link
         .set_ams_filament(ams_id, tray_id, info_idx, &color, kind, min, max);
     Ok(sent(format!("set-filament ams {ams_id} tray {tray_id}")))
 }

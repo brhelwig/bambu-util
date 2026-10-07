@@ -2,16 +2,20 @@
 //! used to poll for.
 //!
 //! Server to page, as JSON text, each message a full replacement:
-//! - `{"type":"status", ...}` — the `/api/status` shape, on connect, on every
-//!   change to the printer's state (at most four a second), and every second
-//!   so countdowns stay current;
+//! - `{"type":"printers","printers":[...]}` — every printer's name and how it
+//!   is doing, for the switcher, on connect and whenever any of it changes;
+//! - `{"type":"status", ...}` — the `/api/status` shape for the selected
+//!   printer, on connect, on every change to its state (at most four a
+//!   second), and every second so countdowns stay current;
 //! - `{"type":"range","oldest","newest"}` — the scrub bar's span, on connect,
 //!   per recorded frame and every second;
 //! - `{"type":"jobs","jobs":[...]}` — recent prints, on connect and whenever
-//!   one starts, ends or is pruned.
+//!   one starts, ends or is forgotten.
 //!
-//! Server to page, binary: while the page has said `{"type":"follow","on":true}`,
-//! each recorded frame as an 8-byte big-endian unix second then the JPEG.
+//! Page to server: `{"type":"select","printer":<id>}` picks the printer the
+//! status, range, jobs and frames are about (the first one until it does), and
+//! `{"type":"follow","on":true}` asks for each recorded frame, sent binary as an
+//! 8-byte big-endian unix second then the JPEG.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,23 +29,27 @@ use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
 
 use super::{App, text};
+use crate::camera::Frame;
+use crate::clock::Clock;
+use crate::printers::{Printer, Printers};
 
 /// The fewest milliseconds between two status messages.
 const STATUS_EVERY: Duration = Duration::from_millis(250);
 const PING_EVERY: Duration = Duration::from_secs(30);
 
-/// The latest of each message, shared by every open page.
+/// The latest of each message about one printer, shared by every page showing
+/// it.
 #[derive(Clone)]
-pub struct Live {
+pub struct Feed {
     status: watch::Sender<Arc<str>>,
     range: watch::Sender<Arc<str>>,
     jobs: watch::Sender<Arc<str>>,
 }
 
-impl Default for Live {
+impl Default for Feed {
     fn default() -> Self {
         let empty = || watch::Sender::new(Arc::from(""));
-        Live {
+        Feed {
             status: empty(),
             range: empty(),
             jobs: empty(),
@@ -67,32 +75,36 @@ fn tagged(kind: &str, mut v: Value) -> Value {
     v
 }
 
-impl Live {
-    fn status(&self, app: &App) {
-        publish(&self.status, tagged("status", super::status_of(app)));
+impl Feed {
+    fn status(&self, printer: &Printer, now: i64) {
+        publish(
+            &self.status,
+            tagged("status", super::status_of(Some(printer), now)),
+        );
     }
 
-    fn range(&self, app: &App) {
-        match super::camera::range_of(app) {
+    fn range(&self, printer: &Printer) {
+        match super::camera::range_of(printer) {
             Ok(range) => publish(&self.range, tagged("range", range)),
             Err(err) => tracing::warn!("live: camera range: {err}"),
         }
     }
 
-    fn jobs(&self, app: &App) {
-        match app.store.recent_jobs() {
+    fn jobs(&self, printer: &Printer) {
+        match printer.store.recent_jobs() {
             Ok(jobs) => publish(&self.jobs, json!({"type": "jobs", "jobs": jobs})),
             Err(err) => tracing::warn!("live: jobs: {err}"),
         }
     }
 
-    /// Keeps the messages current, forever. Spawn once.
-    pub async fn run(self, app: App) {
-        let mut state = app.cache.subscribe();
-        let mut frames = app.hub.frames();
+    /// Keeps one printer's messages current, and the switcher's summary with
+    /// them, until the printer is removed.
+    pub async fn run(self, printer: Arc<Printer>, printers: Printers, clock: Clock) {
+        let mut state = printer.cache.subscribe();
+        let mut frames = printer.hub.frames();
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         let mut next_status = Instant::now();
-        self.jobs(&app);
+        self.jobs(&printer);
         loop {
             let throttled = Instant::now() < next_status;
             tokio::select! {
@@ -100,23 +112,34 @@ impl Live {
                     if changed.is_err() {
                         return;
                     }
-                    self.status(&app);
+                    self.status(&printer, clock());
+                    printers.refresh_summary();
                     next_status = Instant::now() + STATUS_EVERY;
                 }
                 _ = tokio::time::sleep_until(next_status), if throttled => {}
                 _ = tick.tick() => {
-                    self.status(&app);
-                    self.range(&app);
+                    self.status(&printer, clock());
+                    self.range(&printer);
                 }
                 frame = frames.recv() => match frame {
-                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => self.range(&app),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => self.range(&printer),
                     Err(broadcast::error::RecvError::Closed) => return,
                 },
-                _ = app.jobs_changed.notified() => {
-                    self.jobs(&app);
-                    self.range(&app);
+                _ = printer.jobs_changed.notified() => {
+                    self.jobs(&printer);
+                    self.range(&printer);
                 }
             }
+        }
+    }
+
+    /// Fills in anything not computed yet, so a page's first messages are
+    /// complete.
+    fn prime(&self, printer: &Printer, now: i64) {
+        self.status(printer, now);
+        self.range(printer);
+        if self.jobs.borrow().is_empty() {
+            self.jobs(printer);
         }
     }
 }
@@ -152,57 +175,145 @@ fn same_origin(app: &App, headers: &HeaderMap) -> bool {
     })
 }
 
-async fn client(app: App, mut socket: WebSocket) {
-    let live = &app.live;
-    let (mut status, mut range, mut jobs) = (
-        live.status.subscribe(),
-        live.range.subscribe(),
-        live.jobs.subscribe(),
-    );
-    // Fill in anything not computed yet, so the first messages are complete.
-    live.status(&app);
-    live.range(&app);
-    if jobs.borrow().is_empty() {
-        live.jobs(&app);
+/// What one page is watching: the selected printer's messages and frames, or
+/// a placeholder status when there are no printers.
+struct Watching {
+    printer: Option<Arc<Printer>>,
+    status: watch::Receiver<Arc<str>>,
+    range: watch::Receiver<Arc<str>>,
+    jobs: watch::Receiver<Arc<str>>,
+    frames: broadcast::Receiver<Frame>,
+}
+
+impl Watching {
+    fn new(printer: Option<Arc<Printer>>, now: i64) -> Watching {
+        match &printer {
+            Some(p) => {
+                p.feed.prime(p, now);
+                Watching {
+                    status: p.feed.status.subscribe(),
+                    range: p.feed.range.subscribe(),
+                    jobs: p.feed.jobs.subscribe(),
+                    frames: p.hub.frames(),
+                    printer,
+                }
+            }
+            None => {
+                let fixed = |v: Value| watch::Sender::new(Arc::from(v.to_string())).subscribe();
+                Watching {
+                    status: fixed(tagged("status", super::status_of(None, now))),
+                    range: fixed(json!({"type": "range", "oldest": null, "newest": null})),
+                    jobs: fixed(json!({"type": "jobs", "jobs": []})),
+                    frames: broadcast::Sender::new(1).subscribe(),
+                    printer: None,
+                }
+            }
+        }
     }
-    let mut frames = app.hub.frames();
+
+    fn id(&self) -> Option<i64> {
+        self.printer.as_ref().map(|p| p.id)
+    }
+
+    /// Every current message, as on connect or after switching printer.
+    fn current(&mut self) -> Vec<Message> {
+        [&mut self.status, &mut self.range, &mut self.jobs]
+            .into_iter()
+            .map(|rx| rx.borrow_and_update().clone())
+            .filter(|msg| !msg.is_empty())
+            .map(|msg| Message::Text(msg.as_ref().into()))
+            .collect()
+    }
+}
+
+/// What a page asked for.
+enum Request {
+    Follow(bool),
+    Select(i64),
+}
+
+fn request(msg: &str) -> Option<Request> {
+    let v: Value = serde_json::from_str(msg).ok()?;
+    match v.get("type")?.as_str()? {
+        "follow" => Some(Request::Follow(v.get("on")?.as_bool()?)),
+        "select" => Some(Request::Select(v.get("printer")?.as_i64()?)),
+        _ => None,
+    }
+}
+
+async fn send_all(socket: &mut WebSocket, msgs: Vec<Message>) -> bool {
+    for msg in msgs {
+        if socket.send(msg).await.is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+async fn client(app: App, mut socket: WebSocket) {
+    let mut summary = app.printers.summary();
+    let mut watching = Watching::new(app.printers.first(), (app.clock)());
     let mut following = false;
     let mut ping = tokio::time::interval(PING_EVERY);
-    for rx in [&mut status, &mut range, &mut jobs] {
-        let msg = rx.borrow_and_update().clone();
-        if !msg.is_empty()
-            && socket
-                .send(Message::Text(msg.as_ref().into()))
-                .await
-                .is_err()
-        {
-            return;
-        }
+    let mut first = vec![Message::Text(summary.borrow_and_update().as_ref().into())];
+    first.extend(watching.current());
+    if !send_all(&mut socket, first).await {
+        return;
     }
     loop {
         let out = tokio::select! {
-            Ok(()) = status.changed() => Message::Text(status.borrow_and_update().as_ref().into()),
-            Ok(()) = range.changed() => Message::Text(range.borrow_and_update().as_ref().into()),
-            Ok(()) = jobs.changed() => Message::Text(jobs.borrow_and_update().as_ref().into()),
-            frame = frames.recv(), if following => match frame {
+            Ok(()) = summary.changed() => {
+                let msg = Message::Text(summary.borrow_and_update().as_ref().into());
+                // A removed printer, or the first one added: move to whichever
+                // is first now.
+                let gone = watching.id().is_none_or(|id| app.printers.get(id).is_none());
+                if gone && watching.id() != app.printers.first().map(|p| p.id) {
+                    watching = Watching::new(app.printers.first(), (app.clock)());
+                    let mut msgs = vec![msg];
+                    msgs.extend(watching.current());
+                    if !send_all(&mut socket, msgs).await {
+                        return;
+                    }
+                    continue;
+                }
+                msg
+            }
+            Ok(()) = watching.status.changed() => Message::Text(watching.status.borrow_and_update().as_ref().into()),
+            Ok(()) = watching.range.changed() => Message::Text(watching.range.borrow_and_update().as_ref().into()),
+            Ok(()) = watching.jobs.changed() => Message::Text(watching.jobs.borrow_and_update().as_ref().into()),
+            frame = watching.frames.recv(), if following && watching.printer.is_some() => match frame {
                 Ok(frame) => binary_frame(frame.0, &frame.1),
                 // A slow page skips to the newest frame rather than queueing.
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return,
+                Err(broadcast::error::RecvError::Closed) => continue,
             },
             incoming = socket.recv() => match incoming {
-                Some(Ok(Message::Text(msg))) => {
-                    let Some(on) = follow_request(&msg) else { continue };
-                    following = on;
-                    if !on {
+                Some(Ok(Message::Text(msg))) => match request(&msg) {
+                    Some(Request::Select(id)) => {
+                        let Some(printer) = app.printers.get(id) else { continue };
+                        watching = Watching::new(Some(printer), (app.clock)());
+                        let mut msgs = watching.current();
+                        if following {
+                            msgs.extend(newest_frame(&watching));
+                        }
+                        if !send_all(&mut socket, msgs).await {
+                            return;
+                        }
                         continue;
                     }
-                    // Show the newest frame at once rather than at the next one.
-                    match newest_frame(&app) {
-                        Some(msg) => msg,
-                        None => continue,
+                    Some(Request::Follow(on)) => {
+                        following = on;
+                        if !on {
+                            continue;
+                        }
+                        // Show the newest frame at once rather than at the next one.
+                        match newest_frame(&watching) {
+                            Some(msg) => msg,
+                            None => continue,
+                        }
                     }
-                }
+                    None => continue,
+                },
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
                 Some(Ok(_)) => continue,
             },
@@ -214,15 +325,6 @@ async fn client(app: App, mut socket: WebSocket) {
     }
 }
 
-/// `{"type":"follow","on":true}` → Some(true).
-fn follow_request(msg: &str) -> Option<bool> {
-    let v: Value = serde_json::from_str(msg).ok()?;
-    if v.get("type")?.as_str()? != "follow" {
-        return None;
-    }
-    v.get("on")?.as_bool()
-}
-
 fn binary_frame(ts: i64, jpeg: &[u8]) -> Message {
     let mut out = Vec::with_capacity(8 + jpeg.len());
     out.extend_from_slice(&ts.to_be_bytes());
@@ -230,8 +332,9 @@ fn binary_frame(ts: i64, jpeg: &[u8]) -> Message {
     Message::Binary(out.into())
 }
 
-fn newest_frame(app: &App) -> Option<Message> {
-    let (_, newest) = app.store.range().ok()?;
-    let (jpeg, ts) = app.store.frame_at_or_after(newest?).ok()??;
+fn newest_frame(watching: &Watching) -> Option<Message> {
+    let store = &watching.printer.as_ref()?.store;
+    let (_, newest) = store.range().ok()?;
+    let (jpeg, ts) = store.frame_at_or_after(newest?).ok()??;
     Some(binary_frame(ts, &jpeg))
 }

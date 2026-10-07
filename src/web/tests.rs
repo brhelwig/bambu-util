@@ -118,10 +118,7 @@ async fn idle_actions_are_refused_mid_print_and_without_a_printer() {
     let r = offline.post("/api/actions/home").await;
     assert_eq!(
         (r.status, r.text()),
-        (
-            StatusCode::CONFLICT,
-            "blocked: not connected to printer\n".into()
-        )
+        (StatusCode::CONFLICT, "blocked: no printer set up\n".into())
     );
 }
 
@@ -278,10 +275,7 @@ async fn the_lamp_works_in_any_state_but_needs_the_printer() {
     let r = offline.post("/api/actions/lamp-on").await;
     assert_eq!(
         (r.status, r.text()),
-        (
-            StatusCode::CONFLICT,
-            "blocked: not connected to printer\n".into()
-        )
+        (StatusCode::CONFLICT, "blocked: no printer set up\n".into())
     );
 }
 
@@ -427,10 +421,6 @@ async fn bad_setting_writes_are_refused() {
             "/api/settings/bed-off-after?value=1",
             "bed-off-after must be between 1h0m0s and 168h0m0s",
         ),
-        (
-            "/api/settings/printer-ip?text=10.0.0.1",
-            "not writable here",
-        ),
     ] {
         let r = h.post(uri).await;
         assert_eq!(
@@ -443,66 +433,69 @@ async fn bad_setting_writes_are_refused() {
 }
 
 #[tokio::test]
-async fn setting_up_a_printer_connects_to_it_and_keeps_its_secret() {
+async fn adding_a_printer_connects_to_it_and_keeps_its_secret() {
     let printer =
         crate::testing::printer::FakePrinter::start("127.0.0.1", 0, 0, "SERIAL1", "secret").await;
     let dir = crate::testing::tempdir();
     let h = Harness::start_in(dir.clone(), crate::auth::Decision::Disabled, Some(printer)).await;
-    assert_eq!(
-        h.get("/api/printer").await.json(),
-        json!({"ip": "", "serial": "", "accessCodeSet": false, "configured": false})
-    );
+    assert_eq!(h.get("/api/printers").await.json(), json!([]));
 
-    let r = h
-        .request(
-            "POST",
-            "/api/printer",
-            r#"{"ip":"127.0.0.1","serial":"SERIAL1"}"#,
-        )
-        .await;
-    assert_eq!(
-        (r.status, r.text()),
+    for (body, want) in [
         (
-            StatusCode::BAD_REQUEST,
-            "the printer's address, serial and access code are all needed\n".into()
-        )
-    );
-    assert_eq!(
-        h.request("POST", "/api/printer", "not json").await.text(),
-        "invalid request\n"
-    );
+            r#"{"name":"Garage","ip":"127.0.0.1","serial":"SERIAL1"}"#,
+            "the printer's address, serial and access code are all needed",
+        ),
+        (
+            r#"{"name":" ","ip":"127.0.0.1","serial":"SERIAL1","accessCode":"secret"}"#,
+            "give the printer a name",
+        ),
+        ("not json", "invalid request"),
+    ] {
+        let r = h.request("POST", "/api/printers", body).await;
+        assert_eq!(
+            (r.status, r.text()),
+            (StatusCode::BAD_REQUEST, format!("{want}\n")),
+            "{body}"
+        );
+    }
 
     let r = h
         .request(
             "POST",
-            "/api/printer",
-            r#"{"ip":" 127.0.0.1 ","serial":"SERIAL1","accessCode":"secret"}"#,
+            "/api/printers",
+            r#"{"name":" Garage ","ip":" 127.0.0.1 ","serial":"SERIAL1","accessCode":"secret"}"#,
         )
         .await;
-    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(r.status, StatusCode::CREATED);
+    let id = r.json()["id"].as_i64().unwrap();
     h.wait(|s| s.connected).await;
-    let got = h.get("/api/printer").await;
+    let got = h.get("/api/printers").await;
     assert_eq!(
         got.json(),
-        json!({"ip": "127.0.0.1", "serial": "SERIAL1", "accessCodeSet": true, "configured": true})
+        json!([{"id": id, "name": "Garage", "ip": "127.0.0.1", "serial": "SERIAL1", "accessCodeSet": true}])
     );
     assert!(!got.text().contains("secret"));
 
-    // Re-saving without the code keeps it.
+    // Re-saving without the code keeps it, and a rename alone doesn't
+    // reconnect or check the printer.
     let r = h
         .request(
             "POST",
-            "/api/printer",
-            r#"{"ip":"127.0.0.1","serial":"SERIAL1","accessCode":""}"#,
+            &format!("/api/printers/{id}"),
+            r#"{"name":"Workshop","ip":"127.0.0.1","serial":"SERIAL1","accessCode":""}"#,
         )
         .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
-    h.wait(|s| s.connected).await;
+    assert!(h.app.printers.get(id).unwrap().cache.snapshot().connected);
+    assert_eq!(h.get("/api/printers").await.json()[0]["name"], "Workshop");
 
     // And it is still there after a restart.
     drop(h);
     let again = Harness::start_in(dir, crate::auth::Decision::Disabled, None).await;
-    assert_eq!(again.get("/api/printer").await.json()["configured"], true);
+    assert_eq!(
+        again.get("/api/printers").await.json()[0]["name"],
+        "Workshop"
+    );
 }
 
 #[tokio::test]
@@ -516,7 +509,7 @@ async fn a_printer_that_does_not_answer_is_not_saved_and_says_why() {
     )
     .await;
     let save = |ip: &str, serial: &str, code: &str| {
-        format!(r#"{{"ip":"{ip}","serial":"{serial}","accessCode":"{code}"}}"#)
+        format!(r#"{{"name":"P1S","ip":"{ip}","serial":"{serial}","accessCode":"{code}"}}"#)
     };
     for (body, want) in [
         (
@@ -529,28 +522,28 @@ async fn a_printer_that_does_not_answer_is_not_saved_and_says_why() {
         ),
         (
             // Nothing listens there.
-            save("127.0.0.2", "SERIAL1", "secret"),
-            "127.0.0.2 refused the connection. Check the address, and that LAN mode is on in the printer's network settings.",
+            save("127.0.0.3", "SERIAL1", "secret"),
+            "127.0.0.3 refused the connection. Check the address, and that LAN mode is on in the printer's network settings.",
         ),
     ] {
-        let r = h.request("POST", "/api/printer", &body).await;
+        let r = h.request("POST", "/api/printers", &body).await;
         assert_eq!(
             (r.status, r.text()),
             (StatusCode::UNPROCESSABLE_ENTITY, format!("{want}\n")),
             "{body}"
         );
     }
-    assert_eq!(h.get("/api/printer").await.json()["configured"], false);
+    assert_eq!(h.get("/api/printers").await.json(), json!([]));
 
     // Saved anyway, the status says why it isn't connected.
     let r = h
         .request(
             "POST",
-            "/api/printer",
-            r#"{"ip":"127.0.0.1","serial":"SERIAL1","accessCode":"wrong","skipCheck":true}"#,
+            "/api/printers",
+            r#"{"name":"P1S","ip":"127.0.0.1","serial":"SERIAL1","accessCode":"wrong","skipCheck":true}"#,
         )
         .await;
-    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(r.status, StatusCode::CREATED);
     h.wait(|s| s.problem.is_some()).await;
     let status = h.get("/api/status").await.json();
     assert_eq!(
@@ -565,6 +558,150 @@ async fn a_printer_that_does_not_answer_is_not_saved_and_says_why() {
             json!("The printer rejected the access code.")
         )
     );
+
+    // Changing the details checks them again.
+    let id = status["printer"].as_i64().unwrap();
+    let r = h
+        .request(
+            "POST",
+            &format!("/api/printers/{id}"),
+            &save("127.0.0.1", "SERIAL1", "nope"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn several_printers_each_get_their_own_requests_and_footage() {
+    let one =
+        crate::testing::printer::FakePrinter::start("127.0.0.1", 0, 0, "SERIAL1", "secret").await;
+    // The same ports on another loopback address, as two printers on a LAN.
+    let two = crate::testing::printer::FakePrinter::start(
+        "127.0.0.2",
+        one.mqtt_port,
+        one.camera_port,
+        "SERIAL2",
+        "secret2",
+    )
+    .await;
+    one.set_state(idle());
+    two.set_state(json!({"gcode_state": "RUNNING", "mc_percent": 40}));
+    let h = Harness::start_in(
+        crate::testing::tempdir(),
+        crate::auth::Decision::Disabled,
+        Some(one.clone()),
+    )
+    .await;
+    let add = |name: &str, ip: &str, serial: &str, code: &str| {
+        format!(r#"{{"name":"{name}","ip":"{ip}","serial":"{serial}","accessCode":"{code}"}}"#)
+    };
+    let id1 = h
+        .request(
+            "POST",
+            "/api/printers",
+            &add("Garage", "127.0.0.1", "SERIAL1", "secret"),
+        )
+        .await
+        .json()["id"]
+        .as_i64()
+        .unwrap();
+    let r = h
+        .request(
+            "POST",
+            "/api/printers",
+            &add("garage", "127.0.0.2", "SERIAL2", "secret2"),
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.text()),
+        (
+            StatusCode::BAD_REQUEST,
+            "there is already a printer called garage\n".into()
+        )
+    );
+    let id2 = h
+        .request(
+            "POST",
+            "/api/printers",
+            &add("Office", "127.0.0.2", "SERIAL2", "secret2"),
+        )
+        .await
+        .json()["id"]
+        .as_i64()
+        .unwrap();
+    h.wait_on(id1, |s| s.connected && !s.fields.is_empty())
+        .await;
+    h.wait_on(id2, |s| s.connected && !s.fields.is_empty())
+        .await;
+
+    // Each status and action is about the printer asked for; no printer named
+    // means the first.
+    assert_eq!(h.get("/api/status").await.json()["printer"], id1);
+    let s2 = h.get(&format!("/api/status?printer={id2}")).await.json();
+    assert_eq!(
+        (s2["printer"].clone(), s2["gcodeState"].clone()),
+        (json!(id2), json!("RUNNING"))
+    );
+    assert_eq!(
+        h.get("/api/status?printer=999").await.text(),
+        "no such printer\n"
+    );
+    assert_eq!(
+        h.post(&format!("/api/actions/pause?printer={id2}"))
+            .await
+            .text(),
+        "sent: pause"
+    );
+    two.wait_for(|r| r.contains("\"pause\"")).await;
+    assert!(!one.requests().iter().any(|r| r.contains("\"pause\"")));
+    assert_eq!(
+        h.post(&format!("/api/actions/home?printer={id1}"))
+            .await
+            .text(),
+        "sent: home"
+    );
+    one.wait_for(|r| r.contains("G28")).await;
+    assert!(!two.requests().iter().any(|r| r.contains("G28")));
+
+    // Footage is kept per printer.
+    let p2 = h.app.printers.get(id2).unwrap();
+    p2.store.insert_frame(5, &[2]).unwrap();
+    assert_eq!(
+        h.get(&format!("/camera/history/frame?ts=0&printer={id2}"))
+            .await
+            .body,
+        vec![2]
+    );
+    assert_ne!(h.get("/camera/history/frame?ts=0").await.body, vec![2]);
+
+    // Notifications say which printer, while there is more than one.
+    assert_eq!(h.app.printers.label(id2), "Office: ");
+
+    // Removing one stops it and forgets its footage.
+    assert_eq!(
+        h.request("DELETE", &format!("/api/printers/{id2}"), "")
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(h.app.printers.get(id2).is_none() && !h.app.printers.stored(id2));
+    assert_eq!(p2.store.range().unwrap(), (None, None));
+    assert_eq!(
+        h.get("/api/printers")
+            .await
+            .json()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        h.request("DELETE", &format!("/api/printers/{id2}"), "")
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(h.app.printers.label(id1), "");
 }
 
 // Camera.
@@ -576,9 +713,20 @@ async fn frames_jobs_and_the_range() {
         h.get("/camera/history/range").await.json(),
         json!({"oldest": null, "newest": null})
     );
+    // A printer that isn't there, so nothing is recorded but what is put here.
+    h.app
+        .printers
+        .add(
+            "P1S",
+            crate::p1s::Config {
+                ip: "127.0.0.3".into(),
+                serial: "S".into(),
+                access_code: "c".into(),
+            },
+        )
+        .unwrap();
+    let store = h.app.printers.first().unwrap().store.clone();
     let now = crate::clock::secs(crate::clock::system()());
-    let store =
-        crate::history::Store::new(crate::db::Db::open(h.dir.join(crate::DB_FILE)).unwrap());
     store.insert_frame(now - 48 * 3600, &[1]).unwrap();
     store.insert_frame(now - 100, PIXEL_JPEG).unwrap();
     store.insert_frame(now - 50, &[3]).unwrap();
@@ -623,8 +771,7 @@ async fn frames_jobs_and_the_range() {
 async fn the_range_starts_just_before_a_running_print() {
     let h = Harness::with_printer(running()).await;
     let now = crate::clock::secs(crate::clock::system()());
-    let store =
-        crate::history::Store::new(crate::db::Db::open(h.dir.join(crate::DB_FILE)).unwrap());
+    let store = h.app.printers.first().unwrap().store.clone();
     store.insert_frame(now - 20 * 3600, &[1]).unwrap();
     store.insert_frame(now, &[2]).unwrap();
     let job = store

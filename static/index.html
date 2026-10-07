@@ -148,6 +148,22 @@
   .row span:first-child { color: var(--muted); }
   #conn { text-align: right; max-width: 70%; }
   #printerMsg.bad { color: var(--bad); }
+  /* The printer switcher: one chip per printer, shown with two or more. */
+  #switcher { display: flex; gap: 8px; overflow-x: auto; margin: -4px 0 14px; padding-bottom: 2px; scrollbar-width: none; }
+  #switcher::-webkit-scrollbar { display: none; }
+  #switcher button { flex: none; display: flex; align-items: center; gap: 7px; background: var(--card); color: var(--text); border: 1px solid transparent; border-radius: 999px; padding: 7px 14px; font-size: 0.9rem; width: auto; margin: 0; font-weight: 500; }
+  #switcher button[aria-pressed="true"] { border-color: var(--accent); background: var(--inset); }
+  #switcher .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  #switcher .dot.ok { background: var(--ok); }
+  #switcher .dot.bad { background: var(--bad); }
+  #switcher .pct { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .printeritem { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+  .printeritem .who { flex: 1; min-width: 0; }
+  .printeritem .who div:first-child { font-weight: 600; }
+  .printeritem .who div + div { color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+  .printeritem button { width: auto; margin: 0; padding: 6px 12px; font-size: 0.85rem; }
+  .formbtns { display: flex; gap: 8px; }
+  .formbtns button { flex: 1; }
   .ok { color: var(--ok); }
   .bad { color: var(--bad); }
   button {
@@ -248,6 +264,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 5 8.9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9.5a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9.5a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
   </button>
 </div>
+<div id="switcher" role="group" aria-label="Printer" style="display:none"></div>
 <div class="card" id="jobCard">
   <h2>Job status</h2>
   <div class="row" id="jobEmpty" style="color:var(--muted)">No active print</div>
@@ -391,18 +408,24 @@
     up or down the page.</div>
 </div>
 <div class="card">
-  <h2>Printer</h2>
-  <div class="setrow"><label for="setPrinterIP">Address</label>
-    <input type="text" id="setPrinterIP" placeholder="192.0.2.10" inputmode="decimal"><span class="unit"></span></div>
-  <div class="setrow"><label for="setPrinterSerial">Serial</label>
-    <input type="text" id="setPrinterSerial" placeholder="01P00A000000000"><span class="unit"></span></div>
-  <div class="setrow"><label for="setPrinterCode">Access code</label>
-    <input type="password" id="setPrinterCode" placeholder="unchanged" autocomplete="off"><span class="unit"></span></div>
-  <div class="notifywhat">On the printer: Settings → WLAN for the address and access
-    code, Settings → Device for the serial.</div>
-  <button id="printerSave">Save printer</button>
+  <h2>Printers</h2>
+  <div id="printerList"></div>
+  <button id="printerAddBtn" style="margin-top:10px">Add printer</button>
+  <div id="printerForm" style="display:none; margin-top:6px">
+    <div class="setrow"><label for="setPrinterName">Name</label>
+      <input type="text" id="setPrinterName" placeholder="Garage P1S" maxlength="40" autocomplete="off"><span class="unit"></span></div>
+    <div class="setrow"><label for="setPrinterIP">Address</label>
+      <input type="text" id="setPrinterIP" placeholder="192.0.2.10" inputmode="decimal"><span class="unit"></span></div>
+    <div class="setrow"><label for="setPrinterSerial">Serial</label>
+      <input type="text" id="setPrinterSerial" placeholder="01P00A000000000"><span class="unit"></span></div>
+    <div class="setrow"><label for="setPrinterCode">Access code</label>
+      <input type="password" id="setPrinterCode" placeholder="required" autocomplete="off"><span class="unit"></span></div>
+    <div class="notifywhat">On the printer: Settings → WLAN for the address and access
+      code, Settings → Device for the serial.</div>
+    <div class="formbtns"><button id="printerSave">Add printer</button><button id="printerCancel">Cancel</button></div>
+    <button id="printerSaveAnyway" style="display:none; margin-top:8px">Save anyway</button>
+  </div>
   <div id="printerMsg" class="notifywhat" style="margin:8px 0 0"></div>
-  <button id="printerSaveAnyway" style="display:none; margin-top:8px">Save anyway</button>
 </div>
 <div class="card">
   <h2>General</h2>
@@ -430,6 +453,15 @@
 <div id="log"></div>
 <script>
 const $ = id => document.getElementById(id);
+
+// The printers, for the switcher, and which one this page is showing (see
+// "Printer switcher" below).
+let printerList = [];
+let currentPrinter = null;
+try {
+  const fromUrl = new URLSearchParams(location.search).get("printer");
+  currentPrinter = Number(fromUrl || localStorage.getItem("printer")) || null;
+} catch { /* storage blocked: start on the first printer */ }
 
 // --- Session ----------------------------------------------------------------
 // Any 401 means the session lapsed: go log in and come back. Only the first
@@ -768,7 +800,9 @@ function demoStatus() {
     ams: { tray_now: "0", ams: [{ id: "0", humidity: "2", humidity_raw: "24", tray: demoTrays }] },
     hms: [],
   };
-  if (DEMO_PRINT) {
+  // Two demo printers, so the switcher shows: the second is printing (or, in
+  // ?demo=print, the first).
+  if (DEMO_PRINT !== (currentPrinter === 2)) {
     const total = 240, layer = Math.min(total, 20 + demoTick * 2);
     return { ...base, gcodeState: "RUNNING", actionsAllowed: false,
       progress: Math.min(99, Math.round((layer / total) * 100)),
@@ -781,6 +815,10 @@ function demoStatus() {
     printActions: { pause: false, resume: false, stop: false } };
 }
 if (DEMO) {
+  applyPrinterList([
+    { id: 1, name: "Garage", connected: true, gcodeState: DEMO_PRINT ? "RUNNING" : "IDLE", progress: DEMO_PRINT ? 42 : null },
+    { id: 2, name: "Office", connected: true, gcodeState: DEMO_PRINT ? "IDLE" : "RUNNING", progress: DEMO_PRINT ? null : 42 },
+  ]);
   const mode = DEMO_PRINT ? "printing" : "idle";
   document.title += ` · demo (${mode})`;
   $("log").textContent = `demo (${mode}) — no printer connected`;
@@ -928,7 +966,7 @@ async function post(action) {
     return;
   }
   try {
-    const r = await fetch(`/api/actions/${action}`, { method: "POST" });
+    const r = await fetch(withPrinter(`/api/actions/${action}`), { method: "POST" });
     $("log").textContent = await r.text();
   } catch {
     $("log").textContent = "request failed";
@@ -996,7 +1034,7 @@ async function showCamFrame(ts) {
   const seq = ++camFrameSeq;
   let r;
   try {
-    r = await fetch(`/camera/history/frame?ts=${Math.floor(ts)}`);
+    r = await fetch(withPrinter(`/camera/history/frame?ts=${Math.floor(ts)}`));
   } catch {
     return; // hold the frame and caption already shown
   }
@@ -1167,6 +1205,58 @@ function applyCamRange(range) {
   if (camFollowing) $("camSlider").value = camRange.newest;
 }
 
+// --- Printer switcher ---------------------------------------------------------
+// Which printer the dashboard, camera and controls are about. Remembered per
+// device; the server falls back to the first printer if it is gone.
+
+// Adds the selected printer to a request URL.
+function withPrinter(url) {
+  if (currentPrinter == null) return url;
+  return url + (url.includes("?") ? "&" : "?") + `printer=${currentPrinter}`;
+}
+
+function selectPrinter(id) {
+  if (id === currentPrinter) return;
+  currentPrinter = id;
+  try { localStorage.setItem("printer", String(id)); } catch { /* not remembered */ }
+  renderSwitcher();
+  if (DEMO) { refresh(); return; }
+  // The camera starts at the new printer's live view.
+  setFollowing(true);
+  liveSend({ type: "select", printer: id });
+}
+
+function renderSwitcher() {
+  const bar = $("switcher");
+  bar.style.display = printerList.length > 1 ? "" : "none";
+  bar.innerHTML = "";
+  for (const p of printerList) {
+    const b = document.createElement("button");
+    b.setAttribute("aria-pressed", String(p.id === currentPrinter));
+    const dot = document.createElement("span");
+    dot.className = "dot " + (p.connected ? "ok" : "bad");
+    const name = document.createElement("span");
+    name.textContent = p.name;
+    b.append(dot, name);
+    if (p.progress != null) {
+      const pct = document.createElement("span");
+      pct.className = "pct";
+      pct.textContent = `${p.progress}%`;
+      b.appendChild(pct);
+    }
+    b.title = p.connected ? `${p.name}: ${p.gcodeState}` : `${p.name}: ${p.problem || "not connected"}`;
+    b.addEventListener("click", () => selectPrinter(p.id));
+    bar.appendChild(b);
+  }
+}
+
+function applyPrinterList(list) {
+  printerList = list;
+  if (!list.some(p => p.id === currentPrinter)) currentPrinter = list.length ? list[0].id : null;
+  renderSwitcher();
+  if ($("settingsScreen").style.display !== "none") renderPrinterList();
+}
+
 // --- Live updates -------------------------------------------------------------
 // One websocket carries everything that changes on its own: the printer's
 // status, the camera's recorded span, the recent prints, and — while following
@@ -1184,6 +1274,7 @@ function connectLive() {
     opened = true;
     liveRetry = 1000;
     liveSocket = ws;
+    if (currentPrinter != null) liveSend({ type: "select", printer: currentPrinter });
     liveSend({ type: "follow", on: camFollowing });
   };
   ws.onmessage = ev => {
@@ -1194,7 +1285,14 @@ function connectLive() {
       return;
     }
     const msg = JSON.parse(ev.data);
-    if (msg.type === "status") {
+    if (msg.type === "printers") {
+      applyPrinterList(msg.printers);
+    } else if (msg.type === "status") {
+      // Until this page picks one, the server shows the first printer.
+      if (msg.printer != null && msg.printer !== currentPrinter && !printerList.some(p => p.id === currentPrinter)) {
+        currentPrinter = msg.printer;
+        renderSwitcher();
+      }
       lastStatus = msg;
       renderStatus(msg);
     } else if (msg.type === "range") {
@@ -1596,7 +1694,9 @@ function renderEvents() {
     head.className = "head";
     const what = document.createElement("span");
     what.className = "what";
-    what.textContent = e.summary;
+    // Which printer, once there is more than one to tell apart.
+    const about = printerList.length > 1 && printerList.find(p => p.id === e.printer);
+    what.textContent = about ? `${about.name}: ${e.summary}` : e.summary;
     const when = document.createElement("span");
     when.className = "when";
     when.textContent = new Date(e.at).toLocaleTimeString();
@@ -1649,46 +1749,114 @@ for (const id of Object.values(EVENT_FILTERS)) {
   $(id).addEventListener("change", renderEvents);
 }
 
-// --- Printer ----------------------------------------------------------------
-// The access code is never sent back, so the field starts blank and blank
-// means unchanged.
+// --- Printers ---------------------------------------------------------------
+// The list comes from /api/printers; how each is doing comes from the live
+// socket's printers message. Add and Edit share one form. Access codes are
+// never sent back, so on an edit the field starts blank and blank means
+// unchanged. Saving checks the printer answers first, unless the details are
+// unchanged (a rename) or Save anyway is pressed.
+let printerRows = [];
+let editingPrinter = null; // the id being edited, or null when adding
+
 async function refreshPrinter() {
-  if (DEMO) return;
+  if (DEMO) {
+    printerRows = printerList.map(p => ({ ...p, ip: `192.0.2.${10 + p.id}`, serial: `01P00A00000000${p.id}`, accessCodeSet: true }));
+    renderPrinterList();
+    return;
+  }
   try {
-    const r = await fetch("/api/printer");
+    const r = await fetch("/api/printers");
     if (!r.ok) return;
-    const p = await r.json();
-    $("setPrinterIP").value = p.ip || "";
-    $("setPrinterSerial").value = p.serial || "";
-    $("setPrinterCode").value = "";
-    $("setPrinterCode").placeholder = p.accessCodeSet ? "unchanged" : "required";
-    $("printerMsg").textContent = p.configured ? "" : "No printer set up yet.";
+    printerRows = await r.json();
   } catch {
-    // leave whatever is on screen
+    return; // leave whatever is on screen
+  }
+  renderPrinterList();
+}
+
+function renderPrinterList() {
+  const list = $("printerList");
+  list.innerHTML = "";
+  if (!printerRows.length) {
+    const empty = document.createElement("div");
+    empty.className = "notifywhat";
+    empty.textContent = "No printer set up yet.";
+    list.appendChild(empty);
+  }
+  for (const p of printerRows) {
+    const live = printerList.find(x => x.id === p.id);
+    const row = document.createElement("div");
+    row.className = "printeritem";
+    const who = document.createElement("div");
+    who.className = "who";
+    const name = document.createElement("div");
+    name.textContent = p.name;
+    const detail = document.createElement("div");
+    const state = !live ? "" : live.connected ? " · connected" : ` · ${live.problem || "connecting…"}`;
+    detail.textContent = p.ip + state;
+    if (live && !live.connected) detail.classList.add("bad");
+    who.append(name, detail);
+    const edit = document.createElement("button");
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => openPrinterForm(p));
+    const remove = document.createElement("button");
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removePrinter(p));
+    row.append(who, edit, remove);
+    list.appendChild(row);
   }
 }
 
-// Save first checks the printer answers with these details, and says what is
-// wrong if it doesn't. Save anyway skips that, for a printer that is off.
+function openPrinterForm(p) {
+  editingPrinter = p ? p.id : null;
+  $("setPrinterName").value = p ? p.name : "";
+  $("setPrinterIP").value = p ? p.ip : "";
+  $("setPrinterSerial").value = p ? p.serial : "";
+  $("setPrinterCode").value = "";
+  $("setPrinterCode").placeholder = p ? "unchanged" : "required";
+  $("printerSave").textContent = p ? "Save" : "Add printer";
+  $("printerSaveAnyway").style.display = "none";
+  $("printerMsg").className = "notifywhat";
+  $("printerMsg").textContent = "";
+  $("printerForm").style.display = "";
+  $("printerAddBtn").style.display = "none";
+  $("setPrinterName").focus();
+}
+
+function closePrinterForm() {
+  editingPrinter = null;
+  $("printerForm").style.display = "none";
+  $("printerAddBtn").style.display = "";
+}
+
 async function savePrinter(skipCheck) {
   $("printerSave").disabled = true;
   $("printerSaveAnyway").style.display = "none";
   $("printerMsg").className = "notifywhat";
-  $("printerMsg").textContent = skipCheck ? "Saving…" : "Checking the printer answers…";
+  const editing = editingPrinter;
+  const old = printerRows.find(p => p.id === editing);
+  const detailsChanged = !old || $("setPrinterCode").value !== ""
+    || $("setPrinterIP").value.trim() !== old.ip || $("setPrinterSerial").value.trim() !== old.serial;
+  $("printerMsg").textContent = skipCheck || !detailsChanged ? "Saving…" : "Checking the printer answers…";
+  const body = {
+    name: $("setPrinterName").value.trim(),
+    ip: $("setPrinterIP").value.trim(),
+    serial: $("setPrinterSerial").value.trim(),
+    accessCode: $("setPrinterCode").value,
+    skipCheck,
+  };
   try {
-    const r = await fetch("/api/printer", {
+    if (DEMO) throw new Error("not in the demo");
+    const r = await fetch(editing == null ? "/api/printers" : `/api/printers/${editing}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ip: $("setPrinterIP").value.trim(),
-        serial: $("setPrinterSerial").value.trim(),
-        accessCode: $("setPrinterCode").value,
-        skipCheck,
-      }),
+      body: JSON.stringify(body),
     });
     if (r.ok) {
+      if (editing == null) selectPrinter((await r.json()).id);
+      closePrinterForm();
       await refreshPrinter();
-      $("printerMsg").textContent = skipCheck ? "Saved." : "Connected and saved.";
+      $("printerMsg").textContent = skipCheck || !detailsChanged ? `Saved ${body.name}.` : `Connected to ${body.name} and saved.`;
     } else {
       $("printerMsg").className = "notifywhat bad";
       $("printerMsg").textContent = (await r.text()).trim();
@@ -1696,11 +1864,28 @@ async function savePrinter(skipCheck) {
       if (r.status === 422) $("printerSaveAnyway").style.display = "";
     }
   } catch (e) {
+    $("printerMsg").className = "notifywhat bad";
     $("printerMsg").textContent = `could not save: ${e.message || e}`;
   }
   $("printerSave").disabled = false;
 }
 
+async function removePrinter(p) {
+  if (!confirm(`Remove ${p.name}? Its camera history is deleted too.`)) return;
+  if (DEMO) return;
+  try {
+    const r = await fetch(`/api/printers/${p.id}`, { method: "DELETE" });
+    $("printerMsg").className = r.ok ? "notifywhat" : "notifywhat bad";
+    $("printerMsg").textContent = r.ok ? `Removed ${p.name}.` : (await r.text()).trim();
+  } catch (e) {
+    $("printerMsg").textContent = `could not remove: ${e.message || e}`;
+  }
+  closePrinterForm();
+  await refreshPrinter();
+}
+
+$("printerAddBtn").addEventListener("click", () => openPrinterForm(null));
+$("printerCancel").addEventListener("click", () => { closePrinterForm(); $("printerMsg").textContent = ""; });
 $("printerSave").addEventListener("click", () => savePrinter(false));
 $("printerSaveAnyway").addEventListener("click", () => savePrinter(true));
 

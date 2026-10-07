@@ -1,7 +1,7 @@
 //! Web Push notifications to subscribed browsers: RFC 8291 message encryption
 //! over RFC 8188 aes128gcm, authorized by an RFC 8292 signed token.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -222,8 +222,6 @@ pub struct Subscription {
     pub kinds: Option<Vec<String>>,
     /// How often, in seconds, to repeat the bed reminder. Zero means never.
     pub bed_interval: i64,
-    /// When this device was last reminded, in unix seconds.
-    pub bed_reminded: Option<i64>,
 }
 
 impl Subscription {
@@ -242,9 +240,9 @@ pub struct Sender {
     http: reqwest::Client,
     log: Log,
     clock: Clock,
-    /// Devices with a bed reminder on its way, so a reminder isn't sent twice
-    /// while the first is still being delivered.
-    reminding: Arc<Mutex<HashSet<String>>>,
+    /// Devices with a bed reminder on its way, and which printer it is about,
+    /// so a reminder isn't sent twice while the first is still being delivered.
+    reminding: Arc<Mutex<HashSet<(String, i64)>>>,
 }
 
 impl Sender {
@@ -304,9 +302,10 @@ impl Sender {
 
     /// Forgets one subscription. A missing one is not an error.
     pub fn unsubscribe(&self, endpoint: &str) -> Result<(), String> {
-        self.db
-            .lock()
-            .execute("DELETE FROM subscriptions WHERE endpoint = ?", [endpoint])
+        let conn = self.db.lock();
+        conn.execute("DELETE FROM subscriptions WHERE endpoint = ?", [endpoint])
+            .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM bed_reminders WHERE endpoint = ?", [endpoint])
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -321,11 +320,12 @@ impl Sender {
     pub fn all(&self) -> Result<Vec<Subscription>, String> {
         let conn = self.db.lock();
         let mut stmt = conn
-            .prepare("SELECT endpoint, p256dh, auth, kinds, bed_interval, bed_reminded_ts FROM subscriptions ORDER BY id")
+            .prepare(
+                "SELECT endpoint, p256dh, auth, kinds, bed_interval FROM subscriptions ORDER BY id",
+            )
             .map_err(|e| e.to_string())?;
         stmt.query_map([], |r| {
             let kinds: Option<String> = r.get(3)?;
-            let reminded: i64 = r.get(5)?;
             Ok(Subscription {
                 endpoint: r.get(0)?,
                 p256dh: r.get(1)?,
@@ -337,7 +337,6 @@ impl Sender {
                         .collect()
                 }),
                 bed_interval: r.get(4)?,
-                bed_reminded: (reminded > 0).then_some(reminded),
             })
         })
         .and_then(|rows| rows.collect())
@@ -454,11 +453,28 @@ impl Sender {
         Ok(true)
     }
 
-    /// Reminds each device the bed is still on, at the interval that device
-    /// chose, starting one interval after `since`. Returns when the next
+    /// Reminds each device that printer `printer`'s bed is still on, at the
+    /// interval that device chose, starting one interval after `since`. The
+    /// title starts with `label` ("" or "Name: "). Returns when the next
     /// reminder comes due, so the caller can wake for it.
-    pub fn remind_bed_on(&self, since: i64, target: f64, now: i64) -> Option<i64> {
-        let subs = match self.all() {
+    pub fn remind_bed_on(
+        &self,
+        printer: i64,
+        label: &str,
+        since: i64,
+        target: f64,
+        now: i64,
+    ) -> Option<i64> {
+        let subs = match self.all().and_then(|subs| {
+            let reminded = self.bed_reminded(printer)?;
+            Ok(subs
+                .into_iter()
+                .map(|s| {
+                    let at = reminded.get(&s.endpoint).copied();
+                    (s, at)
+                })
+                .collect::<Vec<_>>())
+        }) {
             Ok(subs) => subs,
             Err(err) => {
                 tracing::warn!("push: bed reminders: {err}");
@@ -466,24 +482,25 @@ impl Sender {
             }
         };
         let mut next: Option<i64> = None;
-        for sub in subs.into_iter().filter(|s| s.bed_interval > 0) {
-            let due = sub.bed_reminded.unwrap_or(since) + sub.bed_interval;
+        for (sub, reminded) in subs.into_iter().filter(|(s, _)| s.bed_interval > 0) {
+            let due = reminded.unwrap_or(since) + sub.bed_interval;
             if now < due {
                 next = Some(next.map_or(due, |n| n.min(due)));
                 continue;
             }
+            let key = (sub.endpoint.clone(), printer);
             if !self
                 .reminding
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .insert(sub.endpoint.clone())
+                .insert(key.clone())
             {
                 continue; // already on its way
             }
             let n = Notification::new(
-                &format!("Bed on for {}", rounded_hours(now - since)),
+                &format!("{label}Bed on for {}", rounded_hours(now - since)),
                 &format!("Holding {target:.0}°C."),
-                TAG_BED,
+                &format!("{TAG_BED}-{printer}"),
                 "",
             );
             let sender = self.clone();
@@ -491,8 +508,9 @@ impl Sender {
                 let payload = serde_json::to_vec(&n).unwrap_or_default();
                 if sender.deliver_or_forget(&sub, &payload).await {
                     let marked = sender.db.lock().execute(
-                        "UPDATE subscriptions SET bed_reminded_ts = ? WHERE endpoint = ?",
-                        params![now, sub.endpoint],
+                        "INSERT INTO bed_reminders (endpoint, printer_id, at) VALUES (?, ?, ?)
+                         ON CONFLICT(endpoint, printer_id) DO UPDATE SET at = excluded.at",
+                        params![sub.endpoint, printer, now],
                     );
                     if let Err(err) = marked {
                         tracing::warn!("push: recording a reminder: {err}");
@@ -502,20 +520,29 @@ impl Sender {
                     .reminding
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
-                    .remove(&sub.endpoint);
+                    .remove(&key);
             });
         }
         next
     }
 
-    /// Starts every device's reminder schedule over, for when the bed goes off.
-    pub fn forget_bed_reminders(&self) -> Result<(), String> {
+    /// When each device was last reminded about `printer`'s bed.
+    fn bed_reminded(&self, printer: i64) -> Result<HashMap<String, i64>, String> {
+        let conn = self.db.lock();
+        let mut stmt = conn
+            .prepare("SELECT endpoint, at FROM bed_reminders WHERE printer_id = ?")
+            .map_err(|e| e.to_string())?;
+        stmt.query_map([printer], |r| Ok((r.get(0)?, r.get(1)?)))
+            .and_then(|rows| rows.collect())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Starts every device's reminder schedule for `printer` over, for when
+    /// its bed goes off.
+    pub fn forget_bed_reminders(&self, printer: i64) -> Result<(), String> {
         self.db
             .lock()
-            .execute(
-                "UPDATE subscriptions SET bed_reminded_ts = 0 WHERE bed_reminded_ts != 0",
-                [],
-            )
+            .execute("DELETE FROM bed_reminders WHERE printer_id = ?", [printer])
             .map_err(|e| e.to_string())?;
         Ok(())
     }
