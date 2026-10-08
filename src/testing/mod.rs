@@ -9,7 +9,6 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio_rustls::TlsAcceptor;
 
-/// A TLS server configuration with a fresh self-signed certificate.
 pub fn server_tls() -> TlsAcceptor {
     printer::acceptor()
 }

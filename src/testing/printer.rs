@@ -1,9 +1,3 @@
-//! A pretend P1S: a TLS MQTT broker that answers like the printer's, and a TLS
-//! camera that streams a JPEG a second. Used by the tests, and by
-//! `cargo run --example fake_printer` to run the app against without one.
-//!
-//! Self-contained (no `crate::` paths) so the example can include it.
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,13 +6,15 @@ use rumqttc::mqttbytes::QoS;
 use rumqttc::mqttbytes::v4::{
     ConnAck, ConnectReturnCode, Packet, PubAck, Publish, SubAck, SubscribeReasonCode,
 };
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::sign::{CertifiedKey, SingleCertAndKey};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio_rustls::TlsAcceptor;
 
-/// A JPEG small enough to inline: one grey pixel.
 pub const PIXEL_JPEG: &[u8] = &[
     0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07,
     0x07, 0x09, 0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12, 0x13, 0x0F,
@@ -31,18 +27,17 @@ pub const PIXEL_JPEG: &[u8] = &[
     0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0x2A, 0x9F, 0xFF, 0xD9,
 ];
 
-/// A self-signed TLS acceptor, as the printer has.
 pub fn acceptor() -> TlsAcceptor {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let key = rustls::pki_types::PrivateKeyDer::try_from(cert.signing_key.serialize_der()).unwrap();
-    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .unwrap()
-    .with_no_client_auth()
-    .with_single_cert(vec![cert.cert.der().clone()], key)
-    .unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let cert = CertificateDer::from_pem_slice(include_bytes!("testdata/printer-cert.pem")).unwrap();
+    let key = PrivateKeyDer::from_pem_slice(include_bytes!("testdata/printer-key.pem")).unwrap();
+    let key = provider.key_provider.load_private_key(key).unwrap();
+    let certified = CertifiedKey::new(vec![cert], key);
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&rustls::version::TLS12])
+        .unwrap()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(SingleCertAndKey::from(certified)));
     TlsAcceptor::from(Arc::new(config))
 }
 
@@ -51,16 +46,12 @@ pub struct FakePrinter {
     pub mqtt_port: u16,
     pub camera_port: u16,
     pub serial: String,
-    /// Every payload published to the request topic, in order.
     requests: Arc<Mutex<Vec<String>>>,
-    /// The state a pushall gets back.
     state: Arc<Mutex<Value>>,
     reports: broadcast::Sender<Value>,
 }
 
 impl FakePrinter {
-    /// Listens on `host` (port 0 picks free ports) and serves until dropped
-    /// with the runtime.
     pub async fn start(
         host: &str,
         mqtt_port: u16,
@@ -120,13 +111,10 @@ impl FakePrinter {
         printer
     }
 
-    /// Replaces the fields a pushall returns.
     pub fn set_state(&self, state: Value) {
         *self.state.lock().unwrap() = state;
     }
 
-    /// Sends a `{"print": fields}` report to every connected client, and
-    /// merges it into what a pushall returns.
     pub fn report(&self, fields: Value) {
         if let (Value::Object(state), Value::Object(new)) =
             (&mut *self.state.lock().unwrap(), &fields)
@@ -142,7 +130,6 @@ impl FakePrinter {
         self.requests.lock().unwrap().clone()
     }
 
-    /// Waits until a request satisfying `want` has arrived.
     pub async fn wait_for(&self, want: impl Fn(&str) -> bool) -> String {
         for _ in 0..200 {
             if let Some(r) = self.requests().into_iter().find(|r| want(r)) {
